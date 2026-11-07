@@ -2,17 +2,17 @@
 __pycache__/
 *.pyc
 .idea/
+*.iml
 .venv/
 *.log
 
 # Local configuration and credentials
 .env
-airflow/config/simple_auth_passwords.json
+*.env.local
+kubeconfig*
 
-# Airflow runtime artifacts
-airflow/logs/*
-!airflow/logs/.gitkeep
+# Build output
+**/target/
 
 # Raw and generated data
-data/*
-!data/.gitkeep
+data/

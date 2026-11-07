@@ -1,0 +1,50 @@
+# DAGs: host directory ./airflow/dags mounted into the kind node (see kind/cluster.yaml).
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: airflow-dags
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes: ["ReadWriteOnce"]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: airflow-dags
+  hostPath:
+    path: /mnt/airflow-dags
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: airflow-dags
+  namespace: airflow
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: airflow-dags
+  volumeName: airflow-dags
+  resources:
+    requests:
+      storage: 1Gi
+---
+# Airflow task logs (shared by scheduler and API server).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: airflow-logs
+  namespace: airflow
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 2Gi
+---
+# Raw JSON archive for later milestones; mounted by task Pods in garmin-jobs.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: garmin-raw-data
+  namespace: garmin-jobs
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi
