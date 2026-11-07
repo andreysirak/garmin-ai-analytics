@@ -2,6 +2,7 @@ CLUSTER      := garmin
 CONTEXT      := kind-$(CLUSTER)
 NAMESPACE    := airflow
 AIRFLOW_CHART_VERSION := 1.22.0
+AIRFLOW_CHART := airflow --repo https://airflow.apache.org --version $(AIRFLOW_CHART_VERSION)
 KUBECTL      := kubectl --context $(CONTEXT)
 HELM         := helm --kube-context $(CONTEXT)
 SCHEDULER_EXEC := $(KUBECTL) -n $(NAMESPACE) exec airflow-scheduler-0 -c scheduler --
@@ -40,14 +41,14 @@ cluster-delete:
 
 infra-validate:
 	kubectl kustomize infrastructure/kubernetes/overlays/local > /dev/null
-	helm template airflow apache-airflow/airflow --version $(AIRFLOW_CHART_VERSION) -n $(NAMESPACE) \
+	helm template airflow $(AIRFLOW_CHART) -n $(NAMESPACE) \
 		-f infrastructure/helm/airflow/values.yaml > /dev/null
 	@echo "manifests are valid"
 
 infra-up:
 	$(KUBECTL) apply -k infrastructure/kubernetes/overlays/local
 	KUBE_CONTEXT="$(CONTEXT)" ./infrastructure/scripts/bootstrap.sh
-	$(HELM) upgrade --install airflow apache-airflow/airflow --version $(AIRFLOW_CHART_VERSION) \
+	$(HELM) upgrade --install airflow $(AIRFLOW_CHART) \
 		--namespace $(NAMESPACE) -f infrastructure/helm/airflow/values.yaml --wait --timeout 10m
 
 infra-down:
