@@ -46,7 +46,7 @@ infra-validate:
 
 infra-up:
 	$(KUBECTL) apply -k infrastructure/kubernetes/overlays/local
-	./infrastructure/scripts/bootstrap.sh
+	KUBE_CONTEXT="$(CONTEXT)" ./infrastructure/scripts/bootstrap.sh
 	$(HELM) upgrade --install airflow apache-airflow/airflow --version $(AIRFLOW_CHART_VERSION) \
 		--namespace $(NAMESPACE) -f infrastructure/helm/airflow/values.yaml --wait --timeout 10m
 
