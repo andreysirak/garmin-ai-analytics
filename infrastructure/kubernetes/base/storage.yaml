@@ -37,12 +37,12 @@ spec:
     requests:
       storage: 2Gi
 ---
-# Raw JSON archive for later milestones; mounted by task Pods in garmin-jobs.
+# Raw JSON archive for later milestones; mounted by task Pods in airflow-jobs.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: garmin-raw-data
-  namespace: garmin-jobs
+  namespace: airflow-jobs
 spec:
   accessModes: ["ReadWriteOnce"]
   resources:

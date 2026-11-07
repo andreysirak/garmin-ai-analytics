@@ -19,8 +19,8 @@ with DAG(
     KubernetesPodOperator(
         task_id="hello_world",
         name="hello-world",
-        namespace="garmin-jobs",
-        service_account_name="garmin-job",
+        namespace="airflow-jobs",
+        service_account_name="airflow-job",
         image="busybox:1.37",
         cmds=["sh", "-c"],
         arguments=["echo 'Hello World from a Kubernetes Pod'"],

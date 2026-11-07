@@ -1,10 +1,10 @@
 # Lets the Airflow scheduler (LocalExecutor runs tasks inside it) manage task Pods
-# in the garmin-jobs namespace only. The ServiceAccount itself is created by the Helm chart.
+# in the airflow-jobs namespace only. The ServiceAccount itself is created by the Helm chart.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: airflow-pod-launcher
-  namespace: garmin-jobs
+  namespace: airflow-jobs
 rules:
   - apiGroups: [""]
     resources: ["pods"]
@@ -20,7 +20,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: airflow-pod-launcher
-  namespace: garmin-jobs
+  namespace: airflow-jobs
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role

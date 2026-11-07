@@ -1,8 +1,10 @@
-CLUSTER      := garmin
+CLUSTER      := garmin-ai-analytics
 CONTEXT      := kind-$(CLUSTER)
 NAMESPACE    := airflow
+JOBS_NAMESPACE := airflow-jobs
 AIRFLOW_CHART_VERSION := 1.22.0
-AIRFLOW_CHART := airflow --repo https://airflow.apache.org --version $(AIRFLOW_CHART_VERSION)
+AIRFLOW_CHART_REPO := https://airflow.apache.org
+AIRFLOW_CHART := airflow --repo $(AIRFLOW_CHART_REPO) --version $(AIRFLOW_CHART_VERSION)
 KUBECTL      := kubectl --context $(CONTEXT)
 HELM         := helm --kube-context $(CONTEXT)
 SCHEDULER_EXEC := $(KUBECTL) -n $(NAMESPACE) exec airflow-scheduler-0 -c scheduler --
@@ -57,7 +59,7 @@ infra-down:
 infra-status:
 	$(HELM) list -n $(NAMESPACE)
 	$(KUBECTL) get pods -n $(NAMESPACE)
-	$(KUBECTL) get pods -n garmin-jobs
+	$(KUBECTL) get pods -n $(JOBS_NAMESPACE)
 
 airflow-ui:
 	@echo "$(AIRFLOW_URL)  (user: admin, password: make airflow-password)"

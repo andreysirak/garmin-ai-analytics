@@ -8,7 +8,7 @@ images:
     tag: "3.3.1"
 
 executor: LocalExecutor
-allowPodLaunching: false  # task Pods are launched into garmin-jobs via kubernetes/base/rbac.yaml
+allowPodLaunching: false  # task Pods are launched into airflow-jobs via kubernetes/base/rbac.yaml
 useStandardNaming: true
 
 fernetKeySecretName: airflow-fernet-key

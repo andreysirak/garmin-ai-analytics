@@ -4,7 +4,7 @@
 set -euo pipefail
 
 NS=airflow
-kubectl() { command kubectl --context "${KUBE_CONTEXT:-kind-garmin}" "$@"; }
+kubectl() { command kubectl --context "${KUBE_CONTEXT:-kind-garmin-ai-analytics}" "$@"; }
 rand() { openssl rand -hex 24; }
 
 exists() { kubectl -n "$NS" get secret "$1" >/dev/null 2>&1; }
