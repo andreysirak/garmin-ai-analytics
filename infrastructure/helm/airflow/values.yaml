@@ -1,0 +1,85 @@
+# Apache Airflow Helm chart values (chart 1.22.0). Secrets are created by
+# infrastructure/scripts/bootstrap.sh and referenced by name; nothing sensitive lives here.
+images:
+  airflow:
+    repository: apache/airflow
+    tag: 3.3.1
+
+executor: LocalExecutor
+allowPodLaunching: false  # task Pods are launched into garmin-jobs via kubernetes/base/rbac.yaml
+useStandardNaming: true
+
+fernetKeySecretName: airflow-fernet-key
+apiSecretKeySecretName: airflow-api-secret-key
+jwtSecretName: airflow-jwt-secret
+
+data:
+  metadataSecretName: airflow-metadata-db
+
+postgresql:
+  enabled: true
+  auth:
+    enablePostgresUser: true
+    existingSecret: airflow-postgresql
+    username: airflow
+    database: airflow
+  primary:
+    persistence:
+      enabled: true
+      size: 2Gi
+    resources:
+      requests: {cpu: 100m, memory: 256Mi}
+      limits: {memory: 512Mi}
+
+config:
+  core:
+    load_examples: "False"
+    dags_are_paused_at_creation: "True"
+    auth_manager: airflow.api_fastapi.auth.managers.simple.simple_auth_manager.SimpleAuthManager
+    simple_auth_manager_users: "admin:admin"
+    simple_auth_manager_passwords_file: /opt/airflow/simple-auth/passwords.json
+  api:
+    expose_config: "False"
+
+volumes:
+  - name: simple-auth
+    secret:
+      secretName: airflow-simple-auth
+volumeMounts:
+  - name: simple-auth
+    mountPath: /opt/airflow/simple-auth
+    readOnly: true
+
+dags:
+  persistence:
+    enabled: true
+    existingClaim: airflow-dags
+logs:
+  persistence:
+    enabled: true
+    existingClaim: airflow-logs
+
+createUserJob:
+  enabled: false  # SimpleAuthManager has no user database
+apiServer:
+  service:
+    type: NodePort
+    ports:
+      - name: api-server
+        port: 8080
+        nodePort: 30080
+  resources:
+    requests: {cpu: 100m, memory: 512Mi}
+    limits: {memory: 1Gi}
+scheduler:
+  resources:
+    requests: {cpu: 200m, memory: 512Mi}
+    limits: {memory: 1Gi}
+dagProcessor:
+  resources:
+    requests: {cpu: 100m, memory: 384Mi}
+    limits: {memory: 768Mi}
+triggerer:
+  enabled: false
+statsd:
+  enabled: false

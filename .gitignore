@@ -16,3 +16,6 @@ airflow/logs/*
 # Raw and generated data
 data/*
 !data/.gitkeep
+
+# IDE
+*.iml
