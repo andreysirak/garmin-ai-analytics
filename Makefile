@@ -4,6 +4,7 @@ NAMESPACE    := airflow
 AIRFLOW_CHART_VERSION := 1.22.0
 KUBECTL      := kubectl --context $(CONTEXT)
 HELM         := helm --kube-context $(CONTEXT)
+SCHEDULER_EXEC := $(KUBECTL) -n $(NAMESPACE) exec airflow-scheduler-0 -c scheduler --
 AIRFLOW_URL  := http://localhost:8080
 
 .PHONY: help cluster-create cluster-status cluster-delete infra-validate infra-up infra-down infra-status \
@@ -65,10 +66,14 @@ airflow-password:
 	@$(KUBECTL) -n $(NAMESPACE) get secret airflow-simple-auth -o jsonpath='{.data.passwords\.json}' | base64 -d | python3 -c 'import json,sys; print(json.load(sys.stdin)["admin"])'
 
 airflow-logs:
-	$(KUBECTL) -n $(NAMESPACE) logs -f --tail=200 deploy/airflow-scheduler -c scheduler
+	$(KUBECTL) -n $(NAMESPACE) logs -f --tail=200 airflow-scheduler-0 -c scheduler
 
 test-infra:
-	$(KUBECTL) -n $(NAMESPACE) exec deploy/airflow-scheduler -c scheduler -- \
-		airflow dags unpause kubernetes_hello
-	$(KUBECTL) -n $(NAMESPACE) exec deploy/airflow-scheduler -c scheduler -- \
-		airflow dags test kubernetes_hello
+	@$(SCHEDULER_EXEC) airflow dags unpause kubernetes_hello >/dev/null
+	@$(SCHEDULER_EXEC) airflow dags trigger kubernetes_hello >/dev/null
+	@echo "Triggered kubernetes_hello, waiting for result..."
+	@for i in $$(seq 1 30); do \
+		s=$$($(SCHEDULER_EXEC) airflow dags list-runs kubernetes_hello -o json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["state"])'); \
+		echo "state: $$s"; \
+		[ "$$s" = success ] && exit 0; [ "$$s" = failed ] && exit 1; sleep 10; \
+	done; echo "timed out"; exit 1

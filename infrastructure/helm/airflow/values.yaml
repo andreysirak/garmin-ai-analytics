@@ -41,15 +41,6 @@ config:
   api:
     expose_config: "False"
 
-volumes:
-  - name: simple-auth
-    secret:
-      secretName: airflow-simple-auth
-volumeMounts:
-  - name: simple-auth
-    mountPath: /opt/airflow/simple-auth
-    readOnly: true
-
 dags:
   persistence:
     enabled: true
@@ -59,9 +50,28 @@ logs:
     enabled: true
     existingClaim: airflow-logs
 
+migrateDatabaseJob:
+  useHelmHooks: false  # hooks deadlock with `helm --wait`
 createUserJob:
   enabled: false  # SimpleAuthManager has no user database
 apiServer:
+  # SimpleAuthManager opens its password file for append, so it needs a writable copy of the Secret.
+  extraVolumes:
+    - name: simple-auth-secret
+      secret:
+        secretName: airflow-simple-auth
+    - name: simple-auth
+      emptyDir: {}
+  extraVolumeMounts:
+    - name: simple-auth
+      mountPath: /opt/airflow/simple-auth
+  extraInitContainers:
+    - name: copy-simple-auth
+      image: busybox:1.37
+      command: ["sh", "-c", "cp /secret/passwords.json /target/passwords.json"]
+      volumeMounts:
+        - {name: simple-auth-secret, mountPath: /secret, readOnly: true}
+        - {name: simple-auth, mountPath: /target}
   service:
     type: NodePort
     ports:
