@@ -70,10 +70,11 @@ airflow-logs:
 
 test-infra:
 	@$(SCHEDULER_EXEC) airflow dags unpause kubernetes_hello >/dev/null
-	@$(SCHEDULER_EXEC) airflow dags trigger kubernetes_hello >/dev/null
-	@echo "Triggered kubernetes_hello, waiting for result..."
-	@for i in $$(seq 1 30); do \
-		s=$$($(SCHEDULER_EXEC) airflow dags list-runs kubernetes_hello -o json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["state"])'); \
-		echo "state: $$s"; \
-		[ "$$s" = success ] && exit 0; [ "$$s" = failed ] && exit 1; sleep 10; \
-	done; echo "timed out"; exit 1
+	@run_id=$$(python3 -c 'import uuid; print("smoke__" + uuid.uuid4().hex)'); \
+		$(SCHEDULER_EXEC) airflow dags trigger kubernetes_hello --run-id "$$run_id" >/dev/null || exit 1; \
+		echo "Triggered kubernetes_hello, waiting for result..."; \
+		for i in $$(seq 1 30); do \
+			s=$$($(SCHEDULER_EXEC) airflow dags list-runs kubernetes_hello -o json 2>/dev/null | python3 -c 'import json,sys; print(next((r["state"] for r in json.load(sys.stdin) if r["run_id"] == sys.argv[1]), "pending"))' "$$run_id"); \
+			echo "state: $$s"; \
+			[ "$$s" = success ] && exit 0; [ "$$s" = failed ] && exit 1; sleep 10; \
+		done; echo "timed out"; exit 1
