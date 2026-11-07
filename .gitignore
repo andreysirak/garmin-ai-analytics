@@ -5,6 +5,7 @@ __pycache__/
 *.iml
 .venv/
 *.log
+**/target/
 
 # Local configuration and credentials
 .env
