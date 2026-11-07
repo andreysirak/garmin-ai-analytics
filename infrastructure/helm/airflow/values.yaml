@@ -1,9 +1,11 @@
 # Apache Airflow Helm chart values (chart 1.22.0). Secrets are created by
 # infrastructure/scripts/bootstrap.sh and referenced by name; nothing sensitive lives here.
+airflowVersion: "3.3.1"
+defaultAirflowTag: "3.3.1"
 images:
   airflow:
     repository: apache/airflow
-    tag: 3.3.1
+    tag: "3.3.1"
 
 executor: LocalExecutor
 allowPodLaunching: false  # task Pods are launched into garmin-jobs via kubernetes/base/rbac.yaml
