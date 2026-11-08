@@ -1,313 +1,160 @@
 # Garmin AI Analytics
 
-## Project overview
+**A personal health data platform built with Java, Apache Airflow, and Kubernetes.**
 
-The goal is a daily AI assistant informed by Garmin watch data. This project
-is in an early development phase: it currently retrieves Garmin daily summary
-and sleep data, but does not yet generate AI analysis or recommendations.
+Garmin AI Analytics is an evolving data engineering project that collects Garmin activity and sleep data, preserves original API responses, and lays the foundation for analytics and AI-powered insights.
 
-### Current Airflow pipeline
+The goal is to turn daily wearable data into meaningful personal insights while practicing production-oriented data engineering.
 
-The `garmin_daily_ingestion` DAG is scheduled daily. It first checks that a
-valid Garmin bearer token is cached, then runs the daily-summary and sleep
-ingestion tasks in parallel:
+**Status:** Active development — Garmin ingestion is implemented; analytical processing and AI recommendations are not yet available.
+
+## Architecture
 
 ```text
-Scheduled or manual DAG run
-             |
-             v
-     ensure_garmin_token
-          /       \
-         v         v
- daily summary    sleep
-      Pod          Pod
-         \         /
-          v       v
-     Original JSON files
-     on garmin-raw-data PVC
+                  Apache Airflow 3
+                         |
+                 Daily ingestion DAG
+                         |
+                Garmin authentication
+                  (Python auth Pod)
+                         |
+                 Bearer-token Secret
+                         |
+                +--------+--------+
+                |                 |
+          Daily summary         Sleep
+           Java 25 Pod       Java 25 Pod
+                |                 |
+                +--------+--------+
+                         |
+                  Raw JSON archive
+                   Kubernetes PVC
+                         |
+                 Project-local files
+
+             Future: PostgreSQL / Beam
+                         |
+                  Analytics & AI
 ```
 
-Each ingestion task runs its standalone Java job in a separate Kubernetes
-Pod. Airflow supplies the processing date, coordinates dependencies, and
-retries failed tasks. The jobs fetch and validate the endpoint response, then
-archive the complete original JSON under a date-specific path on the
-`garmin-raw-data` persistent volume. Reprocessing a date replaces that date's
-file. PostgreSQL storage, analytics, and AI-generated insights are not
-implemented yet.
+Airflow manages scheduling, task dependencies, and retries. Authentication runs in a restricted Kubernetes namespace; after it succeeds, daily-summary and sleep ingestion run in parallel as independent Java jobs in Kubernetes Pods.
 
-### Intended future direction
+The Java ingestion code has no Airflow dependency, so it can be run and tested independently.
 
-The intended progression is to build on this reliable daily data foundation:
-persist and organize the collected Garmin data, derive useful daily health and
-activity context, and use that context to provide personalized AI-generated
-daily summaries or assistance. These are future goals, not current
-capabilities.
+See [Architecture](docs/architecture.md) for component details, storage, and security boundaries.
 
-## Starting from scratch
+## Technology stack
+
+| Layer | Technologies |
+| --- | --- |
+| Data ingestion | Java 25, Maven, JDK HTTP Client, Jackson |
+| Orchestration | Apache Airflow 3, Python |
+| Runtime | Kubernetes, kind, Docker |
+| Infrastructure | Helm, Kustomize |
+| Raw storage | JSON files, Kubernetes PV/PVC, local host mount |
+| Security | Kubernetes Secrets, RBAC, ValidatingAdmissionPolicy |
+| Quality | JUnit 5, pytest, Ruff, SpotBugs, PMD |
+| CI | GitHub Actions |
+
+## What's implemented
+
+- Daily Garmin summary and sleep ingestion.
+- Scheduled and manually triggered Airflow workflows.
+- Independent Java ingestion jobs in separate Kubernetes Pods.
+- Bearer-token acquisition, caching, and refresh.
+- Date-specific original JSON archive with atomic replacement on reruns.
+- Task retries and parallel ingestion after an authentication gate.
+- Dedicated authentication namespace, restricted ServiceAccounts, and admission controls.
+- Java, Python, and infrastructure validation in GitHub Actions.
+
+The project currently **collects and archives** data; it does not yet compute health analytics or generate AI advice.
+
+## Quick start
 
 ### Prerequisites
 
-Install Docker (Colima or Docker Desktop), kind, Helm, kubectl, Python 3.12,
-and OpenSSL. Clone the repository and run the following commands from its
-root.
+Install Docker (or Colima), kind, kubectl, Helm, Python 3.12, and OpenSSL. Java 25 and Maven are needed for direct Java development; Make targets can build Java code using Docker.
 
-### Create and validate the local environment
+### 1. Create the cluster
 
-```sh
+```bash
 make cluster-create
 make infra-validate
 ```
 
-### Configure Garmin credentials and deploy
+### 2. Configure Garmin credentials
 
-Create a private local credentials file from the safe template, then edit it
-with your Garmin Personal API key:
-
-```sh
+```bash
 cp config/credentials.example.json config/credentials.local.json
 chmod 600 config/credentials.local.json
-$EDITOR config/credentials.local.json
 ```
 
-`make infra-up` validates the JSON and creates the Kubernetes Secret only if
-it does not already exist. Existing credentials are left unchanged; an absent
-local file also preserves any existing Secret. If neither exists, deployment
-continues without Garmin credentials and the auth task will not succeed until
-you add the local file and run `make infra-up` again.
+Edit `config/credentials.local.json` and set your Garmin Personal API key. The file is ignored by Git. Existing Kubernetes credentials are not overwritten automatically.
 
-```sh
+### 3. Deploy Airflow and ingestion workloads
+
+```bash
 make infra-up
 ```
 
-The bootstrap checks that the active Kubernetes context is the expected local
-kind context before writing the Garmin Secret. Do not put real credentials in
-the example file, manifests, source control, or logs. The local credentials
-file is ignored by Git.
+This builds and loads the local images, applies Kubernetes resources, bootstraps credentials when available, and deploys Airflow.
 
-### Authentication, orchestration, and least privilege
+### 4. Run the pipeline
 
-The auth CLI exchanges the long-lived Garmin Personal API key for a bearer
-token and caches it in the `garmin-access-token` Kubernetes Secret. It reuses
-the cached token while more than 30 minutes remain; otherwise it obtains a
-fresh token and updates the Secret with its expiration. Tokens are not sent
-through Airflow XCom, command-line arguments, or logs.
-
-The `garmin-auth` ServiceAccount can only get and update the named token Secret
-in `airflow-jobs`. The Java ingestion Pods run with `airflow-job`, have no
-Secret write permissions, and mount the bearer token read-only. Scheduled DAG
-runs use the Airflow logical date; manual runs can provide a `YYYY-MM-DD`
-date. Airflow retries task failures, and the two Java ingestion tasks run in
-parallel after authentication succeeds.
-
-Kubernetes recommends granting users and ServiceAccounts only the permissions
-they need. Its [RBAC good practices](https://kubernetes.io/docs/concepts/security/rbac-good-practices/)
-warn that permission to create Pods or other workloads in a namespace can
-implicitly provide access to Secrets and the permissions of ServiceAccounts
-in that namespace. The long-lived API-key Secret is therefore isolated in
-`garmin-auth`, separate from Java Pods. Airflow's auth-namespace Pod
-permissions are narrow and guarded by a ValidatingAdmissionPolicy that allows
-only the expected auth Pod configuration. This reduces risk but is not
-complete isolation: Airflow can still request the approved
-credential-consuming job, and cluster administrators or compromised trusted
-images remain in the trust boundary. Run `make auth-policy-verify` against a
-configured cluster to check effective RBAC and admission behavior. See
-[Architecture — Security](docs/architecture.md#security) for the threat
-model and production limitations.
-
-### Open Airflow and run ingestion
-
-```sh
+```bash
 make airflow-password
 make airflow-ui
 ```
 
-Sign in to the local Airflow UI as `admin` using the password printed by
-`make airflow-password`. Unpause or trigger `garmin_daily_ingestion` in the
-UI. A manual run can specify a `date` in `YYYY-MM-DD` form; scheduled runs use
-the Airflow logical date. After the token task succeeds, summary and sleep
-tasks run independently. Their complete JSON files are written under
-`data/raw/garmin/` in the project directory. This local data directory is
-ignored by Git. `make cluster-create` and `make infra-up` prepare the directory
-group permissions for ingestion Pods running as non-root UID/GID 10001. They
-use the host user's primary group for the archive directory and pass that group
-to the Pods as a supplementary group; `fsGroup` alone does not change
-`hostPath` ownership.
+Sign in to Airflow as `admin` using the printed password, then trigger or unpause `garmin_daily_ingestion`. Manual runs support an optional date in `YYYY-MM-DD` format.
 
-`make infra-up` can be used again to apply changes to an existing local
-cluster. It rebuilds and loads the local Airflow image, then restarts the
-scheduler and DAG processor so they use the updated Garmin operator code. The
-kind node bind-mounts `data/raw/garmin/`; changes to this mount require
-recreating the kind cluster. Recreating the cluster resets Airflow
-metadata and Kubernetes Secrets, but the Garmin archive remains in the project
-directory. `make infra-up` bootstraps the cluster again; provide
-`config/credentials.local.json` if the Garmin API-key Secret must be restored.
+Successful ingestion writes files directly into the project directory:
 
-#### Migrating an existing raw-data PVC
-
-The static `garmin-raw-data` PV/PVC uses `storageClassName` and `volumeName`
-fields that cannot be changed on an already-bound claim. If upgrading a cluster
-created before this project-local storage setup, back up and copy the old claim
-contents before replacing it. Do not delete the claim until the copy has been
-verified; its old PV may be reclaimed when the claim is deleted.
-
-Pause `garmin_daily_ingestion` and wait for its task Pods to finish. First make
-a host-side backup of any archive already in the project directory:
-
-```sh
-make prepare-garmin-raw-data
-tar -czf "data/raw/garmin-backup-$(date +%Y%m%d%H%M%S).tar.gz" \
-  -C data/raw/garmin .
+```text
+data/raw/garmin/
+├── daily-summary/
+│   └── YYYY-MM-DD.json
+└── sleep/
+    └── YYYY-MM-DD.json
 ```
 
-Create a temporary read-only Pod mounting the old claim:
+**Privacy:** Keep API keys, bearer tokens, and personal Garmin data out of Git, images, logs, and public issues. The raw-data directory is Git-ignored.
 
-```sh
-kubectl --context kind-garmin-ai-analytics apply -f - <<'EOF'
-apiVersion: v1
-kind: Pod
-metadata:
-  name: garmin-archive-migration
-  namespace: airflow-jobs
-spec:
-  restartPolicy: Never
-  securityContext:
-    runAsNonRoot: true
-    runAsUser: 10001
-    runAsGroup: 10001
-    fsGroup: 10001
-  containers:
-    - name: copy-source
-      image: busybox:1.36
-      command: ["sh", "-c", "sleep 3600"]
-      volumeMounts:
-        - name: archive
-          mountPath: /source
-          readOnly: true
-  volumes:
-    - name: archive
-      persistentVolumeClaim:
-        claimName: garmin-raw-data
-EOF
-kubectl --context kind-garmin-ai-analytics -n airflow-jobs \
-  wait --for=condition=Ready pod/garmin-archive-migration --timeout=2m
-kubectl --context kind-garmin-ai-analytics cp -n airflow-jobs \
-  garmin-archive-migration:/source/. data/raw/garmin/
-kubectl --context kind-garmin-ai-analytics -n airflow-jobs \
-  delete pod garmin-archive-migration
+## Development and verification
+
+Run Java checks with:
+
+```bash
+make java-verify
 ```
 
-Inspect `data/raw/garmin/` and confirm the copied files are present alongside
-the host-side backup before proceeding. Then delete the old claim and apply the
-new static PV/PVC; the files copied to the project directory are now the data
-the new PV exposes:
+Python tests verify authentication, custom Kubernetes operators, and DAG behavior using synthetic data. See [CONTRIBUTING.md](CONTRIBUTING.md) for Python installation, Ruff, and pytest commands.
 
-```sh
-kubectl --context kind-garmin-ai-analytics -n airflow-jobs \
-  delete pvc garmin-raw-data
-kubectl --context kind-garmin-ai-analytics \
-  apply -k infrastructure/kubernetes/overlays/local
-kubectl --context kind-garmin-ai-analytics -n airflow-jobs \
-  wait --for=jsonpath='{.status.phase}'=Bound pvc/garmin-raw-data --timeout=2m
-make infra-up
-```
+GitHub Actions runs infrastructure rendering and Java/Python checks for pull requests and `main`. A separate **Airflow Smoke Test** can be started manually; it verifies local Kubernetes/Airflow execution without accessing the real Garmin API.
 
-This migration is only needed for a pre-existing claim whose storage class and
-volume name differ from the manifests. New clusters and clusters already using
-the static claim do not need it.
+Dependency vulnerability scanning is currently excluded while the NVD integration is addressed in [issue #6](https://github.com/andreysirak/garmin-ai-analytics/issues/6).
 
-## Java ingestion jobs
+## Roadmap
 
-`garmin-integration/pom.xml` is the Maven parent and aggregator for:
+- [x] Local Kubernetes and Airflow environment
+- [x] Garmin authentication and Java ingestion
+- [x] Raw JSON archiving with local access
+- [x] Initial tests and CI workflows
+- [ ] PostgreSQL storage and data normalization
+- [ ] Historical backfill and data quality checks
+- [ ] Apache Beam processing and derived datasets
+- [ ] Sleep/activity statistics and correlations
+- [ ] AI-generated daily summaries and recommendations
 
-| Module | Responsibility |
-| --- | --- |
-| `garmin-common/java` | Shared authenticated HTTP client and atomic raw JSON writer |
-| `garmin-daily-summary/java` | Standalone `UserSummaryDailyIngestionJob` |
-| `garmin-sleep/java` | Standalone `SleepDailyIngestionJob` |
+## Documentation
 
-Both feature modules inherit the parent POM and depend on `garmin-common`.
-They produce independently executable shaded JARs. Build and verify with Java
-25:
+- [Architecture and security](docs/architecture.md)
+- [Kubernetes execution decision](docs/decisions/0001-kubernetes-execution.md)
+- [Contributing and development checks](CONTRIBUTING.md)
+- [Changelog](CHANGELOG.md)
 
-```sh
-cd garmin-integration
-mvn clean verify
-mvn -pl garmin-daily-summary/java -am package
-mvn -pl garmin-sleep/java -am package
-```
+## Project philosophy
 
-`verify` runs JUnit 5, SpotBugs, and PMD. Dependency vulnerability scanning is
-temporarily not part of the Java checks: Dependency-Check 13.0.0 fails without
-an NVD API key, while unauthenticated updates with 12.2.2 were rate-limited.
-The investigation to restore a reliable dependency scan is tracked in
-[issue #6](https://github.com/andreysirak/garmin-ai-analytics/issues/6).
+Build incrementally, with clear component boundaries, testable business logic, data integrity, and operational reliability. Add infrastructure only where it serves a practical need.
 
-The Java programs are independent of Airflow and Kubernetes. Each requires a
-token file containing an existing bearer token, supplied through
-`GARMIN_TOKEN_FILE`, and the same CLI arguments:
-
-```sh
-export GARMIN_TOKEN_FILE="$HOME/.config/garmin/access-token"
-java -jar garmin-integration/garmin-daily-summary/java/target/garmin-daily-summary.jar \
-  --date 2026-11-07 \
-  --api-base-url https://personal.connectapi.garmin.com \
-  --output-dir ./data/raw/garmin
-java -jar garmin-integration/garmin-sleep/java/target/garmin-sleep.jar \
-  --date 2026-11-07 \
-  --api-base-url https://personal.connectapi.garmin.com \
-  --output-dir ./data/raw/garmin
-```
-
-Both accept `--help`. They validate the date and response, make one API
-request, and write the complete unmodified response JSON to
-`<output-dir>/daily-summary/YYYY-MM-DD.json` or
-`<output-dir>/sleep/YYYY-MM-DD.json`. Reruns atomically replace that
-date-specific file. Java never receives the long-lived API key and does not
-perform token renewal.
-
-## Python packages and verification
-
-Feature-specific Airflow operators and the independent token manager are
-packaged under:
-
-- `garmin-daily-summary/python/` — `DailySummaryIngestionOperator`
-- `garmin-sleep/python/` — `SleepIngestionOperator`
-- `garmin-auth/python/` — `GarminAuthOperator` and the `garmin-auth` CLI
-
-For combined local development and verification, create a Python 3.12 virtual
-environment from the repository root and install the projects with Airflow's
-constraints:
-
-```sh
-python3.12 -m venv .venv
-source .venv/bin/activate
-constraints="https://raw.githubusercontent.com/apache/airflow/constraints-3.3.1/constraints-3.12.txt"
-python -m pip install --constraint "$constraints" \
-  -e "garmin-integration/garmin-auth/python[airflow,dev]" \
-  -e "garmin-integration/garmin-daily-summary/python[dev]" \
-  -e "garmin-integration/garmin-sleep/python[dev]"
-ruff check airflow/dags airflow/tests \
-  garmin-integration/garmin-auth/python \
-  garmin-integration/garmin-daily-summary/python \
-  garmin-integration/garmin-sleep/python
-pytest -q airflow/tests \
-  garmin-integration/garmin-auth/python/tests \
-  garmin-integration/garmin-daily-summary/python/tests \
-  garmin-integration/garmin-sleep/python/tests
-```
-
-Tests use synthetic tokens/data and local or mocked HTTP and Kubernetes
-interactions. They do not require Garmin credentials or a Kubernetes cluster.
-The Airflow custom image copies all three operator packages into the DAG
-processor's Python path.
-
-## CI
-
-`Java Integration CI` retains the `java-verify` job and **Java integration
-checks** status check, and also validates Python with Ruff and pytest.
-`Validate` renders Kustomize and Helm manifests without a cluster. The optional
-manual **Airflow Smoke Test** remains separate. CI does not use real Garmin
-credentials or personal Garmin data.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development and verification
-conventions.
+This is an independent learning and portfolio project, **not a medical diagnosis or treatment service**.
