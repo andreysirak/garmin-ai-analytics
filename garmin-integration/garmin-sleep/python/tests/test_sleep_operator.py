@@ -3,6 +3,7 @@ from unittest.mock import PropertyMock, patch
 import pytest
 from airflow.providers.cncf.kubernetes.hooks.kubernetes import KubernetesHook
 from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
+
 from garmin_sleep.operator import SleepIngestionOperator
 
 
