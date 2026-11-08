@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: garmin-auth-container-resources
+  namespace: garmin-auth
+spec:
+  limits:
+    - type: Container
+      min:
+        cpu: 50m
+        memory: 96Mi
+      max:
+        cpu: 250m
+        memory: 192Mi
+      defaultRequest:
+        cpu: 50m
+        memory: 96Mi
+      default:
+        cpu: 250m
+        memory: 192Mi

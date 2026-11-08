@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: garmin-integration-config
+  namespace: airflow-jobs
+data:
+  GARMIN_API_BASE_URL: https://personal.connectapi.garmin.com
+  GARMIN_RAW_OUTPUT_DIR: /data/raw/garmin

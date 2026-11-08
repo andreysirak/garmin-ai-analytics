@@ -1,19 +1,20 @@
-# Apache Airflow Helm chart values (chart 1.22.0). Secrets are created by
-# infrastructure/scripts/bootstrap.sh and referenced by name; nothing sensitive lives here.
 airflowVersion: "3.3.1"
 defaultAirflowTag: "3.3.1"
 images:
   airflow:
-    repository: apache/airflow
-    tag: "3.3.1"
+    repository: garmin-airflow
+    tag: "local"
 
 executor: LocalExecutor
-allowPodLaunching: false  # task Pods are launched into airflow-jobs via kubernetes/base/rbac.yaml
+allowPodLaunching: false
 useStandardNaming: true
 
 fernetKeySecretName: airflow-fernet-key
 apiSecretKeySecretName: airflow-api-secret-key
 jwtSecretName: airflow-jwt-secret
+extraEnv: |
+  - name: GARMIN_RAW_DATA_GID
+    value: {{ required "garminRawDataGid must be supplied by Makefile" .Values.garminRawDataGid | quote }}
 
 data:
   metadataSecretName: airflow-metadata-db
@@ -53,11 +54,10 @@ logs:
     existingClaim: airflow-logs
 
 migrateDatabaseJob:
-  useHelmHooks: false  # hooks deadlock with `helm --wait`
+  useHelmHooks: false
 createUserJob:
-  enabled: false  # SimpleAuthManager has no user database
+  enabled: false
 apiServer:
-  # SimpleAuthManager opens its password file for append, so it needs a writable copy of the Secret.
   extraVolumes:
     - name: simple-auth-secret
       secret:

@@ -9,6 +9,8 @@ nodes:
       - hostPath: ./airflow/dags
         containerPath: /mnt/airflow-dags
         readOnly: true
+      - hostPath: ./data/raw/garmin
+        containerPath: /mnt/garmin-raw-data
     extraPortMappings:
       # Airflow API server / UI (NodePort 30080) -> http://localhost:8080
       - containerPort: 30080

@@ -1,37 +1,100 @@
 #!/usr/bin/env bash
-# Creates local-only Kubernetes Secrets for Airflow. Idempotent: existing secrets are kept.
-# Nothing generated here is written to disk or committed.
 set -euo pipefail
 
-NS=airflow
-kubectl() { command kubectl --context "${KUBE_CONTEXT:-kind-garmin-ai-analytics}" "$@"; }
-rand() { openssl rand -hex 24; }
-
-exists() { kubectl -n "$NS" get secret "$1" >/dev/null 2>&1; }
-
-create() {
-  local name=$1; shift
-  if exists "$name"; then
+NAMESPACE=airflow
+JOBS_NAMESPACE=airflow-jobs
+AUTH_NAMESPACE=garmin-auth
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
+kubectl() {
+  command kubectl --context "${KUBE_CONTEXT:-kind-garmin-ai-analytics}" "$@"
+}
+random_secret() {
+  openssl rand -hex 24
+}
+secret_exists() {
+  kubectl -n "$1" get secret "$2" >/dev/null 2>&1
+}
+create_if_missing() {
+  local namespace=$1
+  local name=$2
+  shift 2
+  if secret_exists "$namespace" "$name"; then
     echo "secret/$name exists, skipping"
   else
-    kubectl -n "$NS" create secret generic "$name" "$@"
+    kubectl -n "$namespace" create secret generic "$name" "$@" >/dev/null
+    echo "secret/$name created"
   fi
 }
+bootstrap_garmin_credentials() {
+  local credentials_file="${REPO_ROOT}/config/credentials.local.json"
+  local expected_context="${KUBE_CONTEXT:-kind-garmin-ai-analytics}"
+  local active_context
+  local existing_secret
 
-DB_PASSWORD=$(rand)
-ADMIN_PASSWORD=$(rand)
+  if [[ ! -f "$credentials_file" ]]; then
+    echo "Local Garmin credentials file is absent; preserving any existing Secret"
+    return
+  fi
 
-create airflow-postgresql \
-  --from-literal=postgres-password="$(rand)" \
+  if ! python3 "${SCRIPT_DIR}/read_garmin_api_key.py" --validate-only \
+    "$credentials_file" >/dev/null; then
+    return 1
+  fi
+
+  if ! active_context="$(command kubectl config current-context 2>/dev/null)"; then
+    echo "Unable to determine the active Kubernetes context; not writing Garmin credentials" >&2
+    return 1
+  fi
+  if [[ "$active_context" != "$expected_context" ]]; then
+    echo "Active Kubernetes context does not match expected context; not writing Garmin credentials" >&2
+    return 1
+  fi
+
+  if ! existing_secret="$(kubectl -n "$AUTH_NAMESPACE" get secret garmin-api-credentials \
+    --ignore-not-found -o name)"; then
+    echo "Unable to check for existing Garmin credentials Secret" >&2
+    return 1
+  fi
+  if [[ -n "$existing_secret" ]]; then
+    echo "secret/garmin-api-credentials already exists; leaving it unchanged"
+    return
+  fi
+
+  if ! python3 "${SCRIPT_DIR}/read_garmin_api_key.py" "$credentials_file" |
+    kubectl -n "$AUTH_NAMESPACE" create secret generic garmin-api-credentials \
+      --from-file=api-key=/dev/stdin >/dev/null; then
+    echo "Failed to create Garmin credentials Secret" >&2
+    return 1
+  fi
+  echo "secret/garmin-api-credentials created"
+}
+
+DB_PASSWORD=$(random_secret)
+ADMIN_PASSWORD=$(random_secret)
+
+create_if_missing "$NAMESPACE" airflow-postgresql \
+  --from-literal=postgres-password="$DB_PASSWORD" \
   --from-literal=password="$DB_PASSWORD"
-# Only used on first creation; the password above is the one stored in the secret.
-if ! exists airflow-metadata-db; then
-  DB_PASSWORD=$(kubectl -n "$NS" get secret airflow-postgresql -o jsonpath='{.data.password}' | base64 -d)
-  create airflow-metadata-db \
-    --from-literal=connection="postgresql://airflow:${DB_PASSWORD}@airflow-postgresql.${NS}:5432/airflow"
+if ! secret_exists "$NAMESPACE" airflow-metadata-db; then
+  DB_PASSWORD=$(
+    kubectl -n "$NAMESPACE" get secret airflow-postgresql \
+      -o jsonpath='{.data.password}' | base64 -d
+  )
+  create_if_missing "$NAMESPACE" airflow-metadata-db \
+    --from-literal=connection="postgresql://airflow:${DB_PASSWORD}@airflow-postgresql.${NAMESPACE}:5432/airflow"
 fi
 
-create airflow-fernet-key --from-literal=fernet-key="$(python3 -c 'import base64,os;print(base64.urlsafe_b64encode(os.urandom(32)).decode())')"
-create airflow-api-secret-key --from-literal=api-secret-key="$(rand)"
-create airflow-jwt-secret --from-literal=jwt-secret="$(rand)"
-create airflow-simple-auth --from-literal=passwords.json="{\"admin\": \"${ADMIN_PASSWORD}\"}"
+create_if_missing "$NAMESPACE" airflow-fernet-key \
+  --from-literal=fernet-key="$(python3 -c 'import base64,os;print(base64.urlsafe_b64encode(os.urandom(32)).decode())')"
+create_if_missing "$NAMESPACE" airflow-api-secret-key \
+  --from-literal=api-secret-key="$(random_secret)"
+create_if_missing "$NAMESPACE" airflow-jwt-secret \
+  --from-literal=jwt-secret="$(random_secret)"
+create_if_missing "$NAMESPACE" airflow-simple-auth \
+  --from-literal=passwords.json="{\"admin\": \"${ADMIN_PASSWORD}\"}"
+
+bootstrap_garmin_credentials
+create_if_missing "$JOBS_NAMESPACE" garmin-access-token \
+  --from-literal=expires-at=0
+unset DB_PASSWORD ADMIN_PASSWORD

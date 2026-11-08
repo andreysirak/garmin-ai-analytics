@@ -1,0 +1,133 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: garmin-auth-pod-restrictions
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    matchPolicy: Equivalent
+    namespaceSelector:
+      matchLabels:
+        garmin-auth-pod-policy: restricted
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["pods"]
+        scope: Namespaced
+  validations:
+    - expression: >-
+        request.userInfo.username == "system:serviceaccount:airflow:airflow-scheduler"
+      message: Only the Airflow scheduler may create Pods in the Garmin auth namespace.
+    - expression: >-
+        object.spec.serviceAccountName == "garmin-auth"
+      message: Pods in this namespace must use the garmin-auth ServiceAccount.
+    - expression: >-
+        object.spec.containers.size() == 1 &&
+        object.spec.containers[0].name == "base" &&
+        object.spec.containers[0].image == "garmin-auth:local" &&
+        object.spec.containers[0].imagePullPolicy == "IfNotPresent"
+      message: Only the approved Garmin token-manager image and container are allowed.
+    - expression: >-
+        object.spec.containers[0].command.size() == 1 &&
+        object.spec.containers[0].command[0] == "garmin-auth"
+      message: Only the fixed Garmin token-manager command is allowed.
+    - expression: >-
+        !has(object.spec.containers[0].args) ||
+        object.spec.containers[0].args.size() == 0
+      message: The token-manager container must not have command arguments.
+    - expression: >-
+        (!has(object.spec.containers[0].lifecycle) ||
+          (!has(object.spec.containers[0].lifecycle.postStart) &&
+           !has(object.spec.containers[0].lifecycle.preStop)))
+      message: Lifecycle hooks are forbidden for the token-manager container.
+    - expression: >-
+        !has(object.spec.containers[0].livenessProbe) &&
+        !has(object.spec.containers[0].readinessProbe) &&
+        !has(object.spec.containers[0].startupProbe)
+      message: Probes are not permitted on the token-manager container.
+    - expression: >-
+        (!has(object.spec.containers[0].ports) ||
+          object.spec.containers[0].ports.size() == 0) &&
+        object.spec.containers[0].volumeMounts.size() == 1 &&
+        object.spec.containers[0].volumeMounts[0].name == object.spec.volumes[0].name &&
+        object.spec.containers[0].volumeMounts[0].mountPath == "/var/run/secrets/kubernetes.io/serviceaccount" &&
+        object.spec.containers[0].volumeMounts[0].readOnly == true
+      message: Only the read-only Kubernetes API credential mount is permitted.
+    - expression: >-
+        object.spec.containers[0].env.size() == 2 &&
+        object.spec.containers[0].env[0].name == "GARMIN_API_KEY" &&
+        has(object.spec.containers[0].env[0].valueFrom) &&
+        has(object.spec.containers[0].env[0].valueFrom.secretKeyRef) &&
+        object.spec.containers[0].env[0].valueFrom.secretKeyRef.name == "garmin-api-credentials" &&
+        object.spec.containers[0].env[0].valueFrom.secretKeyRef.key == "api-key" &&
+        (!has(object.spec.containers[0].env[0].valueFrom.secretKeyRef.optional) ||
+          object.spec.containers[0].env[0].valueFrom.secretKeyRef.optional == false) &&
+        object.spec.containers[0].env[1].name == "GARMIN_TOKEN_SECRET_NAMESPACE" &&
+        object.spec.containers[0].env[1].value == "airflow-jobs" &&
+        !has(object.spec.containers[0].env[1].valueFrom)
+      message: The token manager may reference only its named API-key Secret and token namespace.
+    - expression: >-
+        object.spec.containers[0].envFrom.size() == 1 &&
+        has(object.spec.containers[0].envFrom[0].configMapRef) &&
+        object.spec.containers[0].envFrom[0].configMapRef.name == "garmin-auth-config" &&
+        !has(object.spec.containers[0].envFrom[0].secretRef)
+      message: Only the garmin-auth-config ConfigMap may be imported into the container environment.
+    - expression: >-
+        (!has(object.spec.initContainers) || object.spec.initContainers.size() == 0) &&
+        object.spec.volumes.size() == 1 &&
+        object.spec.volumes[0].name.startsWith("kube-api-access-") &&
+        has(object.spec.volumes[0].projected) &&
+        object.spec.volumes[0].projected.sources.size() == 3 &&
+        object.spec.volumes[0].projected.sources.exists(source,
+          has(source.serviceAccountToken) &&
+          source.serviceAccountToken.path == "token") &&
+        object.spec.volumes[0].projected.sources.exists(source,
+          has(source.configMap) &&
+          source.configMap.name == "kube-root-ca.crt") &&
+        object.spec.volumes[0].projected.sources.exists(source,
+          has(source.downwardAPI)) &&
+        (!has(object.spec.ephemeralContainers) || object.spec.ephemeralContainers.size() == 0) &&
+        (!has(object.spec.imagePullSecrets) || object.spec.imagePullSecrets.size() == 0) &&
+        (!has(object.spec.hostNetwork) || object.spec.hostNetwork == false) &&
+        (!has(object.spec.hostPID) || object.spec.hostPID == false) &&
+        (!has(object.spec.hostIPC) || object.spec.hostIPC == false) &&
+        (!has(object.spec.shareProcessNamespace) || object.spec.shareProcessNamespace == false) &&
+        (!has(object.spec.nodeName) || object.spec.nodeName == "") &&
+        (!has(object.spec.runtimeClassName) || object.spec.runtimeClassName == "") &&
+        (!has(object.spec.automountServiceAccountToken) || object.spec.automountServiceAccountToken == true) &&
+        object.spec.restartPolicy == "Never"
+      message: Host access, extra containers, volumes, and nonstandard Pod behavior are forbidden.
+    - expression: >-
+        object.spec.securityContext.runAsNonRoot == true &&
+        object.spec.securityContext.runAsUser == 10001 &&
+        object.spec.securityContext.runAsGroup == 10001 &&
+        object.spec.securityContext.seccompProfile.type == "RuntimeDefault" &&
+        object.spec.containers[0].securityContext.allowPrivilegeEscalation == false &&
+        object.spec.containers[0].securityContext.runAsNonRoot == true &&
+        object.spec.containers[0].securityContext.runAsUser == 10001 &&
+        object.spec.containers[0].securityContext.runAsGroup == 10001 &&
+        object.spec.containers[0].securityContext.readOnlyRootFilesystem == true &&
+        (!has(object.spec.containers[0].securityContext.privileged) ||
+          object.spec.containers[0].securityContext.privileged == false) &&
+        (!has(object.spec.containers[0].securityContext.procMount) ||
+          object.spec.containers[0].securityContext.procMount == "Default") &&
+        (!has(object.spec.containers[0].securityContext.seccompProfile) ||
+          object.spec.containers[0].securityContext.seccompProfile.type == "RuntimeDefault") &&
+        (!has(object.spec.containers[0].securityContext.appArmorProfile) ||
+          object.spec.containers[0].securityContext.appArmorProfile.type == "RuntimeDefault") &&
+        !has(object.spec.containers[0].securityContext.seLinuxOptions) &&
+        !has(object.spec.containers[0].securityContext.windowsOptions) &&
+        object.spec.containers[0].securityContext.capabilities.drop.size() == 1 &&
+        object.spec.containers[0].securityContext.capabilities.drop[0] == "ALL" &&
+        (!has(object.spec.containers[0].securityContext.capabilities.add) ||
+          object.spec.containers[0].securityContext.capabilities.add.size() == 0)
+      message: The token-manager Pod must retain its restricted non-root security context.
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: garmin-auth-pod-restrictions
+spec:
+  policyName: garmin-auth-pod-restrictions
+  validationActions: [Deny]

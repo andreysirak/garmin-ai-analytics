@@ -1,0 +1,7 @@
+.git
+.env
+config/credentials.local.json
+.idea
+**/target
+airflow/logs
+data
