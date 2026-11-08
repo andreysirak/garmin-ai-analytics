@@ -64,7 +64,7 @@ pytest -q airflow/tests \
 Python tests mock Kubernetes operations and use synthetic credentials and
 local HTTP fixtures. Do not run authentication against Garmin from tests.
 
-Pull requests should pass **Validate infrastructure** and **Java integration
-checks** and **Python integration checks**. Run the optional **Airflow Smoke
+Pull requests should pass **Validate infrastructure**, **Garmin API Integration
+Java**, and **Garmin API Integration Python**. Run the optional **Airflow Smoke
 Test** when changing Kubernetes or Airflow execution. Do not use Garmin
 credentials in CI.
