@@ -37,7 +37,21 @@ spec:
     requests:
       storage: 2Gi
 ---
-# Raw JSON archive for later milestones; mounted by task Pods in airflow-jobs.
+# Garmin raw JSON archive is backed by the local project directory mounted into
+# the kind node at /mnt/garmin-raw-data.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: garmin-raw-data
+spec:
+  capacity:
+    storage: 5Gi
+  accessModes: ["ReadWriteOnce"]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: garmin-raw-data
+  hostPath:
+    path: /mnt/garmin-raw-data
+---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -45,6 +59,8 @@ metadata:
   namespace: airflow-jobs
 spec:
   accessModes: ["ReadWriteOnce"]
+  storageClassName: garmin-raw-data
+  volumeName: garmin-raw-data
   resources:
     requests:
       storage: 5Gi

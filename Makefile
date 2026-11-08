@@ -44,6 +44,7 @@ help:
 	@echo "  make kind-load-airflow-image - Load the local Airflow image into kind"
 
 cluster-create:
+	@mkdir -p data/raw/garmin
 	@kind get clusters | grep -qx $(CLUSTER) && echo "cluster $(CLUSTER) already exists" || \
 		kind create cluster --config infrastructure/kind/cluster.yaml
 

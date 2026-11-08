@@ -68,8 +68,37 @@ class SleepDailyIngestionJobTest {
     ProcessResult result = runJob(REQUESTED_DATE);
 
     assertEquals(1, result.exitCode());
-    assertTrue(result.output().contains("missing or mismatched calendarDate"));
+    assertTrue(result.output().contains("calendarDate 2026-11-06"));
+    assertTrue(result.output().contains("requested date " + REQUESTED_DATE));
     assertFalse(Files.exists(temporaryDirectory.resolve("sleep").resolve(REQUESTED_DATE + ".json")));
+  }
+
+  @Test
+  void archivesResponseWhenGarminHasNoSleepData() throws Exception {
+    String rawJson = "{}";
+    server.enqueue(new MockResponse().setBody(rawJson));
+
+    ProcessResult result = runJob(REQUESTED_DATE);
+
+    assertEquals(0, result.exitCode());
+    assertTrue(result.output().contains("No Garmin sleep data for " + REQUESTED_DATE));
+    assertEquals(
+        rawJson,
+        Files.readString(temporaryDirectory.resolve("sleep").resolve(REQUESTED_DATE + ".json")));
+  }
+
+  @Test
+  void archivesEmptySleepSummaryAsNoData() throws Exception {
+    String rawJson = "{\"dailySleepDTO\":{}}";
+    server.enqueue(new MockResponse().setBody(rawJson));
+
+    ProcessResult result = runJob(REQUESTED_DATE);
+
+    assertEquals(0, result.exitCode());
+    assertTrue(result.output().contains("No Garmin sleep data for " + REQUESTED_DATE));
+    assertEquals(
+        rawJson,
+        Files.readString(temporaryDirectory.resolve("sleep").resolve(REQUESTED_DATE + ".json")));
   }
 
   @Test

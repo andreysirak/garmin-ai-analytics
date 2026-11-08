@@ -19,6 +19,7 @@ POLICY_DENIAL = (
 )
 RBAC_CHECKS = (
     ("create", "pods", "garmin-auth", AUTH_SERVICE_ACCOUNT, "yes"),
+    ("patch", "pods", "airflow-jobs", AUTH_SERVICE_ACCOUNT, "yes"),
     ("get", "secrets", "garmin-auth", AUTH_SERVICE_ACCOUNT, "no"),
     ("get", "secret/garmin-api-credentials", "garmin-auth", AUTH_SERVICE_ACCOUNT, "no"),
     ("get", "secret/garmin-api-credentials", "garmin-auth", TOKEN_SERVICE_ACCOUNT, "no"),

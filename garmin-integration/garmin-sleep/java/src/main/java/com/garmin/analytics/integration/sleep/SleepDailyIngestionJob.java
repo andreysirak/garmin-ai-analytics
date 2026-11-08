@@ -13,6 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.HashMap;
 import java.util.Map;
@@ -44,16 +45,28 @@ public final class SleepDailyIngestionJob {
       HttpClient httpClient =
           HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
       GarminClient garminClient = new GarminClient(httpClient, baseUri, token);
-      String rawJson = garminClient.get(ENDPOINT, Map.of("date", date.toString()));
+      String requestedDate = date.format(DateTimeFormatter.ISO_LOCAL_DATE);
+      String rawJson = garminClient.get(ENDPOINT, Map.of("date", requestedDate));
       SleepResponse sleep = parseResponse(objectMapper, rawJson);
-      if (sleep.dailySleepDTO() == null
-          || sleep.dailySleepDTO().calendarDate() == null
-          || !date.equals(sleep.dailySleepDTO().calendarDate())) {
-        throw new IOException("Garmin sleep response has a missing or mismatched calendarDate");
+      if (sleep.dailySleepDTO() == null || !hasSleepMetrics(sleep.dailySleepDTO())) {
+        archive(outputDirectory, date, rawJson);
+        System.out.println("No Garmin sleep data for " + date + "; archived the API response");
+        return;
+      }
+      LocalDate responseDate = sleep.dailySleepDTO().calendarDate();
+      if (responseDate == null) {
+        throw new IOException(
+            "Garmin sleep response is missing calendarDate for requested date " + requestedDate);
+      }
+      if (!date.equals(responseDate)) {
+        throw new IOException(
+            "Garmin sleep response calendarDate "
+                + responseDate
+                + " does not match requested date "
+                + requestedDate);
       }
 
-      Path destination = outputDirectory.resolve("sleep").resolve(date + ".json");
-      new JsonFileWriter().write(destination, rawJson);
+      archive(outputDirectory, date, rawJson);
       System.out.println("Ingested Garmin sleep for " + date);
     } catch (InterruptedException exception) {
       Thread.currentThread().interrupt();
@@ -72,6 +85,25 @@ public final class SleepDailyIngestionJob {
       throw new IllegalArgumentException("Garmin sleep response was empty");
     }
     return response;
+  }
+
+  private static boolean hasSleepMetrics(SleepResponse.DailySleepDTO sleep) {
+    return sleep.sleepTimeSeconds() != null
+        || sleep.deepSleepSeconds() != null
+        || sleep.lightSleepSeconds() != null
+        || sleep.remSleepSeconds() != null
+        || sleep.awakeSleepSeconds() != null
+        || sleep.awakeCount() != null
+        || sleep.sleepStartTimestampGMT() != null
+        || sleep.sleepEndTimestampGMT() != null
+        || sleep.avgSleepStress() != null
+        || sleep.avgHeartRate() != null;
+  }
+
+  private static void archive(Path outputDirectory, LocalDate date, String rawJson)
+      throws IOException {
+    Path destination = outputDirectory.resolve("sleep").resolve(date + ".json");
+    new JsonFileWriter().write(destination, rawJson);
   }
 
   private static boolean isHelp(String[] args) {

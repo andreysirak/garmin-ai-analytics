@@ -125,12 +125,16 @@ Sign in to the local Airflow UI as `admin` using the password printed by
 `make airflow-password`. Unpause or trigger `garmin_daily_ingestion` in the
 UI. A manual run can specify a `date` in `YYYY-MM-DD` form; scheduled runs use
 the Airflow logical date. After the token task succeeds, summary and sleep
-tasks run independently. Their complete JSON files are written to the
-`garmin-raw-data` PVC.
+tasks run independently. Their complete JSON files are written under
+`data/raw/garmin/` in the project directory. This local data directory is
+ignored by Git.
 
 `make infra-up` can be used again to apply changes to an existing local
-cluster. Avoid `make cluster-delete` when you need to preserve the cluster's
-persistent data.
+cluster. The kind node bind-mounts `data/raw/garmin/`; changes to this mount
+require recreating the kind cluster. Recreating the cluster resets Airflow
+metadata and Kubernetes Secrets, but the Garmin archive remains in the project
+directory. `make infra-up` bootstraps the cluster again; provide
+`config/credentials.local.json` if the Garmin API-key Secret must be restored.
 
 ## Java ingestion jobs
 
