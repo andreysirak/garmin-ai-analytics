@@ -84,21 +84,35 @@ kind context before writing the Garmin Secret. Do not put real credentials in
 the example file, manifests, source control, or logs. The local credentials
 file is ignored by Git.
 
-### Why least privilege matters
+### Authentication, orchestration, and least privilege
+
+The auth CLI exchanges the long-lived Garmin Personal API key for a bearer
+token and caches it in the `garmin-access-token` Kubernetes Secret. It reuses
+the cached token while more than 30 minutes remain; otherwise it obtains a
+fresh token and updates the Secret with its expiration. Tokens are not sent
+through Airflow XCom, command-line arguments, or logs.
+
+The `garmin-auth` ServiceAccount can only get and update the named token Secret
+in `airflow-jobs`. The Java ingestion Pods run with `airflow-job`, have no
+Secret write permissions, and mount the bearer token read-only. Scheduled DAG
+runs use the Airflow logical date; manual runs can provide a `YYYY-MM-DD`
+date. Airflow retries task failures, and the two Java ingestion tasks run in
+parallel after authentication succeeds.
 
 Kubernetes recommends granting users and ServiceAccounts only the permissions
 they need. Its [RBAC good practices](https://kubernetes.io/docs/concepts/security/rbac-good-practices/)
 warn that permission to create Pods or other workloads in a namespace can
 implicitly provide access to Secrets and the permissions of ServiceAccounts
-in that namespace. The long-lived API-key Secret is isolated in `garmin-auth`,
-separate from Java Pods. Airflow's auth-namespace Pod permissions are narrow
-and guarded by a ValidatingAdmissionPolicy that permits only the expected auth
-Pod configuration. This reduces risk but is not complete isolation: Airflow
-can still request the approved credential-consuming job, and cluster
-administrators or compromised trusted images remain in the trust boundary.
-Run `make auth-policy-verify` against a configured cluster to check effective
-RBAC and admission behavior. See [Architecture — Security](docs/architecture.md#security)
-for the threat model and production limitations.
+in that namespace. The long-lived API-key Secret is therefore isolated in
+`garmin-auth`, separate from Java Pods. Airflow's auth-namespace Pod
+permissions are narrow and guarded by a ValidatingAdmissionPolicy that allows
+only the expected auth Pod configuration. This reduces risk but is not
+complete isolation: Airflow can still request the approved
+credential-consuming job, and cluster administrators or compromised trusted
+images remain in the trust boundary. Run `make auth-policy-verify` against a
+configured cluster to check effective RBAC and admission behavior. See
+[Architecture — Security](docs/architecture.md#security) for the threat
+model and production limitations.
 
 ### Open Airflow and run ingestion
 
@@ -117,35 +131,6 @@ tasks run independently. Their complete JSON files are written to the
 `make infra-up` can be used again to apply changes to an existing local
 cluster. Avoid `make cluster-delete` when you need to preserve the cluster's
 persistent data.
-
-## Repository structure
-
-The repository is organized by infrastructure, orchestration, Java ingestion,
-and Python packages:
-
-```text
-infrastructure/
-  kind/
-  kubernetes/
-  helm/
-  scripts/
-airflow/
-  dags/
-  config/
-  plugins/
-  tests/
-config/
-  credentials.example.json
-  credentials.local.json  # local only; ignored by Git
-garmin-integration/
-  pom.xml
-  garmin-common/java/
-  garmin-daily-summary/java/
-  garmin-sleep/java/
-  garmin-auth/python/
-  garmin-daily-summary/python/
-  garmin-sleep/python/
-```
 
 ## Java ingestion jobs
 
@@ -231,36 +216,6 @@ Tests use synthetic tokens/data and local or mocked HTTP and Kubernetes
 interactions. They do not require Garmin credentials or a Kubernetes cluster.
 The Airflow custom image copies all three operator packages into the DAG
 processor's Python path.
-
-## Authentication and orchestration
-
-The auth CLI exchanges the long-lived Garmin Personal API key for a bearer
-token using Garmin's Personal API token endpoint. It reads the key from
-`GARMIN_API_KEY`, checks the `garmin-access-token` Kubernetes Secret, and
-reuses the cached token while more than 30 minutes remain. Otherwise it
-requests a new token, reads its JWT `exp`, and updates the Secret with the
-token and expiration. No token is sent through Airflow XCom, command-line
-arguments, or logs.
-
-Airflow DAG `garmin_daily_ingestion` runs the following task graph:
-
-```text
-ensure_garmin_token
-       ├── ingest_daily_summary
-       └── ingest_sleep
-```
-
-The reusable `GarminAuthOperator` runs the auth CLI in its own Pod using the
-`garmin-auth` ServiceAccount. The API key is injected from
-`garmin-api-credentials`; the auth ServiceAccount can only get and update the
-named `garmin-access-token` Secret. The bootstrap process creates this token
-Secret before Airflow starts. The Java Pods use `airflow-job`, which has no
-Secret write permissions, and mount the cached token read-only.
-
-Scheduled runs use the Airflow logical date. Manual runs accept a `date`
-parameter in `YYYY-MM-DD` form; backfills use the logical date of each
-historical run. Airflow retries task failures, and the Java tasks run in
-parallel only after token validation succeeds.
 
 ## CI
 
