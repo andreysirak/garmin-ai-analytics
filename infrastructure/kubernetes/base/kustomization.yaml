@@ -7,4 +7,5 @@ resources:
   - storage.yaml
   - garmin-config.yaml
   - garmin-auth-config.yaml
+  - garmin-auth-limits.yaml
   - garmin-auth-admission.yaml

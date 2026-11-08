@@ -107,7 +107,10 @@ The `garmin-auth-pod-restrictions` ValidatingAdmissionPolicy is selected by a
 label on the `garmin-auth` namespace and bound with `Deny` validation. On Pod
 creation it requires the Airflow scheduler identity and constrains the
 ServiceAccount, single container, local image and command, API-key Secret
-reference, auth ConfigMap, resource values, and restricted security context.
+reference, auth ConfigMap, and restricted security context. It allows only the
+read-only projected Kubernetes API-token mount injected for the
+`garmin-auth` ServiceAccount. A namespace LimitRange applies the token
+manager's CPU and memory requests/limits and bounds them to the approved values.
 It rejects extra containers, volumes, host access, privileged settings, and
 other Secret references. The accompanying
 `infrastructure/scripts/verify_garmin_auth_admission.py` script checks RBAC
