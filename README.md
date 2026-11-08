@@ -1,9 +1,39 @@
 # Garmin AI Analytics
 
-Locally hosted Garmin Personal API ingestion using standalone Java 25 jobs,
-Apache Airflow 3, and Kubernetes (kind). The jobs archive complete original
-JSON responses to the existing `garmin-raw-data` PVC; this MVP does not write
-to PostgreSQL.
+## Project overview
+
+The idea is to build a daily AI assistant informed by data from a Garmin watch.
+This project is in an early development phase, laying the groundwork by
+ingesting Garmin Personal API data using standalone Java 25 jobs, Apache
+Airflow 3, and Kubernetes (kind). The jobs currently archive complete original
+JSON responses to the existing `garmin-raw-data` PVC; PostgreSQL persistence
+is not implemented.
+
+## Repository structure
+
+The repository is organized by infrastructure, orchestration, Java ingestion,
+and Python packages:
+
+```text
+infrastructure/
+  kind/
+  kubernetes/
+  helm/
+  scripts/
+airflow/
+  dags/
+  config/
+  plugins/
+  tests/
+garmin-integration/
+  pom.xml
+  garmin-common/java/
+  garmin-daily-summary/java/
+  garmin-sleep/java/
+  garmin-auth/python/
+  garmin-daily-summary/python/
+  garmin-sleep/python/
+```
 
 ## Java ingestion jobs
 
