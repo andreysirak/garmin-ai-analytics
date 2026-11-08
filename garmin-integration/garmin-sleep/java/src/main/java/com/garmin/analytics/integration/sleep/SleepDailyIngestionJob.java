@@ -48,22 +48,23 @@ public final class SleepDailyIngestionJob {
       String requestedDate = date.format(DateTimeFormatter.ISO_LOCAL_DATE);
       String rawJson = garminClient.get(ENDPOINT, Map.of("date", requestedDate));
       SleepResponse sleep = parseResponse(objectMapper, rawJson);
-      if (sleep.dailySleepDTO() == null || !hasSleepMetrics(sleep.dailySleepDTO())) {
-        archive(outputDirectory, date, rawJson);
-        System.out.println("No Garmin sleep data for " + date + "; archived the API response");
-        return;
-      }
-      LocalDate responseDate = sleep.dailySleepDTO().calendarDate();
-      if (responseDate == null) {
-        throw new IOException(
-            "Garmin sleep response is missing calendarDate for requested date " + requestedDate);
-      }
-      if (!date.equals(responseDate)) {
+      LocalDate responseDate =
+          sleep.dailySleepDTO() == null ? null : sleep.dailySleepDTO().calendarDate();
+      if (responseDate != null && !date.equals(responseDate)) {
         throw new IOException(
             "Garmin sleep response calendarDate "
                 + responseDate
                 + " does not match requested date "
                 + requestedDate);
+      }
+      if (sleep.dailySleepDTO() == null || !hasSleepMetrics(sleep.dailySleepDTO())) {
+        archive(outputDirectory, date, rawJson);
+        System.out.println("No Garmin sleep data for " + date + "; archived the API response");
+        return;
+      }
+      if (responseDate == null) {
+        throw new IOException(
+            "Garmin sleep response is missing calendarDate for requested date " + requestedDate);
       }
 
       archive(outputDirectory, date, rawJson);
