@@ -12,7 +12,7 @@ SCHEDULER_EXEC := $(KUBECTL) -n $(NAMESPACE) exec airflow-scheduler-0 -c schedul
 JAVA_MAVEN_IMAGE := maven:3.9-eclipse-temurin-25
 AIRFLOW_URL := http://localhost:8080
 
-.PHONY: help prepare-garmin-raw-data cluster-create cluster-status cluster-delete infra-validate infra-up infra-down \
+.PHONY: help prepare-garmin-raw-data cluster-create cluster-status cluster-delete infra-validate infra-up airflow-operator-rollout infra-down \
         infra-status airflow-ui airflow-password airflow-logs test-infra java-verify \
         java-package-summary java-package-sleep docker-build docker-build-summary docker-build-sleep \
         kind-load-images airflow-image kind-load-airflow-image auth-image kind-load-auth-image \
@@ -73,6 +73,12 @@ infra-up: prepare-garmin-raw-data kind-load-images kind-load-airflow-image kind-
 	$(HELM) upgrade --install airflow $(AIRFLOW_CHART) \
 		--namespace $(NAMESPACE) -f infrastructure/helm/airflow/values.yaml \
 		--set-string garminRawDataGid=$(GARMIN_RAW_DATA_GID) --wait --timeout 10m
+	$(MAKE) airflow-operator-rollout
+
+airflow-operator-rollout:
+	$(KUBECTL) -n $(NAMESPACE) rollout restart statefulset/airflow-scheduler deployment/airflow-dag-processor
+	$(KUBECTL) -n $(NAMESPACE) rollout status statefulset/airflow-scheduler --timeout=10m
+	$(KUBECTL) -n $(NAMESPACE) rollout status deployment/airflow-dag-processor --timeout=10m
 
 infra-down:
 	$(HELM) uninstall airflow --namespace $(NAMESPACE)

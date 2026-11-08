@@ -134,8 +134,10 @@ to the Pods as a supplementary group; `fsGroup` alone does not change
 `hostPath` ownership.
 
 `make infra-up` can be used again to apply changes to an existing local
-cluster. The kind node bind-mounts `data/raw/garmin/`; changes to this mount
-require recreating the kind cluster. Recreating the cluster resets Airflow
+cluster. It rebuilds and loads the local Airflow image, then restarts the
+scheduler and DAG processor so they use the updated Garmin operator code. The
+kind node bind-mounts `data/raw/garmin/`; changes to this mount require
+recreating the kind cluster. Recreating the cluster resets Airflow
 metadata and Kubernetes Secrets, but the Garmin archive remains in the project
 directory. `make infra-up` bootstraps the cluster again; provide
 `config/credentials.local.json` if the Garmin API-key Secret must be restored.
