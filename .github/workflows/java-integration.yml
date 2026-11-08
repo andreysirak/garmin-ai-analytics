@@ -1,0 +1,53 @@
+name: Java Integration CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  java-verify:
+    name: Java integration checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+      - name: Cache OWASP Dependency-Check database
+        uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.2.3
+        with:
+          path: ~/.cache/owasp-dependency-check
+          key: dependency-check-${{ runner.os }}-${{ hashFiles('garmin-integration/pom.xml') }}
+          restore-keys: |
+            dependency-check-${{ runner.os }}-
+      - name: Validate Airflow DAG syntax
+        run: python3 -m py_compile airflow/dags/garmin_daily_ingestion.py
+      - name: Verify Java integration
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+        run: |
+          if [ -n "${NVD_API_KEY:-}" ]; then
+            export MAVEN_ARGS="-DnvdApiKey=${NVD_API_KEY}"
+          fi
+          mvn -B -ntp -f garmin-integration/pom.xml clean verify
+      - name: Upload Java reports after failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: java-integration-reports
+          if-no-files-found: ignore
+          path: |
+            garmin-integration/**/target/surefire-reports/**
+            garmin-integration/**/target/site/spotbugs.html
+            garmin-integration/**/target/spotbugsXml.xml
+            garmin-integration/**/target/pmd.xml
+            garmin-integration/target/dependency-check-report.*

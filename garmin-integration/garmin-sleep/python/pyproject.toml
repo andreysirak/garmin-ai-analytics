@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "garmin-sleep"
+version = "0.1.0"
+description = "Airflow Kubernetes operator for Garmin sleep ingestion"
+requires-python = ">=3.11"
+dependencies = [
+  "apache-airflow>=3.3,<4",
+  "apache-airflow-providers-cncf-kubernetes>=10,<11",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

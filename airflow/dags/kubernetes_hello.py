@@ -1,4 +1,4 @@
-"""Smoke test: Airflow launches an independent Pod through KubernetesPodOperator."""
+"""Smoke test for Airflow's KubernetesPodOperator execution path."""
 
 from __future__ import annotations
 

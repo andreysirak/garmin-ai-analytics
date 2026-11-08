@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "garmin-auth"
+version = "0.1.0"
+description = "Standalone Garmin Personal API token manager"
+requires-python = ">=3.11"
+dependencies = [
+  "kubernetes>=31,<36",
+]
+
+[project.scripts]
+garmin-auth = "garmin_auth.token_manager:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

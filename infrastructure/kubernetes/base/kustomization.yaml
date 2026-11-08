@@ -5,3 +5,4 @@ resources:
   - service-accounts.yaml
   - rbac.yaml
   - storage.yaml
+  - garmin-config.yaml

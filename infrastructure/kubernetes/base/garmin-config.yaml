@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: garmin-integration-config
+  namespace: airflow-jobs
+data:
+  GARMIN_API_BASE_URL: https://connect.garmin.com
+  GARMIN_AUTH_URL: https://connect.garmin.com/oauth/token
+  GARMIN_API_KEY_HEADER: x-api-key
+  GARMIN_CONNECT_TIMEOUT_SECONDS: "10"
+  GARMIN_REQUEST_TIMEOUT_SECONDS: "30"
+  GARMIN_MAX_RETRIES: "2"
+  GARMIN_RETRY_BACKOFF_MILLIS: "500"
+  GARMIN_RAW_OUTPUT_DIR: /data/raw/garmin
