@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: garmin-auth-config
+  namespace: garmin-auth
+data:
+  GARMIN_AUTH_URL: https://personal.connectapi.garmin.com/personalapitoken-service/personal-api/personal-api-key/token
+  GARMIN_TOKEN_SAFETY_MARGIN_SECONDS: "1800"
+  GARMIN_AUTH_TIMEOUT_SECONDS: "30"

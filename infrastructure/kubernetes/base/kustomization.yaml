@@ -6,3 +6,5 @@ resources:
   - rbac.yaml
   - storage.yaml
   - garmin-config.yaml
+  - garmin-auth-config.yaml
+  - garmin-auth-admission.yaml

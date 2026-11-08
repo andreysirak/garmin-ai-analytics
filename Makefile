@@ -14,7 +14,8 @@ AIRFLOW_URL := http://localhost:8080
 .PHONY: help cluster-create cluster-status cluster-delete infra-validate infra-up infra-down \
         infra-status airflow-ui airflow-password airflow-logs test-infra java-verify \
         java-package-summary java-package-sleep docker-build docker-build-summary docker-build-sleep \
-        kind-load-images airflow-image kind-load-airflow-image auth-image kind-load-auth-image
+        kind-load-images airflow-image kind-load-airflow-image auth-image kind-load-auth-image \
+        auth-policy-verify
 
 help:
 	@echo "Cluster and infrastructure:"
@@ -33,6 +34,7 @@ help:
 	@echo "  make kind-load-images       - Load both local images into kind"
 	@echo "  make auth-image             - Build the Garmin token-manager image"
 	@echo "  make kind-load-auth-image   - Load the Garmin token-manager image into kind"
+	@echo "  make auth-policy-verify     - Verify auth RBAC and Pod admission against the live cluster"
 	@echo "Airflow:"
 	@echo "  make airflow-ui             - Open the Airflow UI"
 	@echo "  make airflow-password       - Print the local admin password"
@@ -141,3 +143,6 @@ auth-image:
 
 kind-load-auth-image: auth-image
 	kind load docker-image garmin-auth:local --name $(CLUSTER)
+
+auth-policy-verify:
+	KUBE_CONTEXT="$(CONTEXT)" python3 infrastructure/scripts/verify_garmin_auth_admission.py

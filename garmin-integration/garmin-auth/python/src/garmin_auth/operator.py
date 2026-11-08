@@ -15,10 +15,11 @@ class GarminAuthOperator(KubernetesPodOperator):
         self,
         *,
         image: str = "garmin-auth:local",
-        namespace: str = "airflow-jobs",
+        namespace: str = "garmin-auth",
         service_account_name: str = "garmin-auth",
         credentials_secret: str = "garmin-api-credentials",
-        config_map: str = "garmin-integration-config",
+        config_map: str = "garmin-auth-config",
+        token_secret_namespace: str = "airflow-jobs",
         **kwargs: object,
     ) -> None:
         super().__init__(
@@ -45,7 +46,7 @@ class GarminAuthOperator(KubernetesPodOperator):
                 ),
                 k8s.V1EnvVar(
                     name="GARMIN_TOKEN_SECRET_NAMESPACE",
-                    value=namespace,
+                    value=token_secret_namespace,
                 ),
             ],
             container_resources=k8s.V1ResourceRequirements(

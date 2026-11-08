@@ -3,6 +3,9 @@ set -euo pipefail
 
 NAMESPACE=airflow
 JOBS_NAMESPACE=airflow-jobs
+AUTH_NAMESPACE=garmin-auth
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
 kubectl() {
   command kubectl --context "${KUBE_CONTEXT:-kind-garmin-ai-analytics}" "$@"
 }
@@ -22,6 +25,49 @@ create_if_missing() {
     kubectl -n "$namespace" create secret generic "$name" "$@" >/dev/null
     echo "secret/$name created"
   fi
+}
+bootstrap_garmin_credentials() {
+  local credentials_file="${REPO_ROOT}/config/credentials.local.json"
+  local expected_context="${KUBE_CONTEXT:-kind-garmin-ai-analytics}"
+  local active_context
+  local existing_secret
+
+  if [[ ! -f "$credentials_file" ]]; then
+    echo "Local Garmin credentials file is absent; preserving any existing Secret"
+    return
+  fi
+
+  if ! python3 "${SCRIPT_DIR}/read_garmin_api_key.py" --validate-only \
+    "$credentials_file" >/dev/null; then
+    return 1
+  fi
+
+  if ! active_context="$(command kubectl config current-context 2>/dev/null)"; then
+    echo "Unable to determine the active Kubernetes context; not writing Garmin credentials" >&2
+    return 1
+  fi
+  if [[ "$active_context" != "$expected_context" ]]; then
+    echo "Active Kubernetes context does not match expected context; not writing Garmin credentials" >&2
+    return 1
+  fi
+
+  if ! existing_secret="$(kubectl -n "$AUTH_NAMESPACE" get secret garmin-api-credentials \
+    --ignore-not-found -o name)"; then
+    echo "Unable to check for existing Garmin credentials Secret" >&2
+    return 1
+  fi
+  if [[ -n "$existing_secret" ]]; then
+    echo "secret/garmin-api-credentials already exists; leaving it unchanged"
+    return
+  fi
+
+  if ! python3 "${SCRIPT_DIR}/read_garmin_api_key.py" "$credentials_file" |
+    kubectl -n "$AUTH_NAMESPACE" create secret generic garmin-api-credentials \
+      --from-file=api-key=/dev/stdin >/dev/null; then
+    echo "Failed to create Garmin credentials Secret" >&2
+    return 1
+  fi
+  echo "secret/garmin-api-credentials created"
 }
 
 DB_PASSWORD=$(random_secret)
@@ -48,12 +94,7 @@ create_if_missing "$NAMESPACE" airflow-jwt-secret \
 create_if_missing "$NAMESPACE" airflow-simple-auth \
   --from-literal=passwords.json="{\"admin\": \"${ADMIN_PASSWORD}\"}"
 
-if [[ -n "${GARMIN_API_KEY:-}" ]]; then
-  create_if_missing "$JOBS_NAMESPACE" garmin-api-credentials \
-    --from-literal=api-key="$GARMIN_API_KEY"
-else
-  echo "GARMIN_API_KEY is unset; skipping Garmin credentials Secret"
-fi
+bootstrap_garmin_credentials
 create_if_missing "$JOBS_NAMESPACE" garmin-access-token \
   --from-literal=expires-at=0
-unset DB_PASSWORD ADMIN_PASSWORD GARMIN_API_KEY
+unset DB_PASSWORD ADMIN_PASSWORD

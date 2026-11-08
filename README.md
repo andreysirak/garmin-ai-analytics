@@ -2,12 +2,121 @@
 
 ## Project overview
 
-The idea is to build a daily AI assistant informed by data from a Garmin watch.
-This project is in an early development phase, laying the groundwork by
-ingesting Garmin Personal API data using standalone Java 25 jobs, Apache
-Airflow 3, and Kubernetes (kind). The jobs currently archive complete original
-JSON responses to the existing `garmin-raw-data` PVC; PostgreSQL persistence
-is not implemented.
+The goal is a daily AI assistant informed by Garmin watch data. This project
+is in an early development phase: it currently retrieves Garmin daily summary
+and sleep data, but does not yet generate AI analysis or recommendations.
+
+### Current Airflow pipeline
+
+The `garmin_daily_ingestion` DAG is scheduled daily. It first checks that a
+valid Garmin bearer token is cached, then runs the daily-summary and sleep
+ingestion tasks in parallel:
+
+```text
+Scheduled or manual DAG run
+             |
+             v
+     ensure_garmin_token
+          /       \
+         v         v
+ daily summary    sleep
+      Pod          Pod
+         \         /
+          v       v
+     Original JSON files
+     on garmin-raw-data PVC
+```
+
+Each ingestion task runs its standalone Java job in a separate Kubernetes
+Pod. Airflow supplies the processing date, coordinates dependencies, and
+retries failed tasks. The jobs fetch and validate the endpoint response, then
+archive the complete original JSON under a date-specific path on the
+`garmin-raw-data` persistent volume. Reprocessing a date replaces that date's
+file. PostgreSQL storage, analytics, and AI-generated insights are not
+implemented yet.
+
+### Intended future direction
+
+The intended progression is to build on this reliable daily data foundation:
+persist and organize the collected Garmin data, derive useful daily health and
+activity context, and use that context to provide personalized AI-generated
+daily summaries or assistance. These are future goals, not current
+capabilities.
+
+## Starting from scratch
+
+### Prerequisites
+
+Install Docker (Colima or Docker Desktop), kind, Helm, kubectl, Python 3.12,
+and OpenSSL. Clone the repository and run the following commands from its
+root.
+
+### Create and validate the local environment
+
+```sh
+make cluster-create
+make infra-validate
+```
+
+### Configure Garmin credentials and deploy
+
+Create a private local credentials file from the safe template, then edit it
+with your Garmin Personal API key:
+
+```sh
+cp config/credentials.example.json config/credentials.local.json
+chmod 600 config/credentials.local.json
+$EDITOR config/credentials.local.json
+```
+
+`make infra-up` validates the JSON and creates the Kubernetes Secret only if
+it does not already exist. Existing credentials are left unchanged; an absent
+local file also preserves any existing Secret. If neither exists, deployment
+continues without Garmin credentials and the auth task will not succeed until
+you add the local file and run `make infra-up` again.
+
+```sh
+make infra-up
+```
+
+The bootstrap checks that the active Kubernetes context is the expected local
+kind context before writing the Garmin Secret. Do not put real credentials in
+the example file, manifests, source control, or logs. The local credentials
+file is ignored by Git.
+
+### Why least privilege matters
+
+Kubernetes recommends granting users and ServiceAccounts only the permissions
+they need. Its [RBAC good practices](https://kubernetes.io/docs/concepts/security/rbac-good-practices/)
+warn that permission to create Pods or other workloads in a namespace can
+implicitly provide access to Secrets and the permissions of ServiceAccounts
+in that namespace. The long-lived API-key Secret is isolated in `garmin-auth`,
+separate from Java Pods. Airflow's auth-namespace Pod permissions are narrow
+and guarded by a ValidatingAdmissionPolicy that permits only the expected auth
+Pod configuration. This reduces risk but is not complete isolation: Airflow
+can still request the approved credential-consuming job, and cluster
+administrators or compromised trusted images remain in the trust boundary.
+Run `make auth-policy-verify` against a configured cluster to check effective
+RBAC and admission behavior. See [Architecture — Security](docs/architecture.md#security)
+for the threat model and production limitations.
+
+### Open Airflow and run ingestion
+
+```sh
+make airflow-password
+make airflow-ui
+```
+
+Sign in to the local Airflow UI as `admin` using the password printed by
+`make airflow-password`. Unpause or trigger `garmin_daily_ingestion` in the
+UI. A manual run can specify a `date` in `YYYY-MM-DD` form; scheduled runs use
+the Airflow logical date. After the token task succeeds, summary and sleep
+tasks run independently. Their complete JSON files are written to the
+`garmin-raw-data` PVC.
+
+`make infra-up` can be used again to apply changes to an existing local
+cluster. Avoid `make cluster-delete` when you need to preserve the cluster's
+persistent data.
 
 ## Repository structure
 
@@ -25,6 +134,9 @@ airflow/
   config/
   plugins/
   tests/
+config/
+  credentials.example.json
+  credentials.local.json  # local only; ignored by Git
 garmin-integration/
   pom.xml
   garmin-common/java/
@@ -149,32 +261,6 @@ Scheduled runs use the Airflow logical date. Manual runs accept a `date`
 parameter in `YYYY-MM-DD` form; backfills use the logical date of each
 historical run. Airflow retries task failures, and the Java tasks run in
 parallel only after token validation succeeds.
-
-## Local Kubernetes and Airflow
-
-Prerequisites: Docker (Colima or Docker Desktop), kind, Helm, kubectl,
-Python 3.12, and OpenSSL. Run from the repository root:
-
-```sh
-make cluster-create
-make infra-validate
-```
-
-Set `GARMIN_API_KEY` in your local shell using a secret manager or hidden
-terminal prompt, then run `make infra-up`. The target builds and loads the
-Airflow, auth, and ingestion images, applies Kubernetes resources, bootstraps
-Secrets, and installs the Airflow chart. Unset the key afterward. Do not put
-credentials in `.env`, manifests, source control, or support logs.
-
-```sh
-unset GARMIN_API_KEY
-make airflow-ui
-```
-
-If `GARMIN_API_KEY` is absent during bootstrap, the cluster can still be
-provisioned, but the auth task will fail until the `garmin-api-credentials`
-Secret is created. Do not recreate the kind cluster or remove persistent
-volumes to troubleshoot an ingestion failure.
 
 ## CI
 

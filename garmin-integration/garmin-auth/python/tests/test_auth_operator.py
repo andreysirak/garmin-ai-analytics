@@ -22,15 +22,19 @@ def test_auth_operator_builds_restricted_token_manager_pod() -> None:
     pod = build_pod(operator)
 
     assert isinstance(operator, KubernetesPodOperator)
-    assert pod.metadata.namespace == "airflow-jobs"
+    assert pod.metadata.namespace == "garmin-auth"
     assert pod.spec.service_account_name == "garmin-auth"
     container = pod.spec.containers[0]
     assert container.image == "garmin-auth:local"
     assert container.command == ["garmin-auth"]
-    assert container.env_from[0].config_map_ref.name == "garmin-integration-config"
+    assert container.env_from[0].config_map_ref.name == "garmin-auth-config"
     api_key = next(env for env in container.env if env.name == "GARMIN_API_KEY")
     assert api_key.value_from.secret_key_ref.name == "garmin-api-credentials"
     assert api_key.value_from.secret_key_ref.key == "api-key"
+    token_namespace = next(
+        env for env in container.env if env.name == "GARMIN_TOKEN_SECRET_NAMESPACE"
+    )
+    assert token_namespace.value == "airflow-jobs"
     assert operator.do_xcom_push is False
     assert container.security_context.run_as_user == 10001
     assert container.security_context.read_only_root_filesystem is True

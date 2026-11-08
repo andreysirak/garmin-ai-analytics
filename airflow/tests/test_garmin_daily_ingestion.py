@@ -19,8 +19,36 @@ def test_garmin_ingestion_dag_has_auth_gate_and_parallel_jobs() -> None:
     assert isinstance(auth, GarminAuthOperator)
     assert isinstance(summary, DailySummaryIngestionOperator)
     assert isinstance(sleep, SleepIngestionOperator)
+    assert auth.namespace == "garmin-auth"
+    assert auth.service_account_name == "garmin-auth"
+    auth_api_key = next(
+        env for env in auth.env_vars if env.name == "GARMIN_API_KEY"
+    )
+    assert auth_api_key.value_from.secret_key_ref.name == "garmin-api-credentials"
+    auth_token_namespace = next(
+        env for env in auth.env_vars if env.name == "GARMIN_TOKEN_SECRET_NAMESPACE"
+    )
+    assert auth_token_namespace.value == "airflow-jobs"
+
     assert summary.upstream_task_ids == {"ensure_garmin_token"}
     assert sleep.upstream_task_ids == {"ensure_garmin_token"}
     assert auth.downstream_task_ids == {"ingest_daily_summary", "ingest_sleep"}
     assert summary.arguments[1] == sleep.arguments[1]
     assert all(task.retries == dag.default_args["retries"] for task in dag.tasks)
+
+    for ingestion_task in (summary, sleep):
+        assert ingestion_task.namespace == "airflow-jobs"
+        assert ingestion_task.service_account_name == "airflow-job"
+        assert ingestion_task.do_xcom_push is False
+        token_volume = next(
+            volume
+            for volume in ingestion_task.volumes
+            if volume.name == "garmin-access-token"
+        )
+        assert token_volume.secret.secret_name == "garmin-access-token"
+        token_mount = next(
+            mount
+            for mount in ingestion_task.volume_mounts
+            if mount.name == "garmin-access-token"
+        )
+        assert token_mount.read_only is True

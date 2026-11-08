@@ -5,7 +5,4 @@ metadata:
   namespace: airflow-jobs
 data:
   GARMIN_API_BASE_URL: https://personal.connectapi.garmin.com
-  GARMIN_AUTH_URL: https://personal.connectapi.garmin.com/personalapitoken-service/personal-api/personal-api-key/token
-  GARMIN_TOKEN_SAFETY_MARGIN_SECONDS: "1800"
-  GARMIN_AUTH_TIMEOUT_SECONDS: "30"
   GARMIN_RAW_OUTPUT_DIR: /data/raw/garmin
