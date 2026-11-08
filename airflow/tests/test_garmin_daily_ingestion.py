@@ -1,4 +1,6 @@
+from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 from airflow.dag_processing.dagbag import DagBag
 from garmin_auth.operator import GarminAuthOperator
@@ -35,6 +37,39 @@ def test_garmin_ingestion_dag_has_auth_gate_and_parallel_jobs() -> None:
     assert auth.downstream_task_ids == {"ingest_daily_summary", "ingest_sleep"}
     assert summary.arguments[1] == sleep.arguments[1]
     assert all(task.retries == dag.default_args["retries"] for task in dag.tasks)
+
+    template = dag.get_template_env().from_string(summary.arguments[1])
+    start_date = datetime(2026, 11, 8, 12, 30)
+    assert (
+        template.render(
+            dag_run=SimpleNamespace(conf={}, logical_date=None, start_date=start_date),
+            params={"date": None},
+            ds="",
+        )
+        == "2026-11-08"
+    )
+    assert (
+        template.render(
+            dag_run=SimpleNamespace(
+                conf={}, logical_date=datetime(2026, 11, 7), start_date=start_date
+            ),
+            params={"date": None},
+            ds="2026-11-07",
+        )
+        == "2026-11-07"
+    )
+    assert (
+        template.render(
+            dag_run=SimpleNamespace(
+                conf={"date": "2026-11-06"},
+                logical_date=None,
+                start_date=start_date,
+            ),
+            params={"date": None},
+            ds="",
+        )
+        == "2026-11-06"
+    )
 
     for ingestion_task in (summary, sleep):
         assert ingestion_task.namespace == "airflow-jobs"

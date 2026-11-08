@@ -10,7 +10,8 @@ from garmin_daily_summary.operator import DailySummaryIngestionOperator
 from garmin_sleep.operator import SleepIngestionOperator
 
 PROCESSING_DATE = (
-    "{{ (dag_run.conf.get('date') if dag_run and dag_run.conf else params.date) or ds }}"
+    "{{ (dag_run.conf.get('date') if dag_run and dag_run.conf else params.date) "
+    "or ((dag_run.logical_date or dag_run.start_date).strftime('%Y-%m-%d') if dag_run else ds) }}"
 )
 with DAG(
     dag_id="garmin_daily_ingestion",
