@@ -153,10 +153,11 @@ mvn -pl garmin-daily-summary/java -am package
 mvn -pl garmin-sleep/java -am package
 ```
 
-`verify` runs JUnit 5, SpotBugs, PMD, and the aggregate OWASP Dependency-Check
-scan. Dependency-Check fails if its vulnerability database cannot be updated
-and fails for CVSS 7.0 or higher. Set `NVD_API_KEY` locally, or configure the
-same GitHub Actions secret, for reliable NVD updates.
+`verify` runs JUnit 5, SpotBugs, and PMD. Dependency vulnerability scanning is
+temporarily not part of the Java checks: Dependency-Check 13.0.0 fails without
+an NVD API key, while unauthenticated updates with 12.2.2 were rate-limited.
+The investigation to restore a reliable dependency scan is tracked in
+[issue #6](https://github.com/andreysirak/garmin-ai-analytics/issues/6).
 
 The Java programs are independent of Airflow and Kubernetes. Each requires a
 token file containing an existing bearer token, supplied through

@@ -12,3 +12,4 @@
 | Changed | Bootstrap Garmin credentials from an ignored, permission-restricted local JSON file without rotating existing Secrets | No | Create `config/credentials.local.json` from the example before `make infra-up` | |
 | Docs | Documented Garmin credential isolation, least-privilege RBAC, admission controls, exposure risks, and production hardening | No | None | |
 | Changed | Renamed Java and Python CI checks and updated the cache action to a supported release | No | None | |
+| Changed | Removed OWASP Dependency-Check from Java verification after empty-key failures and unauthenticated NVD rate limiting; JUnit, SpotBugs, and PMD remain enabled | No | See [issue #6](https://github.com/andreysirak/garmin-ai-analytics/issues/6) for follow-up | |

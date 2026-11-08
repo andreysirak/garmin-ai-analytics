@@ -28,7 +28,6 @@
     <shade.plugin.version>3.6.2</shade.plugin.version>
     <spotbugs.plugin.version>4.10.5.0</spotbugs.plugin.version>
     <pmd.plugin.version>3.28.0</pmd.plugin.version>
-    <dependency-check.plugin.version>13.0.0</dependency-check.plugin.version>
   </properties>
 
   <dependencyManagement>
@@ -89,21 +88,6 @@
           <artifactId>maven-pmd-plugin</artifactId>
           <version>${pmd.plugin.version}</version>
         </plugin>
-        <plugin>
-          <groupId>org.owasp</groupId>
-          <artifactId>dependency-check-maven</artifactId>
-          <version>${dependency-check.plugin.version}</version>
-          <configuration>
-            <failBuildOnCVSS>7.0</failBuildOnCVSS>
-            <failOnError>true</failOnError>
-            <autoUpdate>true</autoUpdate>
-            <dataDirectory>${user.home}/.cache/owasp-dependency-check</dataDirectory>
-            <formats>
-              <format>HTML</format>
-              <format>JSON</format>
-            </formats>
-          </configuration>
-        </plugin>
       </plugins>
     </pluginManagement>
 
@@ -151,20 +135,6 @@
             <phase>verify</phase>
             <goals>
               <goal>check</goal>
-            </goals>
-          </execution>
-        </executions>
-      </plugin>
-      <plugin>
-        <groupId>org.owasp</groupId>
-        <artifactId>dependency-check-maven</artifactId>
-        <inherited>false</inherited>
-        <executions>
-          <execution>
-            <id>dependency-check-aggregate</id>
-            <phase>verify</phase>
-            <goals>
-              <goal>aggregate</goal>
             </goals>
           </execution>
         </executions>

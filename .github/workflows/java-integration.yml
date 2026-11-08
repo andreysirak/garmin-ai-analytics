@@ -22,23 +22,10 @@ jobs:
           distribution: temurin
           java-version: "25"
           cache: maven
-      - name: Cache OWASP Dependency-Check database
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/owasp-dependency-check
-          key: dependency-check-${{ runner.os }}-${{ hashFiles('garmin-integration/pom.xml') }}
-          restore-keys: |
-            dependency-check-${{ runner.os }}-
       - name: Validate Airflow DAG syntax
         run: python3 -m py_compile airflow/dags/garmin_daily_ingestion.py
       - name: Verify Java integration
-        env:
-          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
-        run: |
-          if [ -n "${NVD_API_KEY:-}" ]; then
-            export MAVEN_ARGS="-DnvdApiKey=${NVD_API_KEY}"
-          fi
-          mvn -B -ntp -f garmin-integration/pom.xml clean verify
+        run: mvn -B -ntp -f garmin-integration/pom.xml clean verify
       - name: Upload Java reports after failure
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -50,7 +37,6 @@ jobs:
             garmin-integration/**/target/site/spotbugs.html
             garmin-integration/**/target/spotbugsXml.xml
             garmin-integration/**/target/pmd.xml
-            garmin-integration/target/dependency-check-report.*
 
   python-verify:
     name: Garmin API Integration Python
