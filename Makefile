@@ -72,6 +72,14 @@ airflow-logs:
 	$(KUBECTL) -n $(NAMESPACE) logs -f --tail=200 airflow-scheduler-0 -c scheduler
 
 test-infra:
+	@echo "Waiting for kubernetes_hello DAG discovery..."
+	@found=0; for i in $$(seq 1 24); do \
+		if $(SCHEDULER_EXEC) airflow dags list -o json 2>/dev/null | \
+			python3 -c 'import json,sys; sys.exit(0 if any(d["dag_id"] == "kubernetes_hello" for d in json.load(sys.stdin)) else 1)' 2>/dev/null; then \
+			found=1; break; \
+		fi; \
+		sleep 5; \
+	done; [ "$$found" -eq 1 ] || { echo "Timed out waiting for DAG discovery"; exit 1; }
 	@$(SCHEDULER_EXEC) airflow dags unpause kubernetes_hello >/dev/null
 	@run_id=$$(python3 -c 'import uuid; print("smoke__" + uuid.uuid4().hex)'); \
 		$(SCHEDULER_EXEC) airflow dags trigger kubernetes_hello --run-id "$$run_id" >/dev/null || exit 1; \

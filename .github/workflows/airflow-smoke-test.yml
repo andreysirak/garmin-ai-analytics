@@ -1,0 +1,38 @@
+name: Airflow Smoke Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke-test:
+    name: Airflow smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: azure/setup-helm@b9e51907a09c216f16ebe8536097933489208112 # v4.3.0
+        with:
+          version: v4.0.4
+      - uses: azure/setup-kubectl@c0c8b32d33a5244f1e5947304550403b63930415 # v4
+        with:
+          version: v1.33.7
+      - name: Install kind
+        run: |
+          curl --fail --location --retry 3 -o kind-linux-amd64 https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-linux-amd64
+          echo "aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d  kind-linux-amd64" | sha256sum --check
+          sudo install -m 0755 kind-linux-amd64 /usr/local/bin/kind
+      - name: Create cluster
+        run: make cluster-create
+      - name: Deploy infrastructure
+        run: make infra-up
+      - name: Run DAG smoke test
+        run: make test-infra
+      - name: Show Kubernetes diagnostics
+        if: failure()
+        run: |
+          kubectl --context kind-garmin-ai-analytics get nodes -o wide || true
+          kubectl --context kind-garmin-ai-analytics get pods,jobs,pvc -A -o wide || true
+          kubectl --context kind-garmin-ai-analytics get events -A --field-selector type=Warning --sort-by=.lastTimestamp || true
