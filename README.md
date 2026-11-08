@@ -142,6 +142,79 @@ metadata and Kubernetes Secrets, but the Garmin archive remains in the project
 directory. `make infra-up` bootstraps the cluster again; provide
 `config/credentials.local.json` if the Garmin API-key Secret must be restored.
 
+#### Migrating an existing raw-data PVC
+
+The static `garmin-raw-data` PV/PVC uses `storageClassName` and `volumeName`
+fields that cannot be changed on an already-bound claim. If upgrading a cluster
+created before this project-local storage setup, back up and copy the old claim
+contents before replacing it. Do not delete the claim until the copy has been
+verified; its old PV may be reclaimed when the claim is deleted.
+
+Pause `garmin_daily_ingestion` and wait for its task Pods to finish. First make
+a host-side backup of any archive already in the project directory:
+
+```sh
+make prepare-garmin-raw-data
+tar -czf "data/raw/garmin-backup-$(date +%Y%m%d%H%M%S).tar.gz" \
+  -C data/raw/garmin .
+```
+
+Create a temporary read-only Pod mounting the old claim:
+
+```sh
+kubectl --context kind-garmin-ai-analytics apply -f - <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata:
+  name: garmin-archive-migration
+  namespace: airflow-jobs
+spec:
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    fsGroup: 10001
+  containers:
+    - name: copy-source
+      image: busybox:1.36
+      command: ["sh", "-c", "sleep 3600"]
+      volumeMounts:
+        - name: archive
+          mountPath: /source
+          readOnly: true
+  volumes:
+    - name: archive
+      persistentVolumeClaim:
+        claimName: garmin-raw-data
+EOF
+kubectl --context kind-garmin-ai-analytics -n airflow-jobs \
+  wait --for=condition=Ready pod/garmin-archive-migration --timeout=2m
+kubectl --context kind-garmin-ai-analytics cp -n airflow-jobs \
+  garmin-archive-migration:/source/. data/raw/garmin/
+kubectl --context kind-garmin-ai-analytics -n airflow-jobs \
+  delete pod garmin-archive-migration
+```
+
+Inspect `data/raw/garmin/` and confirm the copied files are present alongside
+the host-side backup before proceeding. Then delete the old claim and apply the
+new static PV/PVC; the files copied to the project directory are now the data
+the new PV exposes:
+
+```sh
+kubectl --context kind-garmin-ai-analytics -n airflow-jobs \
+  delete pvc garmin-raw-data
+kubectl --context kind-garmin-ai-analytics \
+  apply -k infrastructure/kubernetes/overlays/local
+kubectl --context kind-garmin-ai-analytics -n airflow-jobs \
+  wait --for=jsonpath='{.status.phase}'=Bound pvc/garmin-raw-data --timeout=2m
+make infra-up
+```
+
+This migration is only needed for a pre-existing claim whose storage class and
+volume name differ from the manifests. New clusters and clusters already using
+the static claim do not need it.
+
 ## Java ingestion jobs
 
 `garmin-integration/pom.xml` is the Maven parent and aggregator for:
