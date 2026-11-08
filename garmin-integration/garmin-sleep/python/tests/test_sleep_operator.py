@@ -1,5 +1,7 @@
 from unittest.mock import PropertyMock, patch
 
+import pytest
+
 from airflow.providers.cncf.kubernetes.hooks.kubernetes import KubernetesHook
 from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
 
@@ -16,7 +18,8 @@ def build_pod(operator: SleepIngestionOperator):
         return operator.build_pod_request_obj(context={})
 
 
-def test_sleep_operator_builds_standalone_job_pod() -> None:
+def test_sleep_operator_builds_standalone_job_pod(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GARMIN_RAW_DATA_GID", "20")
     operator = SleepIngestionOperator(task_id="sleep", date="2026-11-07")
 
     pod = build_pod(operator)
@@ -42,3 +45,4 @@ def test_sleep_operator_builds_standalone_job_pod() -> None:
     assert raw_mount.mount_path == "/data/raw/garmin"
     assert raw_mount.read_only is False
     assert container.security_context.run_as_user == 10001
+    assert pod.spec.security_context.supplemental_groups == [20]

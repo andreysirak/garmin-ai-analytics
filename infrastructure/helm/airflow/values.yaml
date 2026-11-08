@@ -12,6 +12,9 @@ useStandardNaming: true
 fernetKeySecretName: airflow-fernet-key
 apiSecretKeySecretName: airflow-api-secret-key
 jwtSecretName: airflow-jwt-secret
+extraEnv: |
+  - name: GARMIN_RAW_DATA_GID
+    value: {{ required "garminRawDataGid must be supplied by Makefile" .Values.garminRawDataGid | quote }}
 
 data:
   metadataSecretName: airflow-metadata-db

@@ -1,5 +1,6 @@
 CLUSTER := garmin-ai-analytics
 CONTEXT := kind-$(CLUSTER)
+GARMIN_RAW_DATA_GID := $(shell id -g)
 NAMESPACE := airflow
 JOBS_NAMESPACE := airflow-jobs
 AIRFLOW_CHART_VERSION := 1.22.0
@@ -11,7 +12,7 @@ SCHEDULER_EXEC := $(KUBECTL) -n $(NAMESPACE) exec airflow-scheduler-0 -c schedul
 JAVA_MAVEN_IMAGE := maven:3.9-eclipse-temurin-25
 AIRFLOW_URL := http://localhost:8080
 
-.PHONY: help cluster-create cluster-status cluster-delete infra-validate infra-up infra-down \
+.PHONY: help prepare-garmin-raw-data cluster-create cluster-status cluster-delete infra-validate infra-up infra-down \
         infra-status airflow-ui airflow-password airflow-logs test-infra java-verify \
         java-package-summary java-package-sleep docker-build docker-build-summary docker-build-sleep \
         kind-load-images airflow-image kind-load-airflow-image auth-image kind-load-auth-image \
@@ -19,6 +20,7 @@ AIRFLOW_URL := http://localhost:8080
 
 help:
 	@echo "Cluster and infrastructure:"
+	@echo "  make prepare-garmin-raw-data - Prepare archive directory permissions"
 	@echo "  make cluster-create         - Create the kind cluster"
 	@echo "  make cluster-status         - Show cluster and node status"
 	@echo "  make cluster-delete         - Delete the cluster and its in-cluster data"
@@ -43,8 +45,11 @@ help:
 	@echo "  make airflow-image          - Build the Airflow image with Garmin operator packages"
 	@echo "  make kind-load-airflow-image - Load the local Airflow image into kind"
 
-cluster-create:
+prepare-garmin-raw-data:
 	@mkdir -p data/raw/garmin
+	@find data/raw/garmin -type d -exec chgrp $(GARMIN_RAW_DATA_GID) {} + -exec chmod 2770 {} +
+
+cluster-create: prepare-garmin-raw-data
 	@kind get clusters | grep -qx $(CLUSTER) && echo "cluster $(CLUSTER) already exists" || \
 		kind create cluster --config infrastructure/kind/cluster.yaml
 
@@ -58,14 +63,16 @@ cluster-delete:
 infra-validate:
 	kubectl kustomize infrastructure/kubernetes/overlays/local > /dev/null
 	helm template airflow $(AIRFLOW_CHART) -n $(NAMESPACE) \
-		-f infrastructure/helm/airflow/values.yaml > /dev/null
+		-f infrastructure/helm/airflow/values.yaml \
+		--set-string garminRawDataGid=$(GARMIN_RAW_DATA_GID) > /dev/null
 	@echo "manifests are valid"
 
-infra-up: kind-load-images kind-load-airflow-image kind-load-auth-image
+infra-up: prepare-garmin-raw-data kind-load-images kind-load-airflow-image kind-load-auth-image
 	$(KUBECTL) apply -k infrastructure/kubernetes/overlays/local
 	KUBE_CONTEXT="$(CONTEXT)" ./infrastructure/scripts/bootstrap.sh
 	$(HELM) upgrade --install airflow $(AIRFLOW_CHART) \
-		--namespace $(NAMESPACE) -f infrastructure/helm/airflow/values.yaml --wait --timeout 10m
+		--namespace $(NAMESPACE) -f infrastructure/helm/airflow/values.yaml \
+		--set-string garminRawDataGid=$(GARMIN_RAW_DATA_GID) --wait --timeout 10m
 
 infra-down:
 	$(HELM) uninstall airflow --namespace $(NAMESPACE)

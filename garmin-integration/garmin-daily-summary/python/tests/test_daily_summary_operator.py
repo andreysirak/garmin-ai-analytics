@@ -17,7 +17,8 @@ def build_pod(operator: DailySummaryIngestionOperator):
         return operator.build_pod_request_obj(context={})
 
 
-def test_summary_operator_builds_standalone_job_pod() -> None:
+def test_summary_operator_builds_standalone_job_pod(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GARMIN_RAW_DATA_GID", "20")
     operator = DailySummaryIngestionOperator(
         task_id="summary",
         date="{{ ds }}",
@@ -48,6 +49,7 @@ def test_summary_operator_builds_standalone_job_pod() -> None:
     assert raw_mount.mount_path == "/data/raw/garmin"
     assert raw_mount.read_only is False
     assert pod.spec.containers[0].security_context.run_as_user == 10001
+    assert pod.spec.security_context.supplemental_groups == [20]
 
 
 @pytest.mark.parametrize(

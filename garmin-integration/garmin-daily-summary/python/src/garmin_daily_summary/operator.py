@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from datetime import timedelta
 from urllib.parse import urlsplit
 
@@ -15,6 +16,13 @@ TOKEN_SECRET = "garmin-access-token"
 TOKEN_SECRET_KEY = "access-token"
 TOKEN_MOUNT_PATH = "/var/run/garmin-token"
 RAW_DATA_CLAIM = "garmin-raw-data"
+
+
+def _raw_data_group_id() -> int:
+    value = os.getenv("GARMIN_RAW_DATA_GID")
+    if value is None or not value.isdecimal():
+        raise ValueError("GARMIN_RAW_DATA_GID must be a non-negative integer")
+    return int(value)
 
 
 class DailySummaryIngestionOperator(KubernetesPodOperator):
@@ -102,6 +110,7 @@ class DailySummaryIngestionOperator(KubernetesPodOperator):
             security_context=k8s.V1PodSecurityContext(
                 fs_group=10001,
                 fs_group_change_policy="OnRootMismatch",
+                supplemental_groups=[_raw_data_group_id()],
             ),
             container_security_context=k8s.V1SecurityContext(
                 allow_privilege_escalation=False,

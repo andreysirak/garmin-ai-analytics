@@ -127,7 +127,11 @@ UI. A manual run can specify a `date` in `YYYY-MM-DD` form; scheduled runs use
 the Airflow logical date. After the token task succeeds, summary and sleep
 tasks run independently. Their complete JSON files are written under
 `data/raw/garmin/` in the project directory. This local data directory is
-ignored by Git.
+ignored by Git. `make cluster-create` and `make infra-up` prepare the directory
+group permissions for ingestion Pods running as non-root UID/GID 10001. They
+use the host user's primary group for the archive directory and pass that group
+to the Pods as a supplementary group; `fsGroup` alone does not change
+`hostPath` ownership.
 
 `make infra-up` can be used again to apply changes to an existing local
 cluster. The kind node bind-mounts `data/raw/garmin/`; changes to this mount
