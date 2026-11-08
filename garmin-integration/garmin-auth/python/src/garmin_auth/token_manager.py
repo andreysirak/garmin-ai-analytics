@@ -246,7 +246,7 @@ def request_garmin_token(api_key: str, auth_url: str, timeout_seconds: int) -> B
         raise GarminAuthError(
             f"Garmin authentication failed (HTTP {exc.code})."
         ) from None
-    except (TimeoutError, URLError, OSError):
+    except (TimeoutError, URLError, OSError, ValueError):
         raise GarminAuthError("Garmin authentication request failed.") from None
 
     expires_at = _jwt_expiration(access_token)
