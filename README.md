@@ -39,6 +39,24 @@ streams logs to Airflow and deletes the Pod. Trigger it from the UI or `make tes
 The Makefile target unpauses the DAG before triggering it. DAG files are mounted from
 `airflow/dags` into the cluster, so they do not require an image rebuild.
 
+## CI
+The **Validate** workflow runs `make infra-validate` on every pull request targeting
+`main` and every push to `main`, without a cluster. Require only the
+**Validate infrastructure** status check in the `main` ruleset.
+
+The **Airflow Smoke Test** workflow is optional and runs only when manually requested.
+It creates a fresh kind cluster, deploys Airflow and waits for the smoke-test DAG run
+to succeed. It uses no Garmin credentials.
+
+To run either workflow manually, open **Actions > workflow name > Run workflow** and
+select the branch to test. Both workflow files must first be present on `main` for
+their manual run controls to become available.
+
+Also run the smoke test locally on a Mac when changing kind, Docker, storage or
+networking configuration: GitHub's Linux runner cannot verify Colima or Docker
+Desktop behavior, the macOS host DAG mount, or localhost port mappings. Follow the
+quick start above and check the UI and task logs locally.
+
 ## Troubleshooting
 - Port 8080 busy: check `docker ps --filter publish=8080` and stop the process using it.
   The previous `garmin` cluster may be the owner; `docker stop garmin-control-plane`
