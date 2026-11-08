@@ -52,6 +52,16 @@ def test_summary_operator_builds_standalone_job_pod(monkeypatch: pytest.MonkeyPa
     assert pod.spec.security_context.supplemental_groups == [20]
 
 
+def test_summary_operator_can_be_loaded_without_host_group_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("GARMIN_RAW_DATA_GID", raising=False)
+
+    operator = DailySummaryIngestionOperator(task_id="summary", date="2026-11-07")
+
+    assert operator.security_context.supplemental_groups == [10001]
+
+
 @pytest.mark.parametrize(
     "api_base_url",
     [

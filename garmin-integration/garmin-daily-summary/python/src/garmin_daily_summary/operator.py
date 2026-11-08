@@ -19,8 +19,8 @@ RAW_DATA_CLAIM = "garmin-raw-data"
 
 
 def _raw_data_group_id() -> int:
-    value = os.getenv("GARMIN_RAW_DATA_GID")
-    if value is None or not value.isdecimal():
+    value = os.getenv("GARMIN_RAW_DATA_GID", "10001")
+    if not value.isdecimal():
         raise ValueError("GARMIN_RAW_DATA_GID must be a non-negative integer")
     return int(value)
 
