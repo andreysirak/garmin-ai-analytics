@@ -5,15 +5,13 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 from airflow.sdk import DAG, Param
+from garmin_auth.operator import GarminAuthOperator
 from garmin_daily_summary.operator import DailySummaryIngestionOperator
 from garmin_sleep.operator import SleepIngestionOperator
-
 
 PROCESSING_DATE = (
     "{{ (dag_run.conf.get('date') if dag_run and dag_run.conf else params.date) or ds }}"
 )
-
-
 with DAG(
     dag_id="garmin_daily_ingestion",
     description="Ingest Garmin daily summary and sleep data into the raw-data PVC",
@@ -32,6 +30,9 @@ with DAG(
     max_active_runs=1,
     tags=["garmin", "ingestion", "kubernetes"],
 ) as dag:
+    ensure_garmin_token = GarminAuthOperator(
+        task_id="ensure_garmin_token",
+    )
     ingest_daily_summary = DailySummaryIngestionOperator(
         task_id="ingest_daily_summary",
         date=PROCESSING_DATE,
@@ -40,3 +41,4 @@ with DAG(
         task_id="ingest_sleep",
         date=PROCESSING_DATE,
     )
+    ensure_garmin_token >> [ingest_daily_summary, ingest_sleep]

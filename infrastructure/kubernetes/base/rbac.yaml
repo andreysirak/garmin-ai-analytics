@@ -29,3 +29,28 @@ subjects:
   - kind: ServiceAccount
     name: airflow-scheduler
     namespace: airflow
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: garmin-token-manager
+  namespace: airflow-jobs
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["garmin-access-token"]
+    verbs: ["get", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: garmin-token-manager
+  namespace: airflow-jobs
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: garmin-token-manager
+subjects:
+  - kind: ServiceAccount
+    name: garmin-auth
+    namespace: airflow-jobs

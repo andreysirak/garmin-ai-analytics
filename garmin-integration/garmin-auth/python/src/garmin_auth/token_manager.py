@@ -18,7 +18,6 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from kubernetes import client, config
 from kubernetes.client.exceptions import ApiException
 
-
 DEFAULT_AUTH_URL = (
     "https://personal.connectapi.garmin.com/"
     "personalapitoken-service/personal-api/personal-api-key/token"

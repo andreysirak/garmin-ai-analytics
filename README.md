@@ -1,124 +1,158 @@
 # Garmin AI Analytics
 
-Locally hosted Garmin data ingestion with standalone Java 25 jobs, Apache Airflow,
-and Kubernetes (kind). The Java jobs write the complete Garmin JSON response to the
-existing raw-data PVC; this MVP does not write to PostgreSQL.
+Locally hosted Garmin Personal API ingestion using standalone Java 25 jobs,
+Apache Airflow 3, and Kubernetes (kind). The jobs archive complete original
+JSON responses to the existing `garmin-raw-data` PVC; this MVP does not write
+to PostgreSQL.
 
-## Java modules
+## Java ingestion jobs
 
-`garmin-integration/` is a Maven multi-module build:
+`garmin-integration/pom.xml` is the Maven parent and aggregator for:
 
-| Module | Purpose |
+| Module | Responsibility |
 | --- | --- |
-| `garmin-common` | Environment configuration, API-key authentication, HTTP client, and atomic JSON writer |
-| `garmin-daily-summary` | `UserSummaryDailyIngestionJob` and daily summary response validation |
-| `garmin-sleep` | `SleepDailyIngestionJob` and daily sleep response validation |
+| `garmin-common/java` | Shared authenticated HTTP client and atomic raw JSON writer |
+| `garmin-daily-summary/java` | Standalone `UserSummaryDailyIngestionJob` |
+| `garmin-sleep/java` | Standalone `SleepDailyIngestionJob` |
 
-Build and run unit tests using Java 25:
+Both feature modules inherit the parent POM and depend on `garmin-common`.
+They produce independently executable shaded JARs. Build and verify with Java
+25:
 
 ```sh
 cd garmin-integration
 mvn clean verify
-mvn -pl garmin-daily-summary -am package
-mvn -pl garmin-sleep -am package
+mvn -pl garmin-daily-summary/java -am package
+mvn -pl garmin-sleep/java -am package
 ```
 
-The verification lifecycle runs JUnit 5, SpotBugs, PMD, and the aggregate OWASP
-Dependency-Check scan. The vulnerability scan updates its database and fails if
-the database cannot be updated. OWASP Dependency-Check requires an NVD API key
-for reliable updates; set `NVD_API_KEY` locally, or configure the GitHub Actions
-secret with that name. Java CI passes it to Maven without printing it. This key
-is separate from Garmin credentials.
+`verify` runs JUnit 5, SpotBugs, PMD, and the aggregate OWASP Dependency-Check
+scan. Dependency-Check fails if its vulnerability database cannot be updated
+and fails for CVSS 7.0 or higher. Set `NVD_API_KEY` locally, or configure the
+same GitHub Actions secret, for reliable NVD updates.
 
-After packaging, either job can be run with `--date YYYY-MM-DD`:
+The Java programs are independent of Airflow and Kubernetes. Each requires a
+token file containing an existing bearer token, supplied through
+`GARMIN_TOKEN_FILE`, and the same CLI arguments:
 
 ```sh
-java -jar garmin-integration/garmin-daily-summary/target/garmin-daily-summary.jar \
-  --date 2026-11-07
-java -jar garmin-integration/garmin-sleep/target/garmin-sleep.jar \
-  --date 2026-11-07
+export GARMIN_TOKEN_FILE="$HOME/.config/garmin/access-token"
+java -jar garmin-integration/garmin-daily-summary/java/target/garmin-daily-summary.jar \
+  --date 2026-11-07 \
+  --api-base-url https://personal.connectapi.garmin.com \
+  --output-dir ./data/raw/garmin
+java -jar garmin-integration/garmin-sleep/java/target/garmin-sleep.jar \
+  --date 2026-11-07 \
+  --api-base-url https://personal.connectapi.garmin.com \
+  --output-dir ./data/raw/garmin
 ```
 
-Jobs require `GARMIN_API_BASE_URL`, `GARMIN_API_KEY`, and
-`GARMIN_RAW_OUTPUT_DIR`. `GARMIN_AUTH_URL` and timeout/retry settings are also
-configurable; the Kubernetes ConfigMap supplies non-sensitive defaults.
-Credentials must be supplied through the local Kubernetes Secret described below.
-Never place credentials or real Garmin responses in Git.
+Both accept `--help`. They validate the date and response, make one API
+request, and write the complete unmodified response JSON to
+`<output-dir>/daily-summary/YYYY-MM-DD.json` or
+`<output-dir>/sleep/YYYY-MM-DD.json`. Reruns atomically replace that
+date-specific file. Java never receives the long-lived API key and does not
+perform token renewal.
 
-## Container images
+## Python packages and verification
 
-Build both standalone runtime images:
+Feature-specific Airflow operators and the independent token manager are
+packaged under:
+
+- `garmin-daily-summary/python/` — `DailySummaryIngestionOperator`
+- `garmin-sleep/python/` — `SleepIngestionOperator`
+- `garmin-auth/python/` — `GarminAuthOperator` and the `garmin-auth` CLI
+
+For combined local development and verification, create a Python 3.12 virtual
+environment from the repository root and install the projects with Airflow's
+constraints:
 
 ```sh
-make docker-build
+python3.12 -m venv .venv
+source .venv/bin/activate
+constraints="https://raw.githubusercontent.com/apache/airflow/constraints-3.3.1/constraints-3.12.txt"
+python -m pip install --constraint "$constraints" \
+  -e "garmin-integration/garmin-auth/python[airflow,dev]" \
+  -e "garmin-integration/garmin-daily-summary/python[dev]" \
+  -e "garmin-integration/garmin-sleep/python[dev]"
+ruff check airflow/dags airflow/tests \
+  garmin-integration/garmin-auth/python \
+  garmin-integration/garmin-daily-summary/python \
+  garmin-integration/garmin-sleep/python
+pytest -q airflow/tests \
+  garmin-integration/garmin-auth/python/tests \
+  garmin-integration/garmin-daily-summary/python/tests \
+  garmin-integration/garmin-sleep/python/tests
 ```
 
-Load the local images into the existing kind cluster:
+Tests use synthetic tokens/data and local or mocked HTTP and Kubernetes
+interactions. They do not require Garmin credentials or a Kubernetes cluster.
+The Airflow custom image copies all three operator packages into the DAG
+processor's Python path.
 
-```sh
-make kind-load-images
+## Authentication and orchestration
+
+The auth CLI exchanges the long-lived Garmin Personal API key for a bearer
+token using Garmin's Personal API token endpoint. It reads the key from
+`GARMIN_API_KEY`, checks the `garmin-access-token` Kubernetes Secret, and
+reuses the cached token while more than 30 minutes remain. Otherwise it
+requests a new token, reads its JWT `exp`, and updates the Secret with the
+token and expiration. No token is sent through Airflow XCom, command-line
+arguments, or logs.
+
+Airflow DAG `garmin_daily_ingestion` runs the following task graph:
+
+```text
+ensure_garmin_token
+       ├── ingest_daily_summary
+       └── ingest_sleep
 ```
 
-The images use a Java 25 runtime and contain only their executable shaded JAR.
-`make docker-build-summary` and `make docker-build-sleep` build them separately.
+The reusable `GarminAuthOperator` runs the auth CLI in its own Pod using the
+`garmin-auth` ServiceAccount. The API key is injected from
+`garmin-api-credentials`; the auth ServiceAccount can only get and update the
+named `garmin-access-token` Secret. The bootstrap process creates this token
+Secret before Airflow starts. The Java Pods use `airflow-job`, which has no
+Secret write permissions, and mount the cached token read-only.
+
+Scheduled runs use the Airflow logical date. Manual runs accept a `date`
+parameter in `YYYY-MM-DD` form; backfills use the logical date of each
+historical run. Airflow retries task failures, and the Java tasks run in
+parallel only after token validation succeeds.
 
 ## Local Kubernetes and Airflow
 
-Prerequisites: Docker (Colima or Docker Desktop), kind, Helm, kubectl, Python 3,
-and OpenSSL. Run commands from the repository root.
+Prerequisites: Docker (Colima or Docker Desktop), kind, Helm, kubectl,
+Python 3.12, and OpenSSL. Run from the repository root:
 
 ```sh
 make cluster-create
 make infra-validate
-make infra-up
-make docker-build
-make kind-load-images
+```
+
+Set `GARMIN_API_KEY` in your local shell using a secret manager or hidden
+terminal prompt, then run `make infra-up`. The target builds and loads the
+Airflow, auth, and ingestion images, applies Kubernetes resources, bootstraps
+Secrets, and installs the Airflow chart. Unset the key afterward. Do not put
+credentials in `.env`, manifests, source control, or support logs.
+
+```sh
+unset GARMIN_API_KEY
 make airflow-ui
 ```
 
-Kustomize provisions the `airflow-jobs` namespace, `airflow-job` ServiceAccount,
-Airflow Pod-launcher RBAC, ConfigMap, and `garmin-raw-data` PVC. The Airflow Helm
-chart mounts the DAG directory from the host. Both ingestion tasks use the same
-single-node kind cluster and PVC.
+If `GARMIN_API_KEY` is absent during bootstrap, the cluster can still be
+provisioned, but the auth task will fail until the `garmin-api-credentials`
+Secret is created. Do not recreate the kind cluster or remove persistent
+volumes to troubleshoot an ingestion failure.
 
-Set the Garmin API key only in your local shell before `make infra-up`; the
-bootstrap script creates `garmin-api-credentials` in `airflow-jobs` if the
-variable is present. For example, set `GARMIN_API_KEY` from your local secret
-manager or a hidden terminal prompt, then run `make infra-up` and unset it.
-Do not put the value in `.env`, a manifest, a shell command committed to Git, or
-a support log. If no key is present, infrastructure can still be deployed, but
-Garmin job Pods will fail until the Secret is created.
+## CI
 
-The non-sensitive Garmin API host and authentication endpoint are configured in
-`infrastructure/kubernetes/base/garmin-config.yaml`. They follow the existing
-integration's API-key-to-bearer-token assumptions and should be confirmed or
-adjusted to match the Garmin API credentials provisioned for your environment.
+`Java Integration CI` retains the `java-verify` job and **Java integration
+checks** status check, and also validates Python with Ruff and pytest.
+`Validate` renders Kustomize and Helm manifests without a cluster. The optional
+manual **Airflow Smoke Test** remains separate. CI does not use real Garmin
+credentials or personal Garmin data.
 
-Airflow DAG `garmin_daily_ingestion` launches independent daily summary and sleep
-Pods. Scheduled runs use the Airflow logical date; manual runs accept a `date`
-parameter, and historical backfills use the backfill run's logical date. The two
-tasks receive the same resolved date. To run the optional no-credential KPO smoke
-test, use `make test-infra`. DAG unit checks are available with `make dags-test`.
-For a manual run, trigger `garmin_daily_ingestion` in the Airflow UI and set its
-`date` parameter to `YYYY-MM-DD`; create historical runs with Airflow's backfill
-feature, which supplies the logical processing date to both tasks.
-
-The images write deterministic files:
-
-```text
-/data/raw/garmin/daily-summary/YYYY-MM-DD.json
-/data/raw/garmin/sleep/YYYY-MM-DD.json
-```
-
-Each rerun atomically replaces that resource/date file, so updated Garmin data
-does not create duplicate files.
-
-## Repository checks
-
-- `Validate infrastructure` validates Kustomize and Helm without a cluster.
-- `Airflow Smoke Test` is an optional manual kind/Airflow integration test.
-- `Java Integration CI` runs the Java 25 Maven verification lifecycle on pull
-  requests to `main`, pushes to `main`, and manual dispatch. It does not need
-  Garmin credentials or create a Kubernetes cluster.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for Java style and verification details.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development and verification
+conventions.

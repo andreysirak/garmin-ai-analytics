@@ -8,7 +8,6 @@ from urllib.parse import urlsplit
 from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
 from kubernetes.client import models as k8s
 
-
 DEFAULT_IMAGE = "garmin-sleep:local"
 DEFAULT_API_BASE_URL = "https://personal.connectapi.garmin.com"
 DEFAULT_OUTPUT_DIR = "/data/raw/garmin"

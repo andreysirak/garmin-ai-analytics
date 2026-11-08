@@ -54,4 +54,6 @@ if [[ -n "${GARMIN_API_KEY:-}" ]]; then
 else
   echo "GARMIN_API_KEY is unset; skipping Garmin credentials Secret"
 fi
+create_if_missing "$JOBS_NAMESPACE" garmin-access-token \
+  --from-literal=expires-at=0
 unset DB_PASSWORD ADMIN_PASSWORD GARMIN_API_KEY

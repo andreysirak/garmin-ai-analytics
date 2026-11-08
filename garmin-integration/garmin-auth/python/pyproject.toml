@@ -8,7 +8,17 @@ version = "0.1.0"
 description = "Standalone Garmin Personal API token manager"
 requires-python = ">=3.11"
 dependencies = [
-  "kubernetes>=31,<36",
+  "kubernetes>=31,<37",
+]
+
+[project.optional-dependencies]
+airflow = [
+  "apache-airflow>=3.3,<4",
+  "apache-airflow-providers-cncf-kubernetes>=10,<11",
+]
+dev = [
+  "pytest>=8,<9",
+  "ruff>=0.11,<1",
 ]
 
 [project.scripts]
@@ -16,3 +26,13 @@ garmin-auth = "garmin_auth.token_manager:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
