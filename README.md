@@ -150,7 +150,8 @@ Dependency vulnerability scanning is currently excluded while the NVD integratio
 
 - [Architecture and security](docs/architecture.md)
 - [Kubernetes execution decision](docs/decisions/0001-kubernetes-execution.md)
-- [Contributing and development checks](CONTRIBUTING.md)
+- [Contributing, Story/Task workflow and PR review standards](CONTRIBUTING.md)
+- [Garmin API integration retrospective](docs/retrospectives/0001-garmin-api-integration.md)
 - [Changelog](CHANGELOG.md)
 
 ## Project philosophy
