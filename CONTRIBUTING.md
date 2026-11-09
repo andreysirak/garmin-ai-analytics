@@ -61,16 +61,34 @@ description or a PR comment, for example:
 
 This is a transparency and engineering-quality note, not a claim that AI-generated code is independently trustworthy. Do not include secrets, private data, or sensitive prompts.
 
-**Approval policy:** AI agents must not commit, push, create branches or PRs,
-merge, or modify repository settings without explicit authorization from the
-human operating the tool. Work in a contributor's own fork does not require
-project-owner approval, but changes to this upstream repository remain subject
-to the project owner's approval. Never merge upstream changes without explicit
-project-owner approval.
+### AI assistant environments and authorization
+
+There are two different workflows, and their permissions should not be conflated:
+
+- **Local IntelliJ IDEA / IDE coding agent:** may inspect the repository, edit
+  local working-tree files, and run agreed local checks as part of an authorized
+  coding task. The project owner reviews the diff and ordinarily performs
+  local commits and pushes manually. Preparing code or tests does **not**
+  automatically authorize a local commit, push, merge, or branch-history rewrite.
+- **Browser-connected ChatGPT / Codex GitHub integration:** has the ability to
+  change the **remote GitHub repository** directly. Every remote write action
+  (commits, pushes, branch creation/deletion, issues, PR lifecycle, comments,
+  reviews, or repository settings) requires explicit user instructions for the
+  specific action and target. If permission is absent or ambiguous, **ask first**.
+
+The reported incidents involving many small generated commits, unsolicited PR
+creation and history manipulation occurred in the **browser GitHub integration**
+workflow. They are not attributed to the IDE agent. These safeguards do not
+prevent routine local file edits or running tests in the IDE.
+
+All contributors retain responsibility for reviewing generated changes, securing
+credentials and personal data, and authorizing Git history operations. Work in
+a contributor's own fork is managed by that contributor; upstream writes and
+merges require the appropriate repository authorization.
 
 ### AI-assisted Git commits and history safety
 
-AI coding assistants must prepare **coherent, reviewable changes**, not generate a
+AI coding assistants in either environment must prepare **coherent, reviewable changes**, not generate a
 separate commit for every file, tool call, or small edit. Prefer completing the
 requested change, reviewing the combined diff, and making **one meaningful commit**
 when a commit has been explicitly authorized. Multiple commits are appropriate only
@@ -78,7 +96,7 @@ when they represent intentional, independently understandable steps agreed with
 the human. The owner controls when changes are committed; AI tools must not
 automatically commit after each edit.
 
-**Commit, squash, and force-push are three distinct actions with separate consent:**
+**Commit, squash, and force-push are three distinct actions with separate consent.** In the IDE, the owner normally performs Git operations; for a remote GitHub agent, permission must specify each requested write:
 
 - **Normal commit/push:** only when the human explicitly authorizes it, and only
   within the agreed branch and scope. Prefer non-force, fast-forward pushes.
@@ -106,7 +124,7 @@ pushes in the PR description or handoff.
 
 ### Pull request operations require explicit authorization
 
-**No autonomous PR management.** AI assistants must not perform **any pull
+**No autonomous remote PR management.** Agents with GitHub write access must not perform **any pull
 request operation** unless the human explicitly requests that specific action
 on the intended PR. This includes opening or closing a PR, reopening it,
 marking it draft or ready for review, merging or enabling auto-merge,
@@ -127,35 +145,42 @@ Do not infer permission from prior approvals, normal project workflows, or an
 assumption that a cleanup action is helpful. Read-only inspection and
 proposing a plan are permitted without modifying GitHub state.
 
-### Suggested AI coding assistant prompt (optional)
+### Suggested AI coding assistant prompts (optional)
 
-You may copy the following into any coding assistant. It is guidance, not a
-requirement; the PR disclosure and human review rules above still apply.
+Both variants require human code review, safe synthetic fixtures, and honest
+verification reporting. Choose the one for the actual environment.
+
+**Local IntelliJ IDEA coding agent:**
 
 ```text
-You are contributing to Garmin AI Analytics, an open-source data engineering project.
-Read README.md, CONTRIBUTING.md, the relevant Issue and architecture documentation.
-Inspect existing code before suggesting changes; follow current conventions.
-Keep work focused on the Issue and discuss substantial design changes first.
-Prefer simple, readable, testable changes over unnecessary abstractions.
-Respect the Java/Python/Airflow/Kubernetes boundaries and data integrity.
-Use synthetic fixtures only; never expose Garmin data, credentials or secrets.
-Describe assumptions, design decisions, risks and relevant verification steps.
-Do not commit, push, open PRs, merge or modify settings without explicit
-authorization from the human operating this tool.
-Do not create many tiny AI-generated commits; group a coherent reviewed change
-into one commit when explicitly authorized.
-Never squash, amend, rebase or otherwise rewrite commit history unless the human
-explicitly requests that specific operation.
-Never force-push without separate explicit permission for that force-push;
-permission to squash does not grant permission to force-push, or vice versa.
-Prefer non-force pushes. Never merge without explicit project-owner approval.
-Never open, close, reopen, retarget, merge, change draft status, or otherwise
-manage a PR without a separate explicit instruction for the specific PR action.
-Updating code in an existing PR does not authorize PR lifecycle changes,
-other PRs, reviewers, labels, comments, or unrelated metadata.
-If the permission, PR target, or intended action is unclear, ask first.
-Prepare the changes for human review; the contributor owns the final result.
+You are assisting with Garmin AI Analytics in a local IDE.
+Read README.md, CONTRIBUTING.md, the relevant issue, and architecture docs.
+Inspect the current working tree and git status before changing files.
+Edit local code and tests within the agreed scope; prefer simple solutions.
+Use only synthetic Garmin data. Never disclose personal data or credentials.
+Run relevant local checks and summarize diff, results, and remaining risks.
+The owner ordinarily reviews and performs local commits and pushes.
+Do not commit, push, change PRs or history, force-push, or merge unless explicitly asked.
+Local file editing and test execution do not require separate remote GitHub approval.
+```
+
+**Browser-connected GitHub/Codex agent with remote write access:**
+
+```text
+You are assisting with Garmin AI Analytics using a remote GitHub integration.
+Read README.md, CONTRIBUTING.md, relevant issues, and architecture docs.
+Inspect current repository state before proposing changes.
+Prefer one coherent reviewed commit over numerous AI-generated tiny commits.
+Never commit, push, create/delete remote branches, issues or PRs, edit PR
+metadata, comment, review, close/reopen, merge or change settings unless the
+human explicitly requests the specific action on the intended target.
+A request to edit code does not authorize PR creation or other GitHub writes.
+Never squash/rebase/amend or otherwise rewrite history without an explicit request.
+Never force-push without separate explicit permission for that force-push.
+Never merge without explicit project-owner approval.
+If scope, target, or authorization is ambiguous, ask before acting.
+Use synthetic fixtures; do not expose Garmin responses, tokens or personal data.
+Report exactly what changed and what verification was actually performed.
 ```
 
 See [Retrospective 001 — Garmin API Integration](docs/retrospectives/0001-garmin-api-integration.md) for the lessons behind this workflow.
