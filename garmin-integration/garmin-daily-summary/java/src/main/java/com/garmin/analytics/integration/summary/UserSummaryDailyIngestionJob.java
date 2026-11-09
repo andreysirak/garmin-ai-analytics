@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.garmin.analytics.integration.common.GarminClient;
 import com.garmin.analytics.integration.common.JsonFileWriter;
+import com.garmin.analytics.integration.common.JsonFailureDiagnostics;
 import com.garmin.analytics.integration.summary.response.DailySummaryResponse;
 import java.io.IOException;
 import java.net.URI;
@@ -62,7 +63,7 @@ public final class UserSummaryDailyIngestionJob {
       Thread.currentThread().interrupt();
       fail("Daily summary ingestion was interrupted");
     } catch (JsonProcessingException exception) {
-      fail("Garmin daily summary response could not be mapped to the expected JSON structure");
+      fail("Garmin daily summary response JSON error: " + JsonFailureDiagnostics.describe(exception));
     } catch (IOException | IllegalArgumentException exception) {
       fail("Daily summary ingestion failed: " + exception.getMessage());
     }

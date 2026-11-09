@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.garmin.analytics.integration.common.GarminClient;
 import com.garmin.analytics.integration.common.JsonFileWriter;
+import com.garmin.analytics.integration.common.JsonFailureDiagnostics;
 import com.garmin.analytics.integration.sleep.response.SleepResponse;
 import java.io.IOException;
 import java.net.URI;
@@ -74,7 +75,7 @@ public final class SleepDailyIngestionJob {
       Thread.currentThread().interrupt();
       fail("Sleep ingestion was interrupted");
     } catch (JsonProcessingException exception) {
-      fail("Garmin sleep response could not be mapped to the expected JSON structure");
+      fail("Garmin sleep response JSON error: " + JsonFailureDiagnostics.describe(exception));
     } catch (IOException | IllegalArgumentException exception) {
       fail("Sleep ingestion failed: " + exception.getMessage());
     }

@@ -15,7 +15,9 @@ AIRFLOW_URL := http://localhost:8080
 .PHONY: help prepare-garmin-raw-data cluster-create cluster-status cluster-delete infra-validate infra-up airflow-operator-rollout infra-down \
         infra-status airflow-ui airflow-password airflow-logs test-infra java-verify \
         java-package-summary java-package-sleep docker-build docker-build-summary docker-build-sleep \
-        kind-load-images airflow-image kind-load-airflow-image auth-image kind-load-auth-image \
+        kind-load-images kind-load-ingestion-java-images \
+        kind-load-ingestion-java-summary-image kind-load-ingestion-java-sleep-image \
+        airflow-image kind-load-airflow-image auth-image kind-load-auth-image \
         auth-policy-verify
 
 help:
@@ -33,7 +35,10 @@ help:
 	@echo "  make java-package-summary  - Package daily summary and common modules"
 	@echo "  make java-package-sleep    - Package sleep and common modules"
 	@echo "  make docker-build           - Build both ingestion images"
-	@echo "  make kind-load-images       - Load both local images into kind"
+	@echo "  make kind-load-ingestion-java-summary-image - Build and load Java summary image into kind"
+	@echo "  make kind-load-ingestion-java-sleep-image   - Build and load Java sleep image into kind"
+	@echo "  make kind-load-ingestion-java-images       - Build and load both Java ingestion images"
+	@echo "  make kind-load-images                      - Backward-compatible alias for both Java images"
 	@echo "  make auth-image             - Build the Garmin token-manager image"
 	@echo "  make kind-load-auth-image   - Load the Garmin token-manager image into kind"
 	@echo "  make auth-policy-verify     - Verify auth RBAC and Pod admission against the live cluster"
@@ -67,7 +72,7 @@ infra-validate:
 		--set-string garminRawDataGid=$(GARMIN_RAW_DATA_GID) > /dev/null
 	@echo "manifests are valid"
 
-infra-up: prepare-garmin-raw-data kind-load-images kind-load-airflow-image kind-load-auth-image
+infra-up: prepare-garmin-raw-data kind-load-ingestion-java-images kind-load-airflow-image kind-load-auth-image
 	$(KUBECTL) apply -k infrastructure/kubernetes/overlays/local
 	KUBE_CONTEXT="$(CONTEXT)" ./infrastructure/scripts/bootstrap.sh
 	$(HELM) upgrade --install airflow $(AIRFLOW_CHART) \
@@ -142,9 +147,16 @@ docker-build-sleep:
 	docker build -f garmin-integration/garmin-sleep/Dockerfile \
 		-t garmin-sleep:local .
 
-kind-load-images: docker-build
+kind-load-ingestion-java-summary-image: docker-build-summary
 	kind load docker-image garmin-daily-summary:local --name $(CLUSTER)
+
+kind-load-ingestion-java-sleep-image: docker-build-sleep
 	kind load docker-image garmin-sleep:local --name $(CLUSTER)
+
+kind-load-ingestion-java-images: kind-load-ingestion-java-summary-image kind-load-ingestion-java-sleep-image
+
+# Preserve the existing documented target for backwards compatibility.
+kind-load-images: kind-load-ingestion-java-images
 
 airflow-image:
 	docker build -f airflow/Dockerfile -t garmin-airflow:local .
