@@ -1,5 +1,7 @@
 # Architecture
 
+**Environment:** This is a local development deployment running on the developer's Mac, not a production-grade or always-on service. See [Kubernetes execution decision](decisions/0001-kubernetes-execution.md) for why local kind was chosen over managed cloud services and what a GCP Cloud Composer migration would require.
+
 ```
 kind cluster "garmin-ai-analytics"
 ├── namespace airflow
