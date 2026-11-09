@@ -43,6 +43,8 @@ The Java ingestion code has no Airflow dependency, so it can be run and tested i
 
 See [Architecture](docs/architecture.md) for component details, storage, and security boundaries.
 
+**Why local Kubernetes instead of cloud?** Airflow is the primary orchestrator; kind runs it on a Mac during early development to avoid recurring managed-cloud costs and gain hands-on Kubernetes experience. **Cloud portability guides development from the start:** independent containers, Python DAGs and replaceable storage/configuration boundaries are preferred to local-machine assumptions. **GCP Cloud Composer and managed GCP services** are the leading migration target, although storage, IAM, secrets and execution settings will still require adaptation. See [Kubernetes vs cloud decision](docs/decisions/0001-kubernetes-execution.md) for trade-offs and migration considerations.
+
 ## Technology stack
 
 | Layer | Technologies |
