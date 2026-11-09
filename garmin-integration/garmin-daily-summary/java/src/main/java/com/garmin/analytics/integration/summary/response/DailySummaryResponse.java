@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import com.garmin.analytics.integration.common.json.UtcInstantDeserializer;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 
 /** Garmin Personal API daily user summary response. */
@@ -29,10 +30,10 @@ public record DailySummaryResponse(
     Long dailyPushesGoal,
     Double totalPushDistance,
     Long totalPushes,
-    @JsonDeserialize(using = UtcInstantDeserializer.class) Instant wellnessStartTimeGmt,
-    Instant wellnessStartTimeLocal,
-    Instant wellnessEndTimeGmt,
-    Instant wellnessEndTimeLocal,
+//    @JsonDeserialize(using = UtcInstantDeserializer.class) Instant wellnessStartTimeGmt,
+    LocalDateTime wellnessStartTimeLocal,
+    LocalDateTime wellnessEndTimeGmt,
+    LocalDateTime wellnessEndTimeLocal,
     Long durationInMilliseconds,
     String wellnessDescription,
     Long highlyActiveSeconds,
@@ -75,7 +76,7 @@ public record DailySummaryResponse(
     String stressQualifier,
     Long measurableAwakeDuration,
     Long measurableAsleepDuration,
-    Instant lastSyncTimestampGMT,
+    LocalDateTime lastSyncTimestampGMT,
     Integer minAvgHeartRate,
     Integer maxAvgHeartRate,
     Integer bodyBatteryChargedValue,
@@ -90,8 +91,8 @@ public record DailySummaryResponse(
     Double averageSpo2,
     Double lowestSpo2,
     Double latestSpo2,
-    Instant latestSpo2ReadingTimeGmt,
-    Instant latestSpo2ReadingTimeLocal,
+    LocalDateTime latestSpo2ReadingTimeGmt,
+    LocalDateTime latestSpo2ReadingTimeLocal,
     Double averageMonitoringEnvironmentAltitude,
     BodyBatteryDynamicFeedbackEvent bodyBatteryDynamicFeedbackEvent,
     BodyBatteryDynamicFeedbackEvent endOfDayBodyBatteryDynamicFeedbackEvent,
@@ -104,5 +105,5 @@ public record DailySummaryResponse(
     Double highestRespirationValue,
     Double lowestRespirationValue,
     Double latestRespirationValue,
-    Instant latestRespirationTimeGMT,
+    LocalDateTime latestRespirationTimeGMT,
     Integer respirationAlgorithmVersion) {}
