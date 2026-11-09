@@ -7,6 +7,19 @@
 - Keep changes focused; do not add database storage, additional Garmin endpoints,
   or changes to repository rulesets without approval.
 
+## Your first contribution
+
+Contributions are welcome, whether you want to fix a bug, improve tests or documentation, or propose a feature. You **do not need an invitation or collaborator access** to contribute through a fork and pull request.
+
+1. Browse [open issues](https://github.com/andreysirak/garmin-ai-analytics/issues) for a focused task, or open an issue to suggest an improvement. If you're new to the project, look for `good first issue` when available; not every issue is ready for external contribution.
+2. Comment on an issue to discuss scope before investing time, especially for architecture, infrastructure, API, or data-model changes. You do not need an assignment to propose a change.
+3. **Fork** the repository into your GitHub account, create a branch from `main` in your fork, and implement one focused change. See [Quick start](README.md#quick-start) for the local setup.
+4. Use **synthetic fixtures only**: never include personal Garmin responses, API keys, bearer tokens, local credentials, or other secrets in code, tests, logs, issues, or PRs.
+5. Run the relevant Java, Python, or infrastructure checks described below. You don't need a running Garmin account or real personal data to submit a contribution.
+6. Open a pull request **from your fork to this repository's `main`**, link the issue (for example, `Closes #123` when appropriate), describe the change and verification, and respond to review feedback. Include the AI-assisted development note below if you used AI tools.
+
+The project owner reviews contributions and decides whether to merge them. A PR is a proposal, not a guarantee of acceptance. Please keep changes small and discuss substantial design changes first. There is no need to request direct write access.
+
 ## Planning and delivery workflow
 
 Use **GitHub Projects** to track work through **Backlog → Ready → In Progress → In Review → Done**.
@@ -28,7 +41,17 @@ Keep PRs **focused on one independently reviewable outcome**. A PR description s
 
 The author must understand the code, its role in the architecture, and any design patterns or abstractions used. Review for correctness, readability, security, duplication, appropriate complexity, and maintainability. Generated code is **not automatically review-ready**. Refactor when necessary before requesting review.
 
-All AI-assisted development tools are permitted. For every AI-assisted PR, add an **AI-assisted development note** to the PR description or a PR comment, for example:
+### AI-assisted contributions
+
+AI-assisted contributions are welcome, whether you use GitHub Copilot, ChatGPT,
+Cursor, or another tool. You remain responsible for understanding, reviewing,
+and validating everything you submit. Review generated code for correctness,
+security, unnecessary complexity, and architectural fit; do not submit it blindly.
+Use synthetic data only, and never share credentials, tokens, or personal Garmin
+data with AI tools. State any unverified assumptions or incomplete tests.
+
+For every AI-assisted PR, add an **AI-assisted development note** to the PR
+description or a PR comment, for example:
 
 > **AI-assisted development note**
 > - **Tools used:** [tools and what they assisted with]
@@ -38,7 +61,31 @@ All AI-assisted development tools are permitted. For every AI-assisted PR, add a
 
 This is a transparency and engineering-quality note, not a claim that AI-generated code is independently trustworthy. Do not include secrets, private data, or sensitive prompts.
 
-**Approval policy:** AI agents may propose issues, branches, changes, commits, pushes, and PRs, but must not perform repository mutations without the project owner's explicit authorization. Do not merge without explicit approval.
+**Approval policy:** AI agents must not commit, push, create branches or PRs,
+merge, or modify repository settings without explicit authorization from the
+human operating the tool. Work in a contributor's own fork does not require
+project-owner approval, but changes to this upstream repository remain subject
+to the project owner's approval. Never merge upstream changes without explicit
+project-owner approval.
+
+### Suggested AI coding assistant prompt (optional)
+
+You may copy the following into any coding assistant. It is guidance, not a
+requirement; the PR disclosure and human review rules above still apply.
+
+```text
+You are contributing to Garmin AI Analytics, an open-source data engineering project.
+Read README.md, CONTRIBUTING.md, the relevant Issue and architecture documentation.
+Inspect existing code before suggesting changes; follow current conventions.
+Keep work focused on the Issue and discuss substantial design changes first.
+Prefer simple, readable, testable changes over unnecessary abstractions.
+Respect the Java/Python/Airflow/Kubernetes boundaries and data integrity.
+Use synthetic fixtures only; never expose Garmin data, credentials or secrets.
+Describe assumptions, design decisions, risks and relevant verification steps.
+Do not commit, push, open PRs, merge or modify settings without explicit
+authorization from the human operating this tool.
+Prepare the changes for human review; the contributor owns the final result.
+```
 
 See [Retrospective 001 — Garmin API Integration](docs/retrospectives/0001-garmin-api-integration.md) for the lessons behind this workflow.
 

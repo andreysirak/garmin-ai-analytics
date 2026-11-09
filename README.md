@@ -148,6 +148,10 @@ Dependency vulnerability scanning is currently excluded while the NVD integratio
 - [ ] Sleep/activity statistics and correlations
 - [ ] AI-generated daily summaries and recommendations
 
+## Contributions welcome
+
+Interested in Java, Python, Airflow, Kubernetes, or data engineering? Contributions are welcome, from focused bug fixes and tests to documentation improvements. Explore the [open issues](https://github.com/andreysirak/garmin-ai-analytics/issues), propose an improvement, or submit a pull request. No invitation is needed—see [CONTRIBUTING.md](CONTRIBUTING.md) for a friendly first-contribution guide and review expectations.
+
 ## Documentation
 
 - [Architecture and security](docs/architecture.md)
