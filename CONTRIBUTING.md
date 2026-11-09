@@ -68,6 +68,42 @@ project-owner approval, but changes to this upstream repository remain subject
 to the project owner's approval. Never merge upstream changes without explicit
 project-owner approval.
 
+### AI-assisted Git commits and history safety
+
+AI coding assistants must prepare **coherent, reviewable changes**, not generate a
+separate commit for every file, tool call, or small edit. Prefer completing the
+requested change, reviewing the combined diff, and making **one meaningful commit**
+when a commit has been explicitly authorized. Multiple commits are appropriate only
+when they represent intentional, independently understandable steps agreed with
+the human. The owner controls when changes are committed; AI tools must not
+automatically commit after each edit.
+
+**Commit, squash, and force-push are three distinct actions with separate consent:**
+
+- **Normal commit/push:** only when the human explicitly authorizes it, and only
+  within the agreed branch and scope. Prefer non-force, fast-forward pushes.
+- **Squash or rebase:** rewriting commit history is **not automatic**. Never
+  squash, amend, rebase, reset published history, or recreate existing commits
+  merely to make the PR look cleaner. Do so only after an **explicit request
+  to perform that specific history change**. A request to update a PR or reduce
+  future commit noise does not authorize rewriting existing commits.
+- **Force-push:** **never force-push without the human's explicit permission
+  for that push**, even if a squash/rebase was requested. Approval to squash
+  does not implicitly approve force-push, and approval to force-push does not
+  implicitly approve squash. Explain that collaborators may need to
+  resynchronize local branches before asking for approval. When approved,
+  prefer `--force-with-lease` over `--force` and verify the expected
+  remote head; neither option substitutes for permission.
+- **No implicit merge:** opening or updating a PR, obtaining green checks, or
+  receiving permission for a commit, squash, or force-push never authorizes
+  merging. The project owner must explicitly approve any merge.
+
+When a request can be completed without rewriting history, choose the
+non-destructive option. If required permission is missing, stop before the
+destructive operation and request approval, without blocking unrelated
+non-destructive changes. Clearly report any commits, history rewrites, and
+pushes in the PR description or handoff.
+
 ### Suggested AI coding assistant prompt (optional)
 
 You may copy the following into any coding assistant. It is guidance, not a
@@ -84,6 +120,13 @@ Use synthetic fixtures only; never expose Garmin data, credentials or secrets.
 Describe assumptions, design decisions, risks and relevant verification steps.
 Do not commit, push, open PRs, merge or modify settings without explicit
 authorization from the human operating this tool.
+Do not create many tiny AI-generated commits; group a coherent reviewed change
+into one commit when explicitly authorized.
+Never squash, amend, rebase or otherwise rewrite commit history unless the human
+explicitly requests that specific operation.
+Never force-push without separate explicit permission for that force-push;
+permission to squash does not grant permission to force-push, or vice versa.
+Prefer non-force pushes. Never merge without explicit project-owner approval.
 Prepare the changes for human review; the contributor owns the final result.
 ```
 
