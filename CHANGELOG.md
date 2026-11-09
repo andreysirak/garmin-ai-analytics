@@ -4,6 +4,7 @@
 
 | Type | What changed | Breaking change | Upgrade steps | PR |
 | --- | --- | --- | --- | --- |
+| Fixed | Model Garmin daily summary and sleep response fields as typed Java DTOs, handle flat or wrapped sleep responses, and test ingestion/date validation with synthetic JSON | No | Verify live response structure before downstream schema mapping | |
 | Docs | Set AI-assisted commit hygiene and require separate explicit consent for squash/history rewriting and force-push | No | None | #24 |
 | Docs | Explain local Kubernetes choice, cloud trade-offs, and GCP-first migration considerations | No | None | |
 | Docs | Define Story → Task → PR workflow, AI-assisted PR notes, and Garmin integration retrospective | No | None | |

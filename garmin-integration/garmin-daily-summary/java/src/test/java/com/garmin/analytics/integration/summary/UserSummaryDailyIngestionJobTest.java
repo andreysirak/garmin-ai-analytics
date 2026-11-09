@@ -39,7 +39,7 @@ class UserSummaryDailyIngestionJobTest {
   void archivesCompleteOriginalResponseOnSuccess() throws Exception {
     String rawJson =
         """
-        {"calendarDate":"2026-11-07","totalSteps":8100,"unknownGarminField":{"value":true}}
+        {"calendarDate":"2026-11-07","totalSteps":8100,"wellnessStartTimeGmt":"2026-11-06T23:00:00.0","wellnessStartTimeLocal":"2026-11-07T00:00:00.0","floorsAscended":7.66339,"bodyBatteryVersion":2.0,"unknownGarminField":{"value":true}}
         """;
     server.enqueue(new MockResponse().setBody(rawJson));
     ProcessResult result = runJob(REQUESTED_DATE);
@@ -56,6 +56,39 @@ class UserSummaryDailyIngestionJobTest {
         "/usersummary-service/usersummary/daily?calendarDate=" + REQUESTED_DATE,
         request.getPath());
     assertEquals("Bearer synthetic-token", request.getHeader("Authorization"));
+  }
+
+  @Test
+  void archivesFlatSummaryWithOriginalJsonUnchanged() throws Exception {
+    String rawJson =
+        """
+        {"calendarDate":"2026-11-07","totalSteps":8100,
+         "additionalGarminData":{"nested":true}}
+        """;
+    server.enqueue(new MockResponse().setBody(rawJson));
+    ProcessResult result = runJob(REQUESTED_DATE);
+
+    assertEquals(0, result.exitCode());
+    assertEquals(
+        rawJson,
+        Files.readString(
+            temporaryDirectory.resolve("daily-summary").resolve(REQUESTED_DATE + ".json")));
+  }
+
+  @Test
+  void rejectsResponseWithoutCalendarDate() throws Exception {
+    server.enqueue(
+        new MockResponse()
+            .setBody(
+                "{\"totalSteps\":8100}"));
+
+    ProcessResult result = runJob(REQUESTED_DATE);
+
+    assertEquals(1, result.exitCode());
+    assertTrue(result.output().contains("missing or mismatched calendarDate"));
+    assertFalse(
+        Files.exists(
+            temporaryDirectory.resolve("daily-summary").resolve(REQUESTED_DATE + ".json")));
   }
 
   @Test

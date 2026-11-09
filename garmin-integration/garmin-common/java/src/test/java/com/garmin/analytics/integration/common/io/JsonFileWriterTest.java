@@ -1,4 +1,4 @@
-package com.garmin.analytics.integration.common;
+package com.garmin.analytics.integration.common.io;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;

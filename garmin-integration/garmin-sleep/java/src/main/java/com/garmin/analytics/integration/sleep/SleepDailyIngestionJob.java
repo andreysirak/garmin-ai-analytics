@@ -1,10 +1,13 @@
 package com.garmin.analytics.integration.sleep;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-import com.garmin.analytics.integration.common.GarminClient;
-import com.garmin.analytics.integration.common.JsonFileWriter;
+import com.garmin.analytics.integration.common.client.GarminClient;
+import com.garmin.analytics.integration.common.io.JsonFileWriter;
+import com.garmin.analytics.integration.common.util.JsonFailureDiagnosticsUtil;
+import com.garmin.analytics.integration.sleep.response.SleepResponse;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -48,8 +51,7 @@ public final class SleepDailyIngestionJob {
       String requestedDate = date.format(DateTimeFormatter.ISO_LOCAL_DATE);
       String rawJson = garminClient.get(ENDPOINT, Map.of("date", requestedDate));
       SleepResponse sleep = parseResponse(objectMapper, rawJson);
-      LocalDate responseDate =
-          sleep.dailySleepDTO() == null ? null : sleep.dailySleepDTO().calendarDate();
+      LocalDate responseDate = sleep.calendarDate();
       if (responseDate != null && !date.equals(responseDate)) {
         throw new IOException(
             "Garmin sleep response calendarDate "
@@ -57,7 +59,7 @@ public final class SleepDailyIngestionJob {
                 + " does not match requested date "
                 + requestedDate);
       }
-      if (sleep.dailySleepDTO() == null || !hasSleepMetrics(sleep.dailySleepDTO())) {
+      if (!hasSleepMetrics(sleep)) {
         archive(outputDirectory, date, rawJson);
         System.out.println("No Garmin sleep data for " + date + "; archived the API response");
         return;
@@ -73,7 +75,7 @@ public final class SleepDailyIngestionJob {
       Thread.currentThread().interrupt();
       fail("Sleep ingestion was interrupted");
     } catch (JsonProcessingException exception) {
-      fail("Garmin sleep response could not be mapped to the expected JSON structure");
+      fail("Garmin sleep response JSON error: " + JsonFailureDiagnosticsUtil.describe(exception));
     } catch (IOException | IllegalArgumentException exception) {
       fail("Sleep ingestion failed: " + exception.getMessage());
     }
@@ -81,6 +83,11 @@ public final class SleepDailyIngestionJob {
 
   private static SleepResponse parseResponse(ObjectMapper mapper, String rawJson)
       throws JsonProcessingException {
+    JsonNode root = mapper.readTree(rawJson);
+    if (root != null && root.has("dailySleepDTO")) {
+      throw new IllegalArgumentException(
+          "Unsupported wrapped Garmin sleep response; expected flat fields");
+    }
     SleepResponse response = mapper.readValue(rawJson, SleepResponse.class);
     if (response == null) {
       throw new IllegalArgumentException("Garmin sleep response was empty");
@@ -88,7 +95,7 @@ public final class SleepDailyIngestionJob {
     return response;
   }
 
-  private static boolean hasSleepMetrics(SleepResponse.DailySleepDTO sleep) {
+  private static boolean hasSleepMetrics(SleepResponse sleep) {
     return sleep.sleepTimeSeconds() != null
         || sleep.deepSleepSeconds() != null
         || sleep.lightSleepSeconds() != null
@@ -98,7 +105,13 @@ public final class SleepDailyIngestionJob {
         || sleep.sleepStartTimestampGMT() != null
         || sleep.sleepEndTimestampGMT() != null
         || sleep.avgSleepStress() != null
-        || sleep.avgHeartRate() != null;
+        || sleep.avgHeartRate() != null
+        || sleep.sleepScores() != null
+        || sleep.napTimeSeconds() != null
+        || sleep.dailyNapDTOS() != null
+        || sleep.sleepNeed() != null
+        || sleep.nextSleepNeed() != null
+        || sleep.sleepAlignment() != null;
   }
 
   private static void archive(Path outputDirectory, LocalDate date, String rawJson)

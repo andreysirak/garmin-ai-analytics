@@ -39,7 +39,7 @@ class SleepDailyIngestionJobTest {
   void archivesCompleteOriginalResponseOnSuccess() throws Exception {
     String rawJson =
         """
-        {"dailySleepDTO":{"calendarDate":"2026-11-07","sleepTimeSeconds":27000,"unknown":true}}
+        {"calendarDate":"2026-11-07","sleepTimeSeconds":27000,"unknown":true}
         """;
     server.enqueue(new MockResponse().setBody(rawJson));
 
@@ -62,8 +62,8 @@ class SleepDailyIngestionJobTest {
     server.enqueue(
         new MockResponse()
             .setBody(
-                "{\"dailySleepDTO\":{\"calendarDate\":\"2026-11-06\","
-                    + "\"sleepTimeSeconds\":27000}}"));
+                "{\"calendarDate\":\"2026-11-06\","
+                    + "\"sleepTimeSeconds\":27000}"));
 
     ProcessResult result = runJob(REQUESTED_DATE);
 
@@ -88,17 +88,49 @@ class SleepDailyIngestionJobTest {
   }
 
   @Test
-  void archivesEmptySleepSummaryAsNoData() throws Exception {
-    String rawJson = "{\"dailySleepDTO\":{}}";
-    server.enqueue(new MockResponse().setBody(rawJson));
+  void rejectsUnsupportedWrappedSleepResponseRatherThanTreatingItAsNoData()
+      throws Exception {
+    server.enqueue(
+        new MockResponse()
+            .setBody(
+                "{\"dailySleepDTO\":{\"calendarDate\":\"2026-11-07\",\"sleepTimeSeconds\":27000}}"));
 
     ProcessResult result = runJob(REQUESTED_DATE);
 
+    assertEquals(1, result.exitCode());
+    assertTrue(result.output().contains("Unsupported wrapped Garmin sleep response"));
+    assertFalse(Files.exists(temporaryDirectory.resolve("sleep").resolve(REQUESTED_DATE + ".json")));
+  }
+
+  @Test
+  void archivesFlatSleepResponseInsteadOfMisclassifyingItAsNoData() throws Exception {
+    String rawJson =
+        """
+        {"calendarDate":"2026-11-07","sleepTimeSeconds":27000,
+         "sleepStartTimestampGMT":"2026-11-06T22:30:00Z",
+         "sleepScores":{"overall":{"value":81}}}
+        """;
+    server.enqueue(new MockResponse().setBody(rawJson));
+    ProcessResult result = runJob(REQUESTED_DATE);
+
     assertEquals(0, result.exitCode());
-    assertTrue(result.output().contains("No Garmin sleep data for " + REQUESTED_DATE));
+    assertTrue(result.output().contains("Ingested Garmin sleep"));
+    assertFalse(result.output().contains("No Garmin sleep data"));
     assertEquals(
         rawJson,
         Files.readString(temporaryDirectory.resolve("sleep").resolve(REQUESTED_DATE + ".json")));
+  }
+
+  @Test
+  void rejectsFlatSleepResponseWithWrongDate() throws Exception {
+    server.enqueue(
+        new MockResponse()
+            .setBody("{\"calendarDate\":\"2026-11-06\",\"sleepTimeSeconds\":27000}"));
+    ProcessResult result = runJob(REQUESTED_DATE);
+
+    assertEquals(1, result.exitCode());
+    assertTrue(result.output().contains("does not match requested date"));
+    assertFalse(Files.exists(temporaryDirectory.resolve("sleep").resolve(REQUESTED_DATE + ".json")));
   }
 
   @Test
