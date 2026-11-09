@@ -7,6 +7,19 @@
 - Keep changes focused; do not add database storage, additional Garmin endpoints,
   or changes to repository rulesets without approval.
 
+## Your first contribution
+
+Contributions are welcome, whether you want to fix a bug, improve tests or documentation, or propose a feature. You **do not need an invitation or collaborator access** to contribute through a fork and pull request.
+
+1. Browse [open issues](https://github.com/andreysirak/garmin-ai-analytics/issues) for a focused task, or open an issue to suggest an improvement. If you're new to the project, look for `good first issue` when available; not every issue is ready for external contribution.
+2. Comment on an issue to discuss scope before investing time, especially for architecture, infrastructure, API, or data-model changes. You do not need an assignment to propose a change.
+3. **Fork** the repository into your GitHub account, create a branch from `main` in your fork, and implement one focused change. See [Quick start](README.md#quick-start) for the local setup.
+4. Use **synthetic fixtures only**: never include personal Garmin responses, API keys, bearer tokens, local credentials, or other secrets in code, tests, logs, issues, or PRs.
+5. Run the relevant Java, Python, or infrastructure checks described below. You don't need a running Garmin account or real personal data to submit a contribution.
+6. Open a pull request **from your fork to this repository's `main`**, link the issue (for example, `Closes #123` when appropriate), describe the change and verification, and respond to review feedback. Include the AI-assisted development note below if you used AI tools.
+
+The project owner reviews contributions and decides whether to merge them. A PR is a proposal, not a guarantee of acceptance. Please keep changes small and discuss substantial design changes first. There is no need to request direct write access.
+
 ## Planning and delivery workflow
 
 Use **GitHub Projects** to track work through **Backlog → Ready → In Progress → In Review → Done**.
