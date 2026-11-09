@@ -4,6 +4,9 @@
 
 | Type | What changed | Breaking change | Upgrade steps | PR |
 | --- | --- | --- | --- | --- |
+| Changed | Move output-directory selection out of Java; write unchanged JSON directly to the supplied final directory and reject existing files | Yes: --output-dir is now the final destination | Update DAG/XCom paths and operator mounts before running the pipeline | |
+| Changed | Remove response DTOs and mapping; verify JSON syntax with Jackson Core and persist the unchanged raw response | Yes: response DTO classes and field-level validation removed | Rebuild both Java images; perform schema and business validation downstream | |
+| Changed | Refactor Java ingestion into constructor-injected jobs and CLI applications, with Apache Commons CLI parsing, natural exception propagation, and sanitized SLF4J/Logback failure logging | No | Rebuild and load both Java images | |
 | Docs | Clarify local IDE AI coding vs browser GitHub write permissions and provide separate agent prompts | No | None | #27 |
 | Fixed | Model Garmin daily summary and sleep response fields as typed Java DTOs, handle flat or wrapped sleep responses, and test ingestion/date validation with synthetic JSON | No | Verify live response structure before downstream schema mapping | |
 | Docs | Set AI-assisted commit hygiene and require separate explicit consent for squash/history rewriting and force-push | No | None | #24 |

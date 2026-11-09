@@ -1,5 +1,6 @@
 package com.garmin.analytics.integration.common.client;
 
+import com.garmin.analytics.integration.common.exception.GarminApiException;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -29,8 +30,8 @@ public final class GarminClient {
     this.bearerToken = bearerToken.trim();
   }
 
-  public String get(String endpoint, Map<String, String> queryParameters)
-      throws IOException, InterruptedException {
+  public String callWithQueryParameters(String endpoint, Map<String, String> queryParameters)
+      throws GarminApiException, InterruptedException {
     URI uri = buildUri(endpoint, queryParameters);
     HttpRequest request =
         HttpRequest.newBuilder(uri)
@@ -39,17 +40,20 @@ public final class GarminClient {
             .header("Authorization", "Bearer " + bearerToken)
             .GET()
             .build();
-    HttpResponse<String> response =
-        httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    HttpResponse<String> response;
+    try {
+      response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    } catch (IOException exception) {
+      throw new GarminApiException("Garmin API transport failure", exception);
+    }
     int status = response.statusCode();
     if (status < 200 || status >= 300) {
-      throw new IOException(
-          "Garmin API request to " + uri.getPath() + " failed with HTTP " + status);
+      throw new GarminApiException("Garmin API request failed with HTTP " + status);
     }
     return response.body();
   }
 
-  private static URI validateBaseUri(URI baseUri) {
+  public static URI validateBaseUri(URI baseUri) {
     Objects.requireNonNull(baseUri, "API base URL is required");
     if (!("http".equalsIgnoreCase(baseUri.getScheme())
             || "https".equalsIgnoreCase(baseUri.getScheme()))

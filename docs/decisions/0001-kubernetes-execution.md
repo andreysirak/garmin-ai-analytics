@@ -44,7 +44,7 @@ container execution. AWS remains a possible alternative.
 
 - Preserve **Python Airflow DAGs** and **standalone application containers**;
   avoid embedding ingestion business logic in Airflow-specific Java APIs.
-- Replace **kind hostPath/PVC raw files** with cloud object storage (for example,
+- Replace **kind hostPath/PVC archived JSON files** with cloud object storage (for example,
   **Google Cloud Storage**) and adapt file access/replay contracts accordingly.
 - Move application PostgreSQL to a managed service (for example **Cloud SQL**)
   with Flyway migrations, networking, backups and connection/security updates.

@@ -1,8 +1,11 @@
 package com.garmin.analytics.integration.common.client;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import com.garmin.analytics.integration.common.exception.GarminApiException;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -36,7 +39,7 @@ class GarminClientTest {
     GarminClient client =
         new GarminClient(HttpClient.newHttpClient(), server.url("/").uri(), "synthetic-token");
 
-    String response = client.get("/sleep/daily", Map.of("calendarDate", "2026-11-07"));
+    String response = client.callWithQueryParameters("/sleep/daily", Map.of("calendarDate", "2026-11-07"));
 
     assertEquals(rawJson, response);
     RecordedRequest request = server.takeRequest();
@@ -52,7 +55,9 @@ class GarminClientTest {
     GarminClient client =
         new GarminClient(HttpClient.newHttpClient(), server.url("/").uri(), "synthetic-token");
 
-    assertThrows(IOException.class, () -> client.get("/endpoint", Map.of()));
+    GarminApiException failure = assertThrows(GarminApiException.class,
+        () -> client.callWithQueryParameters("/endpoint", Map.of()));
+    assertTrue(failure.getMessage().contains("HTTP 401"));
     assertEquals(1, server.getRequestCount());
   }
 
@@ -65,7 +70,29 @@ class GarminClientTest {
                 HttpClient.newHttpClient(), URI.create("https://user:pass@example.com"), "token"));
     GarminClient client =
         new GarminClient(HttpClient.newHttpClient(), server.url("/").uri(), "token");
-    assertThrows(IllegalArgumentException.class, () -> client.get("relative", Map.of()));
+    assertThrows(IllegalArgumentException.class, () -> client.callWithQueryParameters("relative", Map.of()));
+  }
+
+  @Test
+  void preservesTransportFailureCause() throws Exception {
+    java.net.URI unavailable = server.url("/").uri();
+    server.shutdown();
+    GarminClient client = new GarminClient(HttpClient.newHttpClient(), unavailable, "token");
+    GarminApiException failure = assertThrows(GarminApiException.class,
+        () -> client.callWithQueryParameters("/endpoint", Map.of()));
+    assertInstanceOf(IOException.class, failure.getCause());
+  }
+
+  @Test
+  void propagatesInterruptionWithoutConvertingItToApiFailure() {
+    GarminClient client = new GarminClient(HttpClient.newHttpClient(), server.url("/").uri(),
+        "token");
+    Thread.currentThread().interrupt();
+    try {
+      assertThrows(InterruptedException.class, () -> client.callWithQueryParameters("/endpoint", Map.of()));
+    } finally {
+      Thread.interrupted();
+    }
   }
 
   @Test

@@ -2,7 +2,7 @@
 
 **A personal health data platform built with Java, Apache Airflow, and Kubernetes.**
 
-Garmin AI Analytics is an evolving data engineering project that collects Garmin activity and sleep data, preserves original API responses, and lays the foundation for analytics and AI-powered insights.
+Garmin AI Analytics is an evolving data engineering project that collects Garmin activity and sleep data, preserves original API JSON responses unchanged for later analytics and AI-powered insights.
 
 The goal is to turn daily wearable data into meaningful personal insights while practicing production-oriented data engineering.
 
@@ -53,7 +53,7 @@ See [Architecture](docs/architecture.md) for component details, storage, and sec
 | Orchestration | Apache Airflow 3, Python |
 | Runtime | Kubernetes, kind, Docker |
 | Infrastructure | Helm, Kustomize |
-| Raw storage | JSON files, Kubernetes PV/PVC, local host mount |
+| Archive storage | Original JSON files, Kubernetes PV/PVC, local host mount |
 | Security | Kubernetes Secrets, RBAC, ValidatingAdmissionPolicy |
 | Quality | JUnit 5, pytest, Ruff, SpotBugs, PMD |
 | CI | GitHub Actions |
@@ -64,7 +64,7 @@ See [Architecture](docs/architecture.md) for component details, storage, and sec
 - Scheduled and manually triggered Airflow workflows.
 - Independent Java ingestion jobs in separate Kubernetes Pods.
 - Bearer-token acquisition, caching, and refresh.
-- Date-specific original JSON archive with atomic replacement on reruns.
+- Unchanged raw JSON written directly to a caller-supplied final directory, after syntax validation.
 - Task retries and parallel ingestion after an authentication gate.
 - Dedicated authentication namespace, restricted ServiceAccounts, and admission controls.
 - Java, Python, and infrastructure validation in GitHub Actions.
@@ -103,6 +103,10 @@ This builds and loads the local images, applies Kubernetes resources, bootstraps
 
 ### 4. Run the pipeline
 
+**DAG/XCom wiring is the next step:** the current DAG/operators still use the shared
+archive root. They must supply distinct final directories for each endpoint/download attempt and
+keep the PVC mount rooted at the archive root before the pipeline is run again.
+
 ```bash
 make airflow-password
 make airflow-ui
@@ -110,17 +114,31 @@ make airflow-ui
 
 Sign in to Airflow as `admin` using the printed password, then trigger or unpause `garmin_daily_ingestion`. Manual runs support an optional date in `YYYY-MM-DD` format.
 
-Successful ingestion writes files directly into the project directory:
+Java treats `--output-dir` as the **final destination directory** and writes only
+`<output-dir>/<requested-date>.json`. It adds no endpoint, date, or download-number
+subdirectories. A caller may select directories with this layout:
 
 ```text
 data/raw/garmin/
 ├── daily-summary/
-│   └── YYYY-MM-DD.json
+│   └── 2026-11-07/
+│       ├── 1/2026-11-07.json
+│       └── 2/2026-11-07.json
 └── sleep/
-    └── YYYY-MM-DD.json
+    └── 2026-11-07/
+        ├── 1/2026-11-07.json
+        └── 2/2026-11-07.json
 ```
 
-**Privacy:** Keep API keys, bearer tokens, and personal Garmin data out of Git, images, logs, and public issues. The raw-data directory is Git-ignored.
+Responses are checked only for syntactically valid JSON, then saved as the original
+UTF-8 string. Fields, dates, numeric formats, whitespace, and unknown properties are
+not mapped or changed. Each response must contain exactly one JSON value; empty or
+malformed responses are rejected before writing. Directory selection and uniqueness
+belong to the caller; Java does not allocate download numbers. Writes go directly to
+a new file and fail if it already exists, preserving earlier data. Response schema
+and business validation belong downstream.
+
+**Privacy:** Keep API keys, bearer tokens, and personal Garmin data out of Git, images, logs, and public issues. The archive directory is Git-ignored.
 
 ## Development and verification
 
