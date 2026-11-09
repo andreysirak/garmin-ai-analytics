@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.garmin.analytics.integration.common.GarminClient;
 import com.garmin.analytics.integration.common.JsonFileWriter;
+import com.garmin.analytics.integration.summary.response.DailySummaryResponse;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -47,7 +48,8 @@ public final class UserSummaryDailyIngestionJob {
       String rawJson =
           garminClient.get(ENDPOINT, Map.of("calendarDate", date.toString()));
       DailySummaryResponse summary = parseResponse(objectMapper, rawJson);
-      if (summary.calendarDate() == null || !date.equals(summary.calendarDate())) {
+      if (summary.calendarDate() == null
+          || !date.equals(summary.calendarDate())) {
         throw new IOException(
             "Garmin daily summary response has a missing or mismatched calendarDate");
       }

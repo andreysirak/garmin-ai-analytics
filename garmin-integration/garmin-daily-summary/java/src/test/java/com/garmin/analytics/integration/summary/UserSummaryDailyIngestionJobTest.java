@@ -59,6 +59,39 @@ class UserSummaryDailyIngestionJobTest {
   }
 
   @Test
+  void archivesFlatSummaryWithOriginalJsonUnchanged() throws Exception {
+    String rawJson =
+        """
+        {"calendarDate":"2026-11-07","totalSteps":8100,
+         "additionalGarminData":{"nested":true}}
+        """;
+    server.enqueue(new MockResponse().setBody(rawJson));
+    ProcessResult result = runJob(REQUESTED_DATE);
+
+    assertEquals(0, result.exitCode());
+    assertEquals(
+        rawJson,
+        Files.readString(
+            temporaryDirectory.resolve("daily-summary").resolve(REQUESTED_DATE + ".json")));
+  }
+
+  @Test
+  void rejectsResponseWithoutCalendarDate() throws Exception {
+    server.enqueue(
+        new MockResponse()
+            .setBody(
+                "{\"totalSteps\":8100}"));
+
+    ProcessResult result = runJob(REQUESTED_DATE);
+
+    assertEquals(1, result.exitCode());
+    assertTrue(result.output().contains("missing or mismatched calendarDate"));
+    assertFalse(
+        Files.exists(
+            temporaryDirectory.resolve("daily-summary").resolve(REQUESTED_DATE + ".json")));
+  }
+
+  @Test
   void rejectsMismatchedResponseDateAndDoesNotArchive() throws Exception {
     server.enqueue(
         new MockResponse().setBody("{\"calendarDate\":\"2026-11-06\",\"totalSteps\":1}"));
