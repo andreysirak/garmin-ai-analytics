@@ -104,6 +104,29 @@ destructive operation and request approval, without blocking unrelated
 non-destructive changes. Clearly report any commits, history rewrites, and
 pushes in the PR description or handoff.
 
+### Pull request operations require explicit authorization
+
+**No autonomous PR management.** AI assistants must not perform **any pull
+request operation** unless the human explicitly requests that specific action
+on the intended PR. This includes opening or closing a PR, reopening it,
+marking it draft or ready for review, merging or enabling auto-merge,
+retargeting its base branch, changing its title or description, adding labels,
+assigning or requesting reviewers, submitting approvals or reviews, posting
+or resolving review discussions, or deleting a PR branch.
+
+A request to modify code, document a rule, create an issue, or prepare a change
+is **not** automatically permission to create, close, or otherwise manage a PR.
+A request to update an existing PR authorizes only the requested changes
+within that PR's scope; it does not authorize changing the PR's lifecycle
+state or unrelated metadata, and it never grants permission to force-push,
+rewrite history, merge, or open/close another PR.
+
+**If the requested PR operation, target PR, or permission is not explicit or
+is ambiguous, stop and ask the human which action they want before acting.**
+Do not infer permission from prior approvals, normal project workflows, or an
+assumption that a cleanup action is helpful. Read-only inspection and
+proposing a plan are permitted without modifying GitHub state.
+
 ### Suggested AI coding assistant prompt (optional)
 
 You may copy the following into any coding assistant. It is guidance, not a
@@ -127,6 +150,11 @@ explicitly requests that specific operation.
 Never force-push without separate explicit permission for that force-push;
 permission to squash does not grant permission to force-push, or vice versa.
 Prefer non-force pushes. Never merge without explicit project-owner approval.
+Never open, close, reopen, retarget, merge, change draft status, or otherwise
+manage a PR without a separate explicit instruction for the specific PR action.
+Updating code in an existing PR does not authorize PR lifecycle changes,
+other PRs, reviewers, labels, comments, or unrelated metadata.
+If the permission, PR target, or intended action is unclear, ask first.
 Prepare the changes for human review; the contributor owns the final result.
 ```
 
