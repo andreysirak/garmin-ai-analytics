@@ -20,6 +20,13 @@ Keep DAGs in Python, launching standalone Java/Python containers with
 `KubernetesPodOperator`. Kubernetes is a learning and execution choice, **not** a
 requirement dictated by Garmin data volume.
 
+**Cloud migration is an ongoing design constraint, starting now.** Every new
+pipeline component should consider how its data access, configuration, secrets,
+and execution model would work in managed cloud services. Prefer replaceable
+infrastructure adapters over coupling business logic to kind, hostPath or a
+particular machine. Validate portability in design and tests where practical;
+do not postpone all migration concerns until deployment.
+
 The preferred future cloud option is **GCP Cloud Composer (managed Airflow)**,
 with suitable managed GCP services for storage, relational data, secrets, and
 container execution. AWS remains a possible alternative.
@@ -49,6 +56,11 @@ container execution. AWS remains a possible alternative.
 - Verify the target **Cloud Composer version**, provider versions, permitted
   `KubernetesPodOperator` namespaces, execution environment and resource limits
   before committing to the deployment model.
+
+**During each phase**, review storage contracts, Airflow/operator compatibility,
+credentials, container images and deployment configuration for cloud portability.
+Document intentional local-only assumptions as migration work rather than
+letting them become hidden dependencies.
 
 The goal is to **minimize application rewrites**, not to claim that hostPath
 volumes, namespace rules or local infrastructure manifests migrate unchanged.
