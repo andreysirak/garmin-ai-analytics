@@ -68,6 +68,65 @@ project-owner approval, but changes to this upstream repository remain subject
 to the project owner's approval. Never merge upstream changes without explicit
 project-owner approval.
 
+### AI-assisted Git commits and history safety
+
+AI coding assistants must prepare **coherent, reviewable changes**, not generate a
+separate commit for every file, tool call, or small edit. Prefer completing the
+requested change, reviewing the combined diff, and making **one meaningful commit**
+when a commit has been explicitly authorized. Multiple commits are appropriate only
+when they represent intentional, independently understandable steps agreed with
+the human. The owner controls when changes are committed; AI tools must not
+automatically commit after each edit.
+
+**Commit, squash, and force-push are three distinct actions with separate consent:**
+
+- **Normal commit/push:** only when the human explicitly authorizes it, and only
+  within the agreed branch and scope. Prefer non-force, fast-forward pushes.
+- **Squash or rebase:** rewriting commit history is **not automatic**. Never
+  squash, amend, rebase, reset published history, or recreate existing commits
+  merely to make the PR look cleaner. Do so only after an **explicit request
+  to perform that specific history change**. A request to update a PR or reduce
+  future commit noise does not authorize rewriting existing commits.
+- **Force-push:** **never force-push without the human's explicit permission
+  for that push**, even if a squash/rebase was requested. Approval to squash
+  does not implicitly approve force-push, and approval to force-push does not
+  implicitly approve squash. Explain that collaborators may need to
+  resynchronize local branches before asking for approval. When approved,
+  prefer `--force-with-lease` over `--force` and verify the expected
+  remote head; neither option substitutes for permission.
+- **No implicit merge:** opening or updating a PR, obtaining green checks, or
+  receiving permission for a commit, squash, or force-push never authorizes
+  merging. The project owner must explicitly approve any merge.
+
+When a request can be completed without rewriting history, choose the
+non-destructive option. If required permission is missing, stop before the
+destructive operation and request approval, without blocking unrelated
+non-destructive changes. Clearly report any commits, history rewrites, and
+pushes in the PR description or handoff.
+
+### Pull request operations require explicit authorization
+
+**No autonomous PR management.** AI assistants must not perform **any pull
+request operation** unless the human explicitly requests that specific action
+on the intended PR. This includes opening or closing a PR, reopening it,
+marking it draft or ready for review, merging or enabling auto-merge,
+retargeting its base branch, changing its title or description, adding labels,
+assigning or requesting reviewers, submitting approvals or reviews, posting
+or resolving review discussions, or deleting a PR branch.
+
+A request to modify code, document a rule, create an issue, or prepare a change
+is **not** automatically permission to create, close, or otherwise manage a PR.
+A request to update an existing PR authorizes only the requested changes
+within that PR's scope; it does not authorize changing the PR's lifecycle
+state or unrelated metadata, and it never grants permission to force-push,
+rewrite history, merge, or open/close another PR.
+
+**If the requested PR operation, target PR, or permission is not explicit or
+is ambiguous, stop and ask the human which action they want before acting.**
+Do not infer permission from prior approvals, normal project workflows, or an
+assumption that a cleanup action is helpful. Read-only inspection and
+proposing a plan are permitted without modifying GitHub state.
+
 ### Suggested AI coding assistant prompt (optional)
 
 You may copy the following into any coding assistant. It is guidance, not a
@@ -84,6 +143,18 @@ Use synthetic fixtures only; never expose Garmin data, credentials or secrets.
 Describe assumptions, design decisions, risks and relevant verification steps.
 Do not commit, push, open PRs, merge or modify settings without explicit
 authorization from the human operating this tool.
+Do not create many tiny AI-generated commits; group a coherent reviewed change
+into one commit when explicitly authorized.
+Never squash, amend, rebase or otherwise rewrite commit history unless the human
+explicitly requests that specific operation.
+Never force-push without separate explicit permission for that force-push;
+permission to squash does not grant permission to force-push, or vice versa.
+Prefer non-force pushes. Never merge without explicit project-owner approval.
+Never open, close, reopen, retarget, merge, change draft status, or otherwise
+manage a PR without a separate explicit instruction for the specific PR action.
+Updating code in an existing PR does not authorize PR lifecycle changes,
+other PRs, reviewers, labels, comments, or unrelated metadata.
+If the permission, PR target, or intended action is unclear, ask first.
 Prepare the changes for human review; the contributor owns the final result.
 ```
 
