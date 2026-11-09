@@ -79,6 +79,16 @@ class DailySummaryResponseTest {
   }
 
   @Test
+  void mapsGmtTimestampWithoutExplicitOffset() throws Exception {
+    ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
+    DailySummaryResponse response = mapper.readValue(
+        "{\"calendarDate\":\"2026-11-09\","
+            + "\"wellnessStartTimeGmt\":\"2026-11-09T00:00:00.000\"}",
+        DailySummaryResponse.class);
+    assertEquals(Instant.parse("2026-11-09T00:00:00Z"), response.wellnessStartTimeGmt());
+  }
+
+  @Test
   void keepsUnknownAndOptionalFieldsFromBreakingDeserialization() throws Exception {
     ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
     DailySummaryResponse response =

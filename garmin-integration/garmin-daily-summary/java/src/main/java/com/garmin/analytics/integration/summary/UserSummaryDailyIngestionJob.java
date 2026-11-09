@@ -3,9 +3,9 @@ package com.garmin.analytics.integration.summary;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-import com.garmin.analytics.integration.common.GarminClient;
-import com.garmin.analytics.integration.common.JsonFileWriter;
-import com.garmin.analytics.integration.common.JsonFailureDiagnostics;
+import com.garmin.analytics.integration.common.client.GarminClient;
+import com.garmin.analytics.integration.common.io.JsonFileWriter;
+import com.garmin.analytics.integration.common.util.JsonFailureDiagnosticsUtil;
 import com.garmin.analytics.integration.summary.response.DailySummaryResponse;
 import java.io.IOException;
 import java.net.URI;
@@ -63,7 +63,7 @@ public final class UserSummaryDailyIngestionJob {
       Thread.currentThread().interrupt();
       fail("Daily summary ingestion was interrupted");
     } catch (JsonProcessingException exception) {
-      fail("Garmin daily summary response JSON error: " + JsonFailureDiagnostics.describe(exception));
+      fail("Garmin daily summary response JSON error: " + JsonFailureDiagnosticsUtil.describe(exception));
     } catch (IOException | IllegalArgumentException exception) {
       fail("Daily summary ingestion failed: " + exception.getMessage());
     }

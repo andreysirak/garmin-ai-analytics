@@ -1,4 +1,4 @@
-package com.garmin.analytics.integration.common;
+package com.garmin.analytics.integration.common.client;
 
 import java.io.IOException;
 import java.net.URI;

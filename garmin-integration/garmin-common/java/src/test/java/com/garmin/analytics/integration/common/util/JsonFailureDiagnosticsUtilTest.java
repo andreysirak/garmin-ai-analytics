@@ -1,4 +1,4 @@
-package com.garmin.analytics.integration.common;
+package com.garmin.analytics.integration.common.util;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -9,7 +9,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
 
-class JsonFailureDiagnosticsTest {
+class JsonFailureDiagnosticsUtilTest {
 
   private record Example(Long sleepTimeSeconds) {}
 
@@ -25,7 +25,7 @@ class JsonFailureDiagnosticsTest {
       mapper.readValue("{\"sleepTimeSeconds\":\"private-sensitive-value\"}", Example.class);
       throw new AssertionError("Expected Jackson mapping failure");
     } catch (JsonProcessingException exception) {
-      String details = JsonFailureDiagnostics.describe(exception);
+      String details = JsonFailureDiagnosticsUtil.describe(exception);
       assertTrue(details.contains("InvalidFormatException"));
       assertTrue(details.contains("sleepTimeSeconds"));
       assertTrue(details.contains("java.lang.Long"));
@@ -44,7 +44,7 @@ class JsonFailureDiagnosticsTest {
           SummaryTimestamps.class);
       throw new AssertionError("Expected Jackson mapping failure");
     } catch (JsonProcessingException exception) {
-      String details = JsonFailureDiagnostics.describe(exception);
+      String details = JsonFailureDiagnosticsUtil.describe(exception);
       assertTrue(details.contains("lastSyncTimestampGMT"));
       assertTrue(details.contains("java.time.Instant"));
       assertTrue(details.contains("ISO-8601 without timezone"));
@@ -62,7 +62,7 @@ class JsonFailureDiagnosticsTest {
           SleepTimestamps.class);
       throw new AssertionError("Expected Jackson mapping failure");
     } catch (JsonProcessingException exception) {
-      String details = JsonFailureDiagnostics.describe(exception);
+      String details = JsonFailureDiagnosticsUtil.describe(exception);
       assertTrue(details.contains("sleepStartTimestampGMT"));
       assertTrue(details.contains("unrecognized string format"));
       assertFalse(details.contains(timestamp));
@@ -76,7 +76,7 @@ class JsonFailureDiagnosticsTest {
       mapper.readTree("{not-json");
       throw new AssertionError("Expected malformed JSON to fail");
     } catch (JsonProcessingException exception) {
-      String details = JsonFailureDiagnostics.describe(exception);
+      String details = JsonFailureDiagnosticsUtil.describe(exception);
       assertTrue(details.contains("JsonParseException"));
       assertTrue(details.contains("line "));
       assertFalse(details.contains("not-json"));

@@ -1,4 +1,4 @@
-package com.garmin.analytics.integration.common;
+package com.garmin.analytics.integration.common.util;
 
 import com.fasterxml.jackson.core.JsonLocation;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -9,7 +9,7 @@ import java.time.Instant;
 import java.util.regex.Pattern;
 
 /** Describes JSON mapping failures without exposing Garmin API values. */
-public final class JsonFailureDiagnostics {
+public final class JsonFailureDiagnosticsUtil {
 
   private static final Pattern ISO_UTC =
       Pattern.compile("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$");
@@ -19,7 +19,7 @@ public final class JsonFailureDiagnostics {
       Pattern.compile("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?$");
   private static final Pattern NUMERIC_STRING = Pattern.compile("^-?\\d+(?:\\.\\d+)?$");
 
-  private JsonFailureDiagnostics() {}
+  private JsonFailureDiagnosticsUtil() {}
 
   public static String describe(JsonProcessingException exception) {
     StringBuilder description = new StringBuilder(exception.getClass().getSimpleName());

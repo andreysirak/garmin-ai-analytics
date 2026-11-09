@@ -1,4 +1,4 @@
-package com.garmin.analytics.integration.common;
+package com.garmin.analytics.integration.common.io;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;

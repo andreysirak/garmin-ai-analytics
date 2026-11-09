@@ -2,6 +2,8 @@ package com.garmin.analytics.integration.summary.response;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+import com.garmin.analytics.integration.common.json.UtcInstantDeserializer;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
@@ -27,7 +29,7 @@ public record DailySummaryResponse(
     Long dailyPushesGoal,
     Double totalPushDistance,
     Long totalPushes,
-    Instant wellnessStartTimeGmt,
+    @JsonDeserialize(using = UtcInstantDeserializer.class) Instant wellnessStartTimeGmt,
     Instant wellnessStartTimeLocal,
     Instant wellnessEndTimeGmt,
     Instant wellnessEndTimeLocal,
