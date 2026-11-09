@@ -2,9 +2,6 @@ package com.garmin.analytics.integration.summary.response;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
-import com.garmin.analytics.integration.common.json.UtcInstantDeserializer;
-import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -30,7 +27,7 @@ public record DailySummaryResponse(
     Long dailyPushesGoal,
     Double totalPushDistance,
     Long totalPushes,
-//    @JsonDeserialize(using = UtcInstantDeserializer.class) Instant wellnessStartTimeGmt,
+    LocalDateTime wellnessStartTimeGmt,
     LocalDateTime wellnessStartTimeLocal,
     LocalDateTime wellnessEndTimeGmt,
     LocalDateTime wellnessEndTimeLocal,
@@ -47,8 +44,8 @@ public record DailySummaryResponse(
     Integer vigorousIntensityMinutes,
     Double floorsAscendedInMeters,
     Double floorsDescendedInMeters,
-    Integer floorsAscended,
-    Integer floorsDescended,
+    Double floorsAscended,
+    Double floorsDescended,
     Integer intensityMinutesGoal,
     Integer userFloorsAscendedGoal,
     Integer minHeartRate,
@@ -86,7 +83,7 @@ public record DailySummaryResponse(
     Integer bodyBatteryMostRecentValue,
     Integer bodyBatteryDuringSleep,
     Integer bodyBatteryAtWakeTime,
-    Integer bodyBatteryVersion,
+    Double bodyBatteryVersion,
     Integer abnormalHeartRateAlertsCount,
     Double averageSpo2,
     Double lowestSpo2,

@@ -39,7 +39,7 @@ class UserSummaryDailyIngestionJobTest {
   void archivesCompleteOriginalResponseOnSuccess() throws Exception {
     String rawJson =
         """
-        {"calendarDate":"2026-11-07","totalSteps":8100,"unknownGarminField":{"value":true}}
+        {"calendarDate":"2026-11-07","totalSteps":8100,"wellnessStartTimeGmt":"2026-11-06T23:00:00.0","wellnessStartTimeLocal":"2026-11-07T00:00:00.0","floorsAscended":7.66339,"bodyBatteryVersion":2.0,"unknownGarminField":{"value":true}}
         """;
     server.enqueue(new MockResponse().setBody(rawJson));
     ProcessResult result = runJob(REQUESTED_DATE);
