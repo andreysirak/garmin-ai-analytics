@@ -254,6 +254,10 @@ See [issue #32 verification](docs/verification/0032-python-ingestion.md) for the
 recorded isolated Airflow/Kubernetes retry check and its test-only substitutions.
 
 Pull requests should pass **Validate infrastructure**, **Garmin API Integration
-Java**, and **Garmin API Integration Python**. Run the optional **Airflow Smoke
+Java**, and **Garmin API Integration Python**. Keep **Garmin API Integration
+Python** configured as a required status check in the repository ruleset: it
+explicitly runs the DagBag import/registration suite before the operator and
+authentication tests. Preserve this job name when editing CI so the required
+status-check configuration continues to match. Run the optional **Airflow Smoke
 Test** when changing Kubernetes or Airflow execution. Do not use Garmin
 credentials in CI.

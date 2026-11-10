@@ -170,6 +170,46 @@ def test_requires_absolute_rendered_output_directory():
     context["ti"].xcom_push.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    "output_dir",
+    [
+        "/tmp/attempt",
+        "/data/raw/garmin-other/attempt",
+        "/data/raw/garmin/../outside/attempt",
+        "/data/raw/garmin/day/../../outside/attempt",
+        "/data/raw/garmin/day/../../../../tmp/attempt",
+    ],
+)
+def test_rejects_rendered_output_directory_outside_pvc_root(output_dir):
+    operator = ingestion_task(output_dir="{{ params.output_dir }}")
+    context = task_context()
+    context["params"] = {"output_dir": output_dir}
+    operator.render_template_fields(context)
+    with patch.object(KubernetesPodOperator, "execute_sync") as run_pod:
+        with pytest.raises(ValueError, match="output_dir must stay within mount_path"):
+            operator.execute(context)
+    run_pod.assert_not_called()
+    context["ti"].xcom_push.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "mount_path,output_dir",
+    [
+        ("/data/raw/garmin", "/data/raw/garmin"),
+        ("/data/raw/garmin", "/data/raw/garmin/day/attempt"),
+        ("/data/raw/garmin", "/data/raw/garmin/day/../attempt"),
+        ("/archive/", "/archive//day/./attempt"),
+    ],
+)
+def test_contained_output_directory_is_forwarded_unchanged(mount_path, output_dir):
+    operator = ingestion_task(mount_path=mount_path, output_dir=output_dir)
+    context = task_context()
+    with patch.object(KubernetesPodOperator, "execute_sync"):
+        operator.execute(context)
+    assert operator.arguments[5] == output_dir
+    context["ti"].xcom_push.assert_called_once_with(key=OUTPUT_DIR_XCOM_KEY, value=output_dir)
+
+
 def test_failure_propagates_without_publishing_output_directory():
     context = task_context()
     with patch.object(

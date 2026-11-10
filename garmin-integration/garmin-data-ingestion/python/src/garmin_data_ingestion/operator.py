@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from datetime import timedelta
+from pathlib import PurePosixPath
+from posixpath import normpath
 
 from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
 from airflow.sdk import Context
@@ -142,6 +144,10 @@ class GarminIngestionOperator(KubernetesPodOperator):
     def execute(self, context: Context) -> None:
         if not self.output_dir.startswith("/"):
             raise ValueError("output_dir must be an absolute container path")
+        mount_path = PurePosixPath(normpath(self.mount_path))
+        output_path = PurePosixPath(normpath(self.output_dir))
+        if not output_path.is_relative_to(mount_path):
+            raise ValueError("output_dir must stay within mount_path")
         self.arguments = [
             "--endpoint",
             self.endpoint,

@@ -101,3 +101,34 @@ and installed packages. The workflow's Airflow constraints URL and editable-inst
 commands succeeded for both packages. The resolver selected Airflow 3.3.2 and the
 Kubernetes provider 10.21.0. DAG `py_compile`, Ruff, and **all 51 tests** passed.
 The files must be committed and pushed before GitHub Actions can use this fix.
+
+## Review hardening follow-up
+
+Rendered output directories are checked for lexical containment in the PVC mount
+root after POSIX normalization. Regression cases reject unrelated absolute paths,
+sibling prefixes, and `..` escapes before Pod execution or XCom publication; valid
+paths, including custom roots, are forwarded unchanged. No Pod-filesystem symlink
+resolution is attempted from the scheduler.
+
+The Python CI job now runs an explicit DagBag import/registration step and a
+separate operator/authentication step, retaining its existing status-check name.
+Both steps passed locally in the Airflow 3.3.1/Python 3.13 verification image:
+**18 DAG tests and 42 operator/authentication tests**, plus Ruff and workflow YAML
+parsing. These follow-up checks did not rerun the constrained Python 3.12 install.
+
+A read-only audit found that the active `main` ruleset (26791190) had no required
+status-check rule. A proposal to require `Garmin API Integration Python` from the
+GitHub Actions app was prepared separately; no repository ruleset was changed.
+
+## Runtime mount-path rename follow-up (2026-11-11)
+
+The constructor and PVC mount used `mount_path`, while the containment check still
+read the removed `self.archive_root` attribute. The check, error message, custom
+mount tests, and retry fixtures now consistently use `mount_path`.
+
+All **60 Python tests** and Ruff passed. The Airflow image built as
+`garmin-airflow:mount-path-fix-review`; the packaged operator executed with both
+default and custom mount paths while Pod execution was mocked. No Kubernetes or
+Garmin calls were made in this image check, and the image was not rolled out.
+Rebuild/load the normal Airflow image and restart scheduler/DAG processor before
+retrying the failed task.

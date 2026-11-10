@@ -60,9 +60,10 @@ jobs:
           ruff check airflow/dags airflow/tests \
             garmin-integration/garmin-auth/python \
             garmin-integration/garmin-data-ingestion/python
-      - name: Test Python integration
+      - name: Validate Airflow DAG imports and registration
+        run: pytest -q airflow/tests
+      - name: Test Python operators and authentication
         run: |
           pytest -q \
-            airflow/tests \
             garmin-integration/garmin-auth/python/tests \
             garmin-integration/garmin-data-ingestion/python/tests

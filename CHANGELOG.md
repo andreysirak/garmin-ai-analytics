@@ -4,6 +4,8 @@
 
 | Type | What changed | Breaking change | Upgrade steps | PR |
 | --- | --- | --- | --- | --- |
+| Fixed | Use mount_path consistently in ingestion containment validation and retry fixtures after the PVC setting rename | No | Rebuild/load the Airflow image and restart scheduler/DAG processor before retrying | |
+| Fixed | Reject rendered ingestion directories outside the mounted archive root, including parent traversal and sibling-prefix paths; explicitly validate DAG imports and registration in Python CI | No | Configure Garmin API Integration Python as required in the repository ruleset | |
 | Changed | Rename the daily DAG and source file to garmin_daily_pipeline to cover the intended ingestion-to-analytics workflow | Yes: Airflow DAG ID changed | Pause garmin_daily_ingestion before enabling garmin_daily_pipeline; previous run history and archives remain available | |
 | Changed | Replace duplicated Python ingestion operators with GarminIngestionOperator; supply shared Java CLI arguments, accept DAG-templated attempt directories, and publish only the output-directory path through XCom | Yes: import garmin_data_ingestion; supply a templated output_dir and a separate mount_path; remove api_base_url | Rebuild/load Airflow image and restart scheduler/DAG processor; downstream readers must require _SUCCESS | |
 | Changed | Inject FileWriter and TokenService interfaces; move local writing to common.io.impl.FileWriterLocalImpl and mounted-Secret token loading to common.service.impl.TokenServiceKubernetesImpl | No CLI or runtime configuration changes | Rebuild the Java ingestion image | |

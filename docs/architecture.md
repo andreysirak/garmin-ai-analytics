@@ -136,8 +136,10 @@ The hash keeps arbitrary run identifiers bounded and inside the archive root.
 UUIDs are generated when a fresh task attempt renders its fields, never during DAG
 parsing or by the operator. Retry and cleared/manual/backfill attempts render fresh
 copies of the source template, preserving uniqueness even for repeated try numbers.
-The operator validates that the rendered path is absolute, without creating,
-inspecting, deleting, or rewriting archive contents. Java creates the directory
+The operator validates that the rendered path is absolute and lexically contained
+within `mount_path`, normalizing `.` and `..` for the containment check. It then
+forwards the original path unchanged. Validation does not inspect the scheduler
+filesystem or resolve symlinks in the Pod filesystem. Java creates the directory
 and persists its response. Earlier failed and successful attempts are retained,
 including legacy layouts.
 

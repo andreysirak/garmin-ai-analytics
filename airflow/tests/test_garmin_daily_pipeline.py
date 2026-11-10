@@ -197,6 +197,10 @@ def test_failed_and_successful_archives_survive_a_retry(
 
     with patch.object(KubernetesPodOperator, "execute_sync", synthetic_pod):
         source_task = dag.get_task("ingest_daily_summary")
+        source_task.mount_path = str(tmp_path)
+        for mount in source_task.volume_mounts:
+            if mount.name == "garmin-raw-data":
+                mount.mount_path = str(tmp_path)
         source_task.output_dir = source_task.output_dir.replace(
             "/data/raw/garmin", str(tmp_path), 1
         )
