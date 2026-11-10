@@ -27,7 +27,9 @@ class GarminDataIngestionJobTest {
     assertEquals(0, result.exitCode());
     assertTrue(result.output().contains("--endpoint /path/to/resource"));
     assertTrue(result.output().contains("--query-param key=value"));
+    assertTrue(result.output().contains("Downstream readers must require _SUCCESS"));
     assertFalse(result.output().contains("--api-base-url"));
+    assertFalse(Files.exists(directory.resolve("_SUCCESS")));
   }
 
   @ParameterizedTest
@@ -54,6 +56,7 @@ class GarminDataIngestionJobTest {
     assertFalse(result.output().contains("Invalid ingestion arguments"));
     assertEquals(1, result.output().lines()
         .filter(line -> line.startsWith("Exception in thread \"main\"")).count());
+    assertFalse(Files.exists(directory.resolve("_SUCCESS")));
   }
 
   @Test

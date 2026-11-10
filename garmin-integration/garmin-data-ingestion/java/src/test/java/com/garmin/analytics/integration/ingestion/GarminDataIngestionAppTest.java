@@ -43,6 +43,7 @@ class GarminDataIngestionAppTest {
   private static final String ENDPOINT = "/caller/resource";
   private static final String DATE_PARAMETER = "callerDate";
   @TempDir Path directory;
+  @TempDir Path tokenDirectory;
   private HttpClient httpClient;
   private HttpResponse<String> response;
   private TokenService tokenService;
@@ -54,7 +55,7 @@ class GarminDataIngestionAppTest {
     response = mock(HttpResponse.class);
     when(response.statusCode()).thenReturn(200);
     when(httpClient.<String>send(any(), any())).thenReturn(response);
-    Path tokenFile = directory.resolve("token");
+    Path tokenFile = tokenDirectory.resolve("token");
     Files.writeString(tokenFile, "synthetic-injected-token\n");
     tokenService = new TokenService(tokenFile.toString());
   }
@@ -72,6 +73,7 @@ class GarminDataIngestionAppTest {
     application().run(arguments(directory, endpoint, dateParameter + "=" + DATE));
 
     assertArrayEquals(rawJson.getBytes(StandardCharsets.UTF_8), Files.readAllBytes(archive()));
+    assertEquals(0, Files.size(directory.resolve("_SUCCESS")));
     ArgumentCaptor<HttpRequest> sentRequest = ArgumentCaptor.forClass(HttpRequest.class);
     verify(httpClient).send(sentRequest.capture(), any());
     HttpRequest request = sentRequest.getValue();
@@ -94,12 +96,12 @@ class GarminDataIngestionAppTest {
     application().run(arguments(directory));
 
     assertEquals(rawJson, Files.readString(archive()));
+    assertEquals(0, Files.size(directory.resolve("_SUCCESS")));
   }
 
   @ParameterizedTest
   @ValueSource(strings = {"", "{", "{\"private-health-value\":1", "{} {}", "{} trailing"})
-  void malformedJsonDoesNotChangeEarlierData(String rawJson) throws Exception {
-    Files.writeString(archive(), "{\"previous\":true}");
+  void malformedJsonLeavesNoArchiveOrSuccessMarker(String rawJson) throws Exception {
     when(response.body()).thenReturn(rawJson);
 
     InvalidResponseException failure = assertThrows(InvalidResponseException.class,
@@ -107,7 +109,8 @@ class GarminDataIngestionAppTest {
 
     assertNull(failure.getCause());
     assertFalse(failure.getMessage().contains("private-health-value"));
-    assertEquals("{\"previous\":true}", Files.readString(archive()));
+    assertFalse(Files.exists(archive()));
+    assertFalse(Files.exists(directory.resolve("_SUCCESS")));
     verify(httpClient).close();
   }
 
@@ -124,6 +127,7 @@ class GarminDataIngestionAppTest {
     verify(httpClient).send(any(), any());
     verify(httpClient).close();
     assertFalse(Files.exists(archive()));
+    assertFalse(Files.exists(directory.resolve("_SUCCESS")));
   }
 
   @Test
@@ -137,18 +141,60 @@ class GarminDataIngestionAppTest {
 
     assertInstanceOf(java.io.IOException.class, failure.getCause());
     assertEquals("preserved", Files.readString(blocked));
+    assertFalse(Files.exists(blocked.resolve("_SUCCESS")));
   }
 
-  @Test
-  void rejectsExistingArchivesWithoutOverwritingThem() throws Exception {
-    Files.writeString(archive(), "{\"previous\":true}");
+  @ParameterizedTest
+  @ValueSource(strings = {"2026-11-07.json", "partial.json"})
+  void rejectsUnmarkedNonemptyAttemptDirectories(String filename) throws Exception {
+    Path previousFile = directory.resolve(filename);
+    Files.writeString(previousFile, "unfinished previous response");
     when(response.body()).thenReturn("{\"new\":true}");
 
     IngestionExecutionException failure = assertThrows(IngestionExecutionException.class,
         () -> application().run(arguments(directory)));
 
     assertInstanceOf(FileAlreadyExistsException.class, failure.getCause());
-    assertEquals("{\"previous\":true}", Files.readString(archive()));
+    assertEquals("unfinished previous response", Files.readString(previousFile));
+    assertFalse(Files.exists(directory.resolve("_SUCCESS")));
+    try (var entries = Files.list(directory)) {
+      assertEquals(List.of(previousFile), entries.toList());
+    }
+  }
+
+  @Test
+  void rejectsCompletedAttemptsEvenWithADifferentArchiveFilename() throws Exception {
+    Path previousArchive = directory.resolve("2026-11-06.json");
+    Files.writeString(previousArchive, "{\"previous\":true}");
+    Path marker = Files.createFile(directory.resolve("_SUCCESS"));
+    when(response.body()).thenReturn("{\"new\":true}");
+
+    IngestionExecutionException failure = assertThrows(IngestionExecutionException.class,
+        () -> application().run(arguments(directory)));
+
+    assertInstanceOf(FileAlreadyExistsException.class, failure.getCause());
+    assertEquals("{\"previous\":true}", Files.readString(previousArchive));
+    assertEquals(0, Files.size(marker));
+    assertFalse(Files.exists(archive()));
+  }
+
+  @Test
+  void writesANewAttemptWithoutChangingEarlierAttempts() throws Exception {
+    Path previousAttempt = Files.createDirectories(directory.resolve(DATE).resolve("1"));
+    Path previousArchive = previousAttempt.resolve(DATE + ".json");
+    Files.writeString(previousArchive, "{\"previous\":true}");
+    Files.createFile(previousAttempt.resolve("_SUCCESS"));
+    Path newAttempt = directory.resolve(DATE).resolve("2");
+    String rawJson = " \n{\"new\": \"café\", \"number\": 1.00}\n";
+    when(response.body()).thenReturn(rawJson);
+
+    application().run(arguments(newAttempt));
+
+    assertArrayEquals(rawJson.getBytes(StandardCharsets.UTF_8),
+        Files.readAllBytes(newAttempt.resolve(DATE + ".json")));
+    assertEquals(0, Files.size(newAttempt.resolve("_SUCCESS")));
+    assertEquals("{\"previous\":true}", Files.readString(previousArchive));
+    assertEquals(0, Files.size(previousAttempt.resolve("_SUCCESS")));
   }
 
   @Test
@@ -161,6 +207,7 @@ class GarminDataIngestionAppTest {
 
     assertTrue(failure.getMessage().contains("--endpoint"));
     verify(httpClient, never()).send(any(), any());
+    assertFalse(Files.exists(directory.resolve("_SUCCESS")));
   }
 
   @Test
@@ -172,6 +219,7 @@ class GarminDataIngestionAppTest {
 
     verify(httpClient).close();
     verify(httpClient, never()).send(any(), any());
+    assertFalse(Files.exists(directory.resolve("_SUCCESS")));
   }
 
   @Test
@@ -182,6 +230,7 @@ class GarminDataIngestionAppTest {
       assertThrows(InterruptedException.class, () -> application().run(arguments(directory)));
       assertTrue(Thread.currentThread().isInterrupted());
       verify(httpClient).close();
+      assertFalse(Files.exists(directory.resolve("_SUCCESS")));
     } finally {
       Thread.interrupted();
     }

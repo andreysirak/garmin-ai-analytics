@@ -122,29 +122,41 @@ make airflow-ui
 
 Sign in to Airflow as `admin` using the printed password, then trigger or unpause `garmin_daily_ingestion`. Manual runs support an optional date in `YYYY-MM-DD` format.
 
-Java treats `--output-dir` as the **final destination directory** and writes only
-`<output-dir>/<requested-date>.json`. It adds no endpoint, date, or download-number
+Java treats `--output-dir` as the **final attempt directory** and writes
+`<output-dir>/<requested-date>.json`, followed by an empty `<output-dir>/_SUCCESS`
+file when the write completes. It adds no endpoint, date, or download-number
 subdirectories. A caller may select directories with this layout:
 
 ```text
 data/raw/garmin/
 ├── daily-summary/
 │   └── 2026-11-07/
-│       ├── 1/2026-11-07.json
-│       └── 2/2026-11-07.json
+│       ├── 1/
+│       │   ├── 2026-11-07.json
+│       │   └── _SUCCESS
+│       └── 2/
+│           ├── 2026-11-07.json
+│           └── _SUCCESS
 └── sleep/
     └── 2026-11-07/
-        ├── 1/2026-11-07.json
-        └── 2/2026-11-07.json
+        ├── 1/
+        │   ├── 2026-11-07.json
+        │   └── _SUCCESS
+        └── 2/
+            ├── 2026-11-07.json
+            └── _SUCCESS
 ```
 
 Responses are checked only for syntactically valid JSON, then saved as the original
 UTF-8 string. Fields, dates, numeric formats, whitespace, and unknown properties are
 not mapped or changed. Each response must contain exactly one JSON value; empty or
 malformed responses are rejected before writing. Directory selection and uniqueness
-belong to the caller; Java does not allocate download numbers. Writes go directly to
-a new file and fail if it already exists, preserving earlier data. Response schema
-and business validation belong downstream.
+belong to the caller; Java does not allocate download numbers. Each attempt requires
+a new or empty directory; nonempty directories are rejected without changing their
+contents. Writes go directly to a new file. A failed attempt may leave JSON behind
+but receives no `_SUCCESS` marker. Downstream tasks must read only directories
+containing that marker. Each retry must use a distinct directory, preserving earlier
+attempts. Response schema and business validation belong downstream.
 
 **Privacy:** Keep API keys, bearer tokens, and personal Garmin data out of Git, images, logs, and public issues. The archive directory is Git-ignored.
 

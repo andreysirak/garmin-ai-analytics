@@ -10,7 +10,7 @@ import java.util.Map;
  * <p>The archive date is independent of the query parameters sent to Garmin.
  *
  * @param date the archive date used in the destination filename
- * @param outputDirectory the final output directory selected by the caller
+ * @param outputDirectory the caller-selected attempt directory, which must be new or empty
  * @param endpoint the validated absolute API path, without a query string or fragment
  * @param queryParameters the unencoded request parameter names and values; may be empty
  */

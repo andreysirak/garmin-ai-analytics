@@ -47,8 +47,9 @@ operator consolidation and DAG/XCom changes remain separate work.
 `GarminDataIngestionJob.main(args)` constructs a `TokenService`, JDK `HttpClient`,
 and `FileWriter`, then calls the constructor-injected `GarminDataIngestionApp.run(args)`.
 The application owns CLI processing, token reading, fetching, JSON syntax checking,
-and writing the unchanged response. It closes the HTTP client on success, help,
-and failure. The 10-second connection and 30-second request timeouts are preserved.
+writing the unchanged response, and marking the attempt complete. It closes the HTTP
+client on success, help, and failure. The 10-second connection and 30-second request
+timeouts are preserved.
 
 Each invocation fetches the caller-supplied `--endpoint` path. The caller may
 supply zero or more `--query-param key=value` options. `GarminApiIntegrationOptions`
@@ -87,17 +88,26 @@ and any request query parameters before running the pipeline.
 value. Objects, arrays, scalars, and JSON `null` are accepted. There are no response
 DTOs, field checks, response-date checks, or sleep-data classification.
 
-`--output-dir` remains the final directory. The application writes the original
+`--output-dir` remains the final attempt directory. The application writes the original
 UTF-8 response to `<output-dir>/<requested-date>.json` without adding subdirectories.
 `FileWriter` creates parent directories and writes directly with `CREATE_NEW`.
-Existing files are never overwritten. Failed writes may leave partial files;
-there are no temporary files or atomic moves. Directory naming and uniqueness
-belong to the caller. Response whitespace, unknown fields, timestamps, nulls,
-and numeric representations remain unchanged.
+The application accepts only a new or empty attempt directory. Existing attempts
+are never overwritten or deleted. There are no temporary files or atomic moves.
+Response whitespace, unknown fields, timestamps, nulls, and numeric representations
+remain unchanged.
+
+After syntax validation and a successful JSON write, the application creates an
+empty `_SUCCESS` file in the same directory. A JSON write or marker-creation failure
+propagates as an ingestion failure. Failed attempts remain unmarked and may contain
+partial or complete JSON files. Downstream tasks must ignore directories without
+`_SUCCESS`. Directory naming and uniqueness belong to the caller; each invocation,
+including retries, must receive its own directory. Java does not allocate attempt
+numbers or perform downstream reads.
 
 DAG/XCom wiring remains pending. The DAG must supply distinct final directories
 per endpoint/download attempt, share those paths through XCom, and keep the PVC
 mounted at a stable archive root independently of each final output directory.
+Future downstream tasks must enforce the `_SUCCESS` requirement before reading JSON.
 Complete that wiring before running the pipeline with the new directory contract.
 
 `GarminApiException`, `InvalidResponseException`, and `IngestionExecutionException`
