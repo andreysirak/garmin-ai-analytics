@@ -169,6 +169,12 @@ make java-verify
 ```
 
 The executable JAR is `garmin-integration/garmin-data-ingestion/java/target/garmin-data-ingestion.jar`.
+The entry point injects `FileWriterLocalImpl` and `TokenServiceKubernetesImpl` through
+the `FileWriter` and `TokenService` interfaces. Their implementations live in the
+shared module's `common.io.impl` and `common.service.impl` packages. The token service
+reads `GARMIN_TOKEN_FILE` from the mounted Kubernetes Secret; it makes no Kubernetes
+API calls.
+
 Supply `--endpoint /path/to/resource` alongside the archive date and final output
 directory. Add any number of request parameters by repeating `--query-param key=value`,
 for example `--query-param from=2026-10-01 --query-param limit=25`. Omit it to send

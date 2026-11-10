@@ -1,4 +1,4 @@
-package com.garmin.analytics.integration.common.service;
+package com.garmin.analytics.integration.common.service.impl;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.garmin.analytics.integration.common.exception.IngestionExecutionException;
+import com.garmin.analytics.integration.common.service.TokenService;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -16,7 +17,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-class TokenServiceTest {
+class TokenServiceKubernetesImplTest {
 
   @TempDir Path directory;
 
@@ -24,7 +25,7 @@ class TokenServiceTest {
   void readsTrimmedTokenFromConfiguredFile() throws Exception {
     Path token = directory.resolve("token");
     Files.writeString(token, "  synthetic-token\n");
-    TokenService service = new TokenService(token.toString());
+    TokenService service = new TokenServiceKubernetesImpl(token.toString());
     assertEquals("synthetic-token", service.readBearerToken());
   }
 
@@ -32,7 +33,7 @@ class TokenServiceTest {
   void rejectsEmptyTokenAndPreservesTheCause() throws Exception {
     Path token = directory.resolve("token");
     Files.writeString(token, "  ");
-    TokenService service = new TokenService(token.toString());
+    TokenService service = new TokenServiceKubernetesImpl(token.toString());
 
     IngestionExecutionException failure = assertThrows(IngestionExecutionException.class,
         service::readBearerToken);
@@ -41,7 +42,7 @@ class TokenServiceTest {
 
   @Test
   void validatesMissingConfigurationWhenReading() {
-    TokenService service = new TokenService(null);
+    TokenService service = new TokenServiceKubernetesImpl(null);
     IngestionExecutionException failure = assertThrows(IngestionExecutionException.class,
         service::readBearerToken);
     assertInstanceOf(IllegalArgumentException.class, failure.getCause());
@@ -49,7 +50,8 @@ class TokenServiceTest {
 
   @Test
   void preservesMissingFileCauseWithoutExposingThePathInItsMessage() {
-    TokenService service = new TokenService(directory.resolve("private-token-path").toString());
+    TokenService service = new TokenServiceKubernetesImpl(
+        directory.resolve("private-token-path").toString());
     IngestionExecutionException failure = assertThrows(IngestionExecutionException.class,
         service::readBearerToken);
     assertInstanceOf(IOException.class, failure.getCause());
@@ -61,7 +63,7 @@ class TokenServiceTest {
   void invalidHeaderCharactersCannotExposeTheTokenInStackTraces(String value) throws Exception {
     Path token = directory.resolve("token");
     Files.writeString(token, value);
-    TokenService service = new TokenService(token.toString());
+    TokenService service = new TokenServiceKubernetesImpl(token.toString());
 
     IngestionExecutionException failure = assertThrows(IngestionExecutionException.class,
         service::readBearerToken);

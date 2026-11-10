@@ -1,21 +1,19 @@
 package com.garmin.analytics.integration.common.io;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
 
 /**
- * Archives unchanged response text in newly created UTF-8 files.
+ * Writes unchanged response text to newly created files.
  *
- * <p>Missing parent directories are created and existing files are never replaced. A failed write
- * may leave a partial file.
+ * <p>Implementations create missing parent directories and preserve existing destination files.
  */
-public final class FileWriter {
+public interface FileWriter {
 
   /**
-   * Writes the response text to the caller-selected destination file.
+   * Writes the complete response text as UTF-8 to the caller-selected destination file.
+   *
+   * <p>The file is closed before this method returns. A failed write may leave a partial file.
    *
    * @param destination the non-null destination file path
    * @param rawJson the non-null response text to write without modification
@@ -23,10 +21,5 @@ public final class FileWriter {
    * @throws java.nio.file.FileAlreadyExistsException if the destination already exists
    * @throws IOException if parent directories cannot be created or the file cannot be written
    */
-  public Path write(Path destination, String rawJson) throws IOException {
-    Path target = destination.toAbsolutePath().normalize();
-    Files.createDirectories(target.getParent());
-    return Files.writeString(target, rawJson, StandardCharsets.UTF_8,
-        StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
-  }
+  Path write(Path destination, String rawJson) throws IOException;
 }

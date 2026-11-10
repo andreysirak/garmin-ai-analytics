@@ -34,6 +34,9 @@ public final class GarminDataIngestionApp {
   /**
    * Creates an ingestion application with its required dependencies.
    *
+   * <p>Token loading and response writing are injected through their interfaces. Concrete
+   * implementations are selected by the application entry point.
+   *
    * @param tokenService the service that reads and validates the bearer token
    * @param httpClient the configured HTTP client, closed by {@link #run(String[])}
    * @param writer the writer that archives the unchanged response text
@@ -79,7 +82,8 @@ public final class GarminDataIngestionApp {
   }
 
   private void createSuccessMarkerFile(GarminApiIntegrationOptions options) throws IOException {
-    Files.createFile(options.outputDirectory().toAbsolutePath().normalize().getParent().resolve("_SUCCESS"));
+    Path attemptDirectory = options.outputDirectory().toAbsolutePath().normalize();
+    Files.createFile(attemptDirectory.resolve("_SUCCESS"));
   }
 
   private void ingest(GarminApiIntegrationOptions options)

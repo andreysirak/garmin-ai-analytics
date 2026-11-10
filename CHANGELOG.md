@@ -4,6 +4,8 @@
 
 | Type | What changed | Breaking change | Upgrade steps | PR |
 | --- | --- | --- | --- | --- |
+| Changed | Inject FileWriter and TokenService interfaces; move local writing to common.io.impl.FileWriterLocalImpl and mounted-Secret token loading to common.service.impl.TokenServiceKubernetesImpl | No CLI or runtime configuration changes | Rebuild the Java ingestion image | |
+| Fixed | Create _SUCCESS in the supplied attempt directory beside its JSON archive | No | Rebuild the Java ingestion image | |
 | Added | Mark completed raw JSON ingestion attempts with an empty _SUCCESS file; reject nonempty attempt directories and preserve previous attempts | Yes: each invocation requires a new or empty --output-dir | Supply a distinct directory for every attempt, including retries; downstream readers must require _SUCCESS | #29 |
 | Changed | Consolidate Sleep and Daily Summary under garmin-data-ingestion/java and python; use one injected Java application and thin main, a fixed Garmin base URI, and caller-supplied endpoint paths and generic query parameters | Yes: Java module/JAR, entry point and required arguments changed | Remove --api-base-url; pass --endpoint and optional repeatable --query-param key=value; update Python operators in their follow-up and rebuild images | |
 | Docs | Document why Java ingestion was retained after evaluating the Airflow 3 Java Task SDK, while orchestration stays in Python | No | None | #29 |

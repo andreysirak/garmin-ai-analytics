@@ -210,7 +210,10 @@ mvn -pl garmin-data-ingestion/java -am package
 
 `mvn verify` runs JUnit 5, SpotBugs, and PMD. Tests use synthetic data and
 mocked HTTP clients; never use real Garmin credentials or personal data.
-Mockito's subclass mock maker is selected in test resources for the injected JDK HTTP client.
+Mockito's subclass mock maker is selected in test resources. Application tests mock
+the injected JDK HTTP client and `TokenService` interface; failure tests can also mock
+`FileWriter`. Tests for `FileWriterLocalImpl` and `TokenServiceKubernetesImpl` use
+temporary files to verify the implementations independently.
 Dependency vulnerability scanning is temporarily excluded because the current
 Dependency-Check release fails without an NVD API key and unauthenticated NVD
 updates were rate-limited. See [issue #6](https://github.com/andreysirak/garmin-ai-analytics/issues/6)

@@ -44,8 +44,12 @@ PostgreSQL Bronze/Silver/Gold storage and downstream analytics remain out of sco
 `python/` operator packages. The Python source and tests were moved unchanged;
 operator consolidation and DAG/XCom changes remain separate work.
 
-`GarminDataIngestionJob.main(args)` constructs a `TokenService`, JDK `HttpClient`,
-and `FileWriter`, then calls the constructor-injected `GarminDataIngestionApp.run(args)`.
+`GarminDataIngestionJob.main(args)` constructs `TokenServiceKubernetesImpl`, a JDK
+`HttpClient`, and `FileWriterLocalImpl`, then calls `GarminDataIngestionApp.run(args)`.
+The application receives the `common.service.TokenService` and `common.io.FileWriter`
+interfaces through its constructor. Concrete implementations live in
+`common.service.impl` and `common.io.impl`; only the entry point selects them.
+Dependency construction remains explicit, without a DI framework.
 The application owns CLI processing, token reading, fetching, JSON syntax checking,
 writing the unchanged response, and marking the attempt complete. It closes the HTTP
 client on success, help, and failure. The 10-second connection and 30-second request
@@ -73,14 +77,18 @@ base URL option. `GarminClient.callGet` resolves the endpoint against `BASE_URI`
 and encodes the query parameters. CLI and token-file validation run before the
 client is called, so the client does not repeat input checks or normalization.
 HTTP tests mock the injected JDK `HttpClient` and capture the complete request;
-there is no alternate-URL constructor or application client factory.
+there is no alternate-URL constructor or application client factory. Application
+tests mock `TokenService` and can inject a failing `FileWriter`. Implementation
+tests exercise mounted-file token loading and local writes using temporary files.
 
 Apache Commons CLI handles required `--date`, `--output-dir`, and `--endpoint`,
 optional repeatable `--query-param`, and standalone `--help`. Required-option, argument,
 duplicate, blank, date, endpoint-path, and positional-argument checks happen before
-HTTP requests. `TokenService` still reads the bearer token from `GARMIN_TOKEN_FILE`,
-which Kubernetes provides through a read-only Secret mount. Help requires neither
-a token nor request arguments. Authentication and HTTP request semantics are unchanged.
+HTTP requests. `TokenServiceKubernetesImpl` implements `TokenService` by reading the
+bearer token from `GARMIN_TOKEN_FILE`, which Kubernetes provides through a read-only
+Secret mount. It reads the mounted file without calling the Kubernetes API. Token
+trimming, validation, and failure causes are preserved. Help requires neither a token
+nor request arguments. Authentication and HTTP request semantics are unchanged.
 The Python follow-up must remove `--api-base-url` and supply the endpoint path
 and any request query parameters before running the pipeline.
 
@@ -90,7 +98,8 @@ DTOs, field checks, response-date checks, or sleep-data classification.
 
 `--output-dir` remains the final attempt directory. The application writes the original
 UTF-8 response to `<output-dir>/<requested-date>.json` without adding subdirectories.
-`FileWriter` creates parent directories and writes directly with `CREATE_NEW`.
+`FileWriterLocalImpl` implements `FileWriter` using Java NIO. It creates parent
+directories and writes the unchanged UTF-8 response directly with `CREATE_NEW`.
 The application accepts only a new or empty attempt directory. Existing attempts
 are never overwritten or deleted. There are no temporary files or atomic moves.
 Response whitespace, unknown fields, timestamps, nulls, and numeric representations

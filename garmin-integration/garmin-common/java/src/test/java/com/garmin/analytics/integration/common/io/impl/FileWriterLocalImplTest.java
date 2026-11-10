@@ -1,9 +1,10 @@
-package com.garmin.analytics.integration.common.io;
+package com.garmin.analytics.integration.common.io.impl;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import com.garmin.analytics.integration.common.io.FileWriter;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileAlreadyExistsException;
@@ -12,9 +13,9 @@ import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-class FileWriterTest {
+class FileWriterLocalImplTest {
 
-  private final FileWriter writer = new FileWriter();
+  private final FileWriter writer = new FileWriterLocalImpl();
   @TempDir Path temporaryDirectory;
 
   @Test

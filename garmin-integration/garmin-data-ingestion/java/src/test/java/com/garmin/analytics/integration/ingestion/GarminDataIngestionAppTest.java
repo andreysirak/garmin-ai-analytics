@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -17,7 +18,9 @@ import com.garmin.analytics.integration.common.exception.GarminApiException;
 import com.garmin.analytics.integration.common.exception.IngestionExecutionException;
 import com.garmin.analytics.integration.common.exception.InvalidResponseException;
 import com.garmin.analytics.integration.common.io.FileWriter;
+import com.garmin.analytics.integration.common.io.impl.FileWriterLocalImpl;
 import com.garmin.analytics.integration.common.service.TokenService;
+import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -43,10 +46,10 @@ class GarminDataIngestionAppTest {
   private static final String ENDPOINT = "/caller/resource";
   private static final String DATE_PARAMETER = "callerDate";
   @TempDir Path directory;
-  @TempDir Path tokenDirectory;
   private HttpClient httpClient;
   private HttpResponse<String> response;
   private TokenService tokenService;
+  private FileWriter writer;
 
   @BeforeEach
   @SuppressWarnings("unchecked")
@@ -55,9 +58,9 @@ class GarminDataIngestionAppTest {
     response = mock(HttpResponse.class);
     when(response.statusCode()).thenReturn(200);
     when(httpClient.<String>send(any(), any())).thenReturn(response);
-    Path tokenFile = tokenDirectory.resolve("token");
-    Files.writeString(tokenFile, "synthetic-injected-token\n");
-    tokenService = new TokenService(tokenFile.toString());
+    tokenService = mock(TokenService.class);
+    when(tokenService.readBearerToken()).thenReturn("synthetic-injected-token");
+    writer = new FileWriterLocalImpl();
   }
 
   @ParameterizedTest
@@ -139,9 +142,46 @@ class GarminDataIngestionAppTest {
     IngestionExecutionException failure = assertThrows(IngestionExecutionException.class,
         () -> application().run(arguments(blocked)));
 
-    assertInstanceOf(java.io.IOException.class, failure.getCause());
+    assertInstanceOf(IOException.class, failure.getCause());
     assertEquals("preserved", Files.readString(blocked));
     assertFalse(Files.exists(blocked.resolve("_SUCCESS")));
+  }
+
+  @Test
+  void tokenFailurePropagatesBeforeSendingARequest() throws Exception {
+    IngestionExecutionException tokenFailure =
+        new IngestionExecutionException("Synthetic token failure");
+    when(tokenService.readBearerToken()).thenThrow(tokenFailure);
+
+    IngestionExecutionException failure = assertThrows(IngestionExecutionException.class,
+        () -> application().run(arguments(directory)));
+
+    assertSame(tokenFailure, failure);
+    verify(httpClient, never()).send(any(), any());
+    verify(httpClient).close();
+    assertFalse(Files.exists(archive()));
+    assertFalse(Files.exists(directory.resolve("_SUCCESS")));
+  }
+
+  @Test
+  void failedWritePreservesPartialArchiveWithoutSuccessMarker() throws Exception {
+    String rawJson = "{\"complete\":true}";
+    when(response.body()).thenReturn(rawJson);
+    writer = mock(FileWriter.class);
+    IOException writeFailure = new IOException("Synthetic write failure");
+    when(writer.write(archive(), rawJson)).thenAnswer(invocation -> {
+      assertFalse(Files.exists(directory.resolve("_SUCCESS")));
+      Files.writeString(archive(), "{");
+      throw writeFailure;
+    });
+
+    IngestionExecutionException failure = assertThrows(IngestionExecutionException.class,
+        () -> application().run(arguments(directory)));
+
+    assertSame(writeFailure, failure.getCause());
+    assertEquals("{", Files.readString(archive()));
+    assertFalse(Files.exists(directory.resolve("_SUCCESS")));
+    verify(httpClient).close();
   }
 
   @ParameterizedTest
@@ -199,24 +239,21 @@ class GarminDataIngestionAppTest {
 
   @Test
   void validatesArgumentsBeforeReadingTheToken() throws Exception {
-    GarminDataIngestionApp app = new GarminDataIngestionApp(
-        new TokenService(null), httpClient, new FileWriter());
-
     IngestionExecutionException failure = assertThrows(IngestionExecutionException.class,
-        () -> app.run(arguments(directory, "relative/path", DATE_PARAMETER + "=" + DATE)));
+        () -> application().run(
+            arguments(directory, "relative/path", DATE_PARAMETER + "=" + DATE)));
 
     assertTrue(failure.getMessage().contains("--endpoint"));
+    verify(tokenService, never()).readBearerToken();
     verify(httpClient, never()).send(any(), any());
     assertFalse(Files.exists(directory.resolve("_SUCCESS")));
   }
 
   @Test
   void helpNeedsNoTokenAndClosesTheHttpClient() throws Exception {
-    GarminDataIngestionApp app = new GarminDataIngestionApp(
-        new TokenService(null), httpClient, new FileWriter());
+    application().run(new String[] {"--help"});
 
-    app.run(new String[] {"--help"});
-
+    verify(tokenService, never()).readBearerToken();
     verify(httpClient).close();
     verify(httpClient, never()).send(any(), any());
     assertFalse(Files.exists(directory.resolve("_SUCCESS")));
@@ -266,7 +303,7 @@ class GarminDataIngestionAppTest {
   }
 
   private GarminDataIngestionApp application() {
-    return new GarminDataIngestionApp(tokenService, httpClient, new FileWriter());
+    return new GarminDataIngestionApp(tokenService, httpClient, writer);
   }
 
   private String[] arguments(Path outputDirectory) {
