@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "garmin-data-ingestion"
 version = "0.1.0"
-description = "Airflow Kubernetes operators for Garmin data ingestion"
+description = "Shared Airflow Kubernetes operator for Garmin data ingestion"
 requires-python = ">=3.11"
 dependencies = [
   "apache-airflow>=3.3,<4",

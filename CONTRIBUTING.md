@@ -238,10 +238,26 @@ pytest -q airflow/tests \
   garmin-integration/garmin-data-ingestion/python/tests
 ```
 
+The shared ingestion operator is exported as
+`garmin_data_ingestion.GarminIngestionOperator`; `airflow/Dockerfile` copies this
+package alongside `garmin_auth`. Rebuild/load the Airflow image and run
+`make airflow-operator-rollout` after operator changes. Both ingestion image tags
+continue to use the same shared JAR. The DAG constructs the attempt-directory
+template and passes it through the required `output_dir` parameter; `mount_path`
+controls only the stable PVC mount.
+
 Python tests mock Kubernetes operations and use synthetic credentials and
-local HTTP fixtures. Do not run authentication against Garmin from tests.
+local HTTP fixtures. Ingestion tests cover explicit query dates, opaque query
+values, stable PVC mounts, directory-only XCom, and the date/try-number layout with
+completed and unmarked archive fixtures. Do not run authentication against Garmin from tests.
+See [issue #32 verification](docs/verification/0032-python-ingestion.md) for the
+recorded isolated Airflow/Kubernetes retry check and its test-only substitutions.
 
 Pull requests should pass **Validate infrastructure**, **Garmin API Integration
-Java**, and **Garmin API Integration Python**. Run the optional **Airflow Smoke
+Java**, and **Garmin API Integration Python**. Keep **Garmin API Integration
+Python** configured as a required status check in the repository ruleset: it
+explicitly runs the DagBag import/registration suite before the operator and
+authentication tests. Preserve this job name when editing CI so the required
+status-check configuration continues to match. Run the optional **Airflow Smoke
 Test** when changing Kubernetes or Airflow execution. Do not use Garmin
 credentials in CI.

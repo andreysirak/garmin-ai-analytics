@@ -1,19 +1,23 @@
-"""KubernetesPodOperator for the standalone Garmin daily summary job."""
+"""Run the shared Garmin JAR, with one immutable archive directory per execution."""
 
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from datetime import timedelta
-from urllib.parse import urlsplit
+from pathlib import PurePosixPath
+from posixpath import normpath
 
 from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
+from airflow.sdk import Context
 from kubernetes.client import models as k8s
 
 DEFAULT_IMAGE = "garmin-daily-summary:local"
-DEFAULT_API_BASE_URL = "https://personal.connectapi.garmin.com"
-DEFAULT_OUTPUT_DIR = "/data/raw/garmin"
+DEFAULT_MOUNT_PATH = "/data/raw/garmin"
+OUTPUT_DIR_XCOM_KEY = "output_dir"
 TOKEN_SECRET = "garmin-access-token"
 TOKEN_SECRET_KEY = "access-token"
+TOKEN_FILE_NAME = "token"
 TOKEN_MOUNT_PATH = "/var/run/garmin-token"
 RAW_DATA_CLAIM = "garmin-raw-data"
 
@@ -25,41 +29,51 @@ def _raw_data_group_id() -> int:
     return int(value)
 
 
-class DailySummaryIngestionOperator(KubernetesPodOperator):
-    """Runs the standalone daily summary JAR in an isolated Kubernetes Pod."""
+class GarminIngestionOperator(KubernetesPodOperator):
+    """Fetch an endpoint using explicit, unencoded query parameters.
+
+    ``date`` names the archive file only; include any request date in ``query_params``.
+    The DAG supplies a distinct, templated ``output_dir`` for each attempt; the
+    operator passes it unchanged to Java. The PVC stays mounted at ``mount_path``.
+    Synchronous execution publishes only the output directory after the Pod succeeds,
+    without an XCom sidecar. Downstream readers must require the empty ``_SUCCESS`` marker.
+    """
+
+    template_fields = (
+        *KubernetesPodOperator.template_fields,
+        "endpoint",
+        "date",
+        "query_params",
+        "output_dir",
+    )
 
     def __init__(
         self,
         *,
+        endpoint: str,
         date: str,
-        api_base_url: str = DEFAULT_API_BASE_URL,
-        output_dir: str = DEFAULT_OUTPUT_DIR,
+        output_dir: str,
+        query_params: Mapping[str, str] | None = None,
+        mount_path: str = DEFAULT_MOUNT_PATH,
         image: str = DEFAULT_IMAGE,
         **kwargs: object,
     ) -> None:
-        parsed_url = urlsplit(api_base_url)
-        if (
-            parsed_url.scheme not in {"https", "http"}
-            or not parsed_url.hostname
-            or parsed_url.username is not None
-            or parsed_url.password is not None
-            or parsed_url.query
-            or parsed_url.fragment
-        ):
-            raise ValueError("api_base_url must be an HTTP(S) URL")
-        if not output_dir.startswith("/"):
-            raise ValueError("output_dir must be an absolute container path")
+        if not mount_path.startswith("/"):
+            raise ValueError("mount_path must be an absolute container path")
+        self.endpoint = endpoint
+        self.date = date
+        self.output_dir = output_dir
+        self.query_params = dict(query_params or {})
+        self.mount_path = mount_path
 
         super().__init__(
-            cmds=["java", "-jar", "/app/garmin-daily-summary.jar"],
-            arguments=[
-                "--date",
-                date,
-                "--api-base-url",
-                api_base_url,
-                "--output-dir",
-                output_dir,
-            ],
+            cmds=["java", "-jar", "/app/garmin-data-ingestion.jar"],
+            # Built after Airflow renders the request and output-directory fields.
+            arguments=[],
+            do_xcom_push=False,
+            deferrable=False,
+            # A new invocation must launch a Pod using the DAG-supplied directory.
+            reattach_on_restart=False,
             namespace="airflow-jobs",
             service_account_name="airflow-job",
             image=image,
@@ -67,7 +81,7 @@ class DailySummaryIngestionOperator(KubernetesPodOperator):
             env_vars=[
                 k8s.V1EnvVar(
                     name="GARMIN_TOKEN_FILE",
-                    value=f"{TOKEN_MOUNT_PATH}/{TOKEN_SECRET_KEY}",
+                    value=f"{TOKEN_MOUNT_PATH}/{TOKEN_FILE_NAME}",
                 )
             ],
             volumes=[
@@ -79,7 +93,7 @@ class DailySummaryIngestionOperator(KubernetesPodOperator):
                         items=[
                             k8s.V1KeyToPath(
                                 key=TOKEN_SECRET_KEY,
-                                path=TOKEN_SECRET_KEY,
+                                path=TOKEN_FILE_NAME,
                             )
                         ],
                     ),
@@ -99,7 +113,7 @@ class DailySummaryIngestionOperator(KubernetesPodOperator):
                 ),
                 k8s.V1VolumeMount(
                     name="garmin-raw-data",
-                    mount_path=output_dir,
+                    mount_path=mount_path,
                     read_only=False,
                 ),
             ],
@@ -126,3 +140,24 @@ class DailySummaryIngestionOperator(KubernetesPodOperator):
             execution_timeout=timedelta(minutes=10),
             **kwargs,
         )
+
+    def execute(self, context: Context) -> None:
+        if not self.output_dir.startswith("/"):
+            raise ValueError("output_dir must be an absolute container path")
+        mount_path = PurePosixPath(normpath(self.mount_path))
+        output_path = PurePosixPath(normpath(self.output_dir))
+        if not output_path.is_relative_to(mount_path):
+            raise ValueError("output_dir must stay within mount_path")
+        self.arguments = [
+            "--endpoint",
+            self.endpoint,
+            "--date",
+            self.date,
+            "--output-dir",
+            self.output_dir,
+        ]
+        for key, value in self.query_params.items():
+            self.arguments.extend(["--query-param", f"{key}={value}"])
+
+        super().execute(context)
+        context["ti"].xcom_push(key=OUTPUT_DIR_XCOM_KEY, value=self.output_dir)

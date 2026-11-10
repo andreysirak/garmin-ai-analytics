@@ -11,7 +11,7 @@ WORKDIR /app
 COPY --from=build \
     /workspace/garmin-integration/garmin-data-ingestion/java/target/garmin-data-ingestion.jar \
     /app/garmin-data-ingestion.jar
-# Preserve the commands used by the existing Python operators.
+# Retain legacy JAR aliases for external callers. Airflow uses the shared JAR.
 RUN ln -s garmin-data-ingestion.jar garmin-daily-summary.jar \
     && ln -s garmin-data-ingestion.jar garmin-sleep.jar
 USER 10001:10001

@@ -4,6 +4,11 @@
 
 | Type | What changed | Breaking change | Upgrade steps | PR |
 | --- | --- | --- | --- | --- |
+| Changed | Store ingestion archives as data-type/YYYY-MM-DD/try-number/YYYY-MM-DD.json, without a run directory | New attempts use the simplified layout | Existing archives remain readable in their original locations | |
+| Fixed | Use mount_path consistently in ingestion containment validation and retry fixtures after the PVC setting rename | No | Rebuild/load the Airflow image and restart scheduler/DAG processor before retrying | |
+| Fixed | Reject rendered ingestion directories outside the mounted archive root, including parent traversal and sibling-prefix paths; explicitly validate DAG imports and registration in Python CI | No | Configure Garmin API Integration Python as required in the repository ruleset | |
+| Changed | Rename the daily DAG and source file to garmin_daily_pipeline to cover the intended ingestion-to-analytics workflow | Yes: Airflow DAG ID changed | Pause garmin_daily_ingestion before enabling garmin_daily_pipeline; previous run history and archives remain available | |
+| Changed | Replace duplicated Python ingestion operators with GarminIngestionOperator; supply shared Java CLI arguments, accept DAG-templated attempt directories, and publish only the output-directory path through XCom | Yes: import garmin_data_ingestion; supply a templated output_dir and a separate mount_path; remove api_base_url | Rebuild/load Airflow image and restart scheduler/DAG processor; downstream readers must require _SUCCESS | |
 | Changed | Inject FileWriter and TokenService interfaces; move local writing to common.io.impl.FileWriterLocalImpl and mounted-Secret token loading to common.service.impl.TokenServiceKubernetesImpl | No CLI or runtime configuration changes | Rebuild the Java ingestion image | |
 | Fixed | Create _SUCCESS in the supplied attempt directory beside its JSON archive | No | Rebuild the Java ingestion image | |
 | Added | Mark completed raw JSON ingestion attempts with an empty _SUCCESS file; reject nonempty attempt directories and preserve previous attempts | Yes: each invocation requires a new or empty --output-dir | Supply a distinct directory for every attempt, including retries; downstream readers must require _SUCCESS | #29 |
