@@ -43,6 +43,8 @@ The Java ingestion code has no Airflow dependency, so it can be run and tested i
 
 See [Architecture](docs/architecture.md) for component details, storage, and security boundaries.
 
+**Why Java for ingestion?** It started as an experiment with the Airflow 3 Java Task SDK (tasks and potentially DAGs). That SDK did not offer a practical benefit for this pipeline, so Python DAGs/operators now launch independent Java JARs with CLI arguments. Java is retained deliberately for hands-on development, not because Garmin requires it. See [Java ingestion decision](docs/decisions/0002-java-ingestion.md).
+
 **Why local Kubernetes instead of cloud?** Airflow is the primary orchestrator; kind runs it on a Mac during early development to avoid recurring managed-cloud costs and gain hands-on Kubernetes experience. **Cloud portability guides development from the start:** independent containers, Python DAGs and replaceable storage/configuration boundaries are preferred to local-machine assumptions. **GCP Cloud Composer and managed GCP services** are the leading migration target, although storage, IAM, secrets and execution settings will still require adaptation. See [Kubernetes vs cloud decision](docs/decisions/0001-kubernetes-execution.md) for trade-offs and migration considerations.
 
 ## Technology stack
@@ -174,6 +176,7 @@ Interested in Java, Python, Airflow, Kubernetes, or data engineering? Contributi
 
 - [Architecture and security](docs/architecture.md)
 - [Kubernetes execution decision](docs/decisions/0001-kubernetes-execution.md)
+- [Java ingestion and Airflow integration decision](docs/decisions/0002-java-ingestion.md)
 - [Contributing, Story/Task workflow and PR review standards](CONTRIBUTING.md)
 - [Garmin API integration retrospective](docs/retrospectives/0001-garmin-api-integration.md)
 - [Changelog](CHANGELOG.md)

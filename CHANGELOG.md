@@ -4,6 +4,7 @@
 
 | Type | What changed | Breaking change | Upgrade steps | PR |
 | --- | --- | --- | --- | --- |
+| Docs | Document why Java ingestion was retained after evaluating the Airflow 3 Java Task SDK, while orchestration stays in Python | No | None | #29 |
 | Changed | Move output-directory selection out of Java; write unchanged JSON directly to the supplied final directory and reject existing files | Yes: --output-dir is now the final destination | Update DAG/XCom paths and operator mounts before running the pipeline | |
 | Changed | Remove response DTOs and mapping; verify JSON syntax with Jackson Core and persist the unchanged raw response | Yes: response DTO classes and field-level validation removed | Rebuild both Java images; perform schema and business validation downstream | |
 | Changed | Refactor Java ingestion into constructor-injected jobs and CLI applications, with Apache Commons CLI parsing, natural exception propagation, and sanitized SLF4J/Logback failure logging | No | Rebuild and load both Java images | |
