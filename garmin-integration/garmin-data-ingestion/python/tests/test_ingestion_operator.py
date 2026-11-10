@@ -93,7 +93,7 @@ def test_templates_render_before_building_request_arguments():
 def test_pvc_mount_and_secret_security_are_preserved(monkeypatch):
     monkeypatch.setenv("GARMIN_RAW_DATA_GID", "20")
     operator = ingestion_task(
-        archive_root="/archive",
+        mount_path="/archive",
         output_dir="/archive/caller-selected-directory",
         image="garmin-sleep:local",
     )
@@ -153,9 +153,9 @@ def test_invalid_shared_storage_group_is_rejected(monkeypatch, value):
         ingestion_task()
 
 
-def test_requires_absolute_archive_root():
+def test_requires_absolute_mount_path():
     with pytest.raises(ValueError, match="absolute"):
-        ingestion_task(archive_root="relative/path")
+        ingestion_task(mount_path="relative/path")
 
 
 def test_requires_absolute_rendered_output_directory():
