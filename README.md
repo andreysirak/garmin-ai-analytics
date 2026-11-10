@@ -139,26 +139,26 @@ output_dir=f"{MOUNT_PATH}/sleep/{ATTEMPT_PATH}",
 mount_path=MOUNT_PATH,
 ```
 
-The template renders this layout (`daily-summary` uses its own sibling directory):
+The template renders this layout (`sleep` uses its own sibling directory):
 
 ```text
 data/raw/garmin/
-└── sleep/
-    └── 2026-11-07/
-        └── run-<SHA256(dag_id + NUL + run_id)>/
-            ├── attempt-1-<uuid>/
-            │   └── 2026-11-07.json   # failed/unmarked; never read downstream
-            └── attempt-2-<uuid>/
-                ├── 2026-11-07.json
-                └── _SUCCESS        # empty completion marker
+└── daily-summary/
+    └── 2026-11-10/
+        ├── 1/
+        │   └── 2026-11-10.json
+        └── 4/
+            ├── 2026-11-10.json
+            └── _SUCCESS
 ```
 
-The DAG templates use the requested date (including manual overrides), task try
-number, a bounded DAG/run hash, and `macros.uuid.uuid4()` evaluated during task
-rendering. Fresh task attempts render a new UUID, including retries and cleared
-runs with repeated try numbers. The operator forwards the rendered directory
-unchanged to Java and XCom; it does not choose or extend the path. Existing
-successful and failed attempts are retained.
+The DAG uses the requested date in `YYYY-MM-DD` format and the numeric
+`ti.try_number`, with no run directory. On the local Mac, for example:
+`/Users/andriisirak/garmin-ai-analytics/data/raw/garmin/daily-summary/2026-11-10/4/2026-11-10.json`.
+The operator forwards the rendered directory unchanged to Java and XCom. The same
+endpoint, date, and try number select the same directory across DAG runs; Java
+rejects a nonempty attempt directory and preserves earlier files. Another download
+of the same date needs a different try number.
 
 | Task | Endpoint | Explicit query parameter |
 | --- | --- | --- |

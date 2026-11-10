@@ -4,6 +4,7 @@
 
 | Type | What changed | Breaking change | Upgrade steps | PR |
 | --- | --- | --- | --- | --- |
+| Changed | Store ingestion archives as data-type/YYYY-MM-DD/try-number/YYYY-MM-DD.json, without a run directory | New attempts use the simplified layout | Existing archives remain readable in their original locations | |
 | Fixed | Use mount_path consistently in ingestion containment validation and retry fixtures after the PVC setting rename | No | Rebuild/load the Airflow image and restart scheduler/DAG processor before retrying | |
 | Fixed | Reject rendered ingestion directories outside the mounted archive root, including parent traversal and sibling-prefix paths; explicitly validate DAG imports and registration in Python CI | No | Configure Garmin API Integration Python as required in the repository ruleset | |
 | Changed | Rename the daily DAG and source file to garmin_daily_pipeline to cover the intended ingestion-to-analytics workflow | Yes: Airflow DAG ID changed | Pause garmin_daily_ingestion before enabling garmin_daily_pipeline; previous run history and archives remain available | |

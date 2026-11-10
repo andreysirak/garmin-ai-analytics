@@ -71,7 +71,7 @@ def test_templates_render_before_building_request_arguments():
         task_id="render",
         endpoint="{{ params.endpoint }}",
         date="{{ ds }}",
-        output_dir="/data/raw/garmin/{{ ds }}/attempt-{{ ti.try_number }}",
+        output_dir="/data/raw/garmin/{{ ds }}/{{ ti.try_number }}",
         query_params={"calendarDate": "{{ ds }}", "optional": "{{ params.empty }}"},
     )
     context = task_context()
@@ -80,7 +80,7 @@ def test_templates_render_before_building_request_arguments():
     with patch.object(KubernetesPodOperator, "execute_sync"):
         operator.execute(context)
     assert operator.arguments[:4] == ["--endpoint", "/synthetic/daily", "--date", "2026-11-08"]
-    assert operator.output_dir == "/data/raw/garmin/2026-11-08/attempt-1"
+    assert operator.output_dir == "/data/raw/garmin/2026-11-08/1"
     assert operator.arguments[5] == operator.output_dir
     assert operator.arguments[6:] == [
         "--query-param",

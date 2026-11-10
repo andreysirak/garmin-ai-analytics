@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from datetime import datetime, timedelta
 
 from airflow.sdk import DAG, Param
@@ -14,17 +13,7 @@ PROCESSING_DATE = (
     "{{ (dag_run.conf.get('date', params.date) if dag_run and dag_run.conf else params.date) "
     "or ((dag_run.logical_date or dag_run.start_date).strftime('%Y-%m-%d') if dag_run else ds) }}"
 )
-ATTEMPT_PATH = (
-    PROCESSING_DATE
-    + "/run-{{ archive_run_key(ti.dag_id, ti.run_id) }}"
-    + "/attempt-{{ ti.try_number }}-{{ macros.uuid.uuid4().hex }}"
-)
-
-
-def archive_run_key(dag_id: str, run_id: str) -> str:
-    """Keep arbitrary DAG/run identifiers bounded and safe as one path component."""
-    return hashlib.sha256(f"{dag_id}\0{run_id}".encode()).hexdigest()
-
+ATTEMPT_PATH = PROCESSING_DATE + "/{{ ti.try_number }}"
 
 with DAG(
     dag_id="garmin_daily_pipeline",
@@ -32,7 +21,6 @@ with DAG(
     schedule="@daily",
     start_date=datetime(2026, 1, 1),
     catchup=False,
-    user_defined_macros={"archive_run_key": archive_run_key},
     params={
         "date": Param(
             default=None,

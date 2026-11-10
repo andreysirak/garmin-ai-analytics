@@ -126,16 +126,17 @@ independently of the final `--output-dir`. The operator requires a templated
 belongs to `garmin_daily_pipeline`, which supplies:
 
 ```text
-<mount_path>/<daily-summary|sleep>/<requested-date>/run-<SHA256(dag_id + NUL + run_id)>/attempt-<try_number>-<uuid>
+<mount_path>/<daily-summary|sleep>/<requested-date>/<try_number>
 ```
 
-The DAG's `ATTEMPT_PATH` template uses `PROCESSING_DATE`, `ti.try_number`, the
-`archive_run_key` macro, and Airflow's `macros.uuid.uuid4()`. The requested date
-supports run configuration, parameters, and the logical-date/start-date fallback.
-The hash keeps arbitrary run identifiers bounded and inside the archive root.
-UUIDs are generated when a fresh task attempt renders its fields, never during DAG
-parsing or by the operator. Retry and cleared/manual/backfill attempts render fresh
-copies of the source template, preserving uniqueness even for repeated try numbers.
+The DAG's `ATTEMPT_PATH` template uses `PROCESSING_DATE` and `ti.try_number`.
+The requested date supports run configuration, parameters, and the logical-date/
+start-date fallback, formatted as `YYYY-MM-DD`. Java writes `<requested-date>.json`
+and `_SUCCESS` directly in the numbered directory. The layout has no run directory.
+The same endpoint/date/try selects the same path across DAG runs; Java rejects a
+nonempty attempt directory without overwriting its contents. Another download of
+the same date requires a different try number.
+
 The operator validates that the rendered path is absolute and lexically contained
 within `mount_path`, normalizing `.` and `..` for the containment check. It then
 forwards the original path unchanged. Validation does not inspect the scheduler
@@ -143,11 +144,10 @@ filesystem or resolve symlinks in the Pod filesystem. Java creates the directory
 and persists its response. Earlier failed and successful attempts are retained,
 including legacy layouts.
 
-The operator runs synchronously and disables Pod reattachment: a restarted worker
-launches a fresh Pod for its DAG-supplied directory. An orphaned Pod may finish
-its old attempt, which stays separate from the replacement. This avoids publishing
-paths that differ from a reused Pod's arguments. Airflow alone decides retries;
-Pod failures propagate and no archive XCom is published for a failed execution.
+The operator runs synchronously and disables Pod reattachment. It uses the
+DAG-supplied directory without allocating an alternative path when that directory
+is occupied. Airflow alone decides retries; Pod failures propagate and no archive
+XCom is published for a failed execution.
 The existing namespace, ServiceAccount, Secret/file access, resources, security
 settings, logging, startup timeout, and execution timeout are preserved.
 

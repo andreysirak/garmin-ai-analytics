@@ -248,7 +248,7 @@ controls only the stable PVC mount.
 
 Python tests mock Kubernetes operations and use synthetic credentials and
 local HTTP fixtures. Ingestion tests cover explicit query dates, opaque query
-values, stable PVC mounts, directory-only XCom, and retry/cleared-run isolation with
+values, stable PVC mounts, directory-only XCom, and the date/try-number layout with
 completed and unmarked archive fixtures. Do not run authentication against Garmin from tests.
 See [issue #32 verification](docs/verification/0032-python-ingestion.md) for the
 recorded isolated Airflow/Kubernetes retry check and its test-only substitutions.

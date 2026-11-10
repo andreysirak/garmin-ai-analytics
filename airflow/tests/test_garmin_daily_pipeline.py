@@ -8,7 +8,6 @@ import pytest
 from airflow.dag_processing.dagbag import DagBag
 from airflow.exceptions import AirflowException
 from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
-from airflow.sdk import macros
 from garmin_auth.operator import GarminAuthOperator
 from garmin_data_ingestion import GarminIngestionOperator
 from garmin_data_ingestion.operator import OUTPUT_DIR_XCOM_KEY
@@ -49,7 +48,6 @@ def render_and_run(
             start_date=datetime(2026, 11, 8, 12, 30),
         ),
         "params": {"date": param_date},
-        "macros": macros,
         "ds": logical_date.strftime("%Y-%m-%d") if logical_date else "",
     }
     task.render_template_fields(context, jinja_env=dag.get_template_env())
@@ -138,10 +136,11 @@ def test_each_task_renders_explicit_request_and_archive_date(
     ]
     assert isinstance(output_dir, str)
     assert task.output_dir == output_dir
-    assert Path(output_dir).parent.parent.name == expected
+    data_type = "daily-summary" if task_id == "ingest_daily_summary" else "sleep"
+    assert output_dir == f"/data/raw/garmin/{data_type}/{expected}/1"
 
 
-def test_paths_distinguish_endpoints_runs_dags_retries_and_repeated_try_numbers(dag):
+def test_paths_use_only_endpoint_date_and_try_number(dag):
     paths = []
     with patch.object(KubernetesPodOperator, "execute_sync"):
         for task_id, run_id, try_number, dag_id in [
@@ -149,7 +148,7 @@ def test_paths_distinguish_endpoints_runs_dags_retries_and_repeated_try_numbers(
             ("ingest_sleep", "manual__one", 1, dag.dag_id),
             ("ingest_daily_summary", "manual__two", 1, dag.dag_id),
             ("ingest_daily_summary", "backfill__one", 1, dag.dag_id),
-            ("ingest_daily_summary", "manual__one", 2, dag.dag_id),
+            ("ingest_daily_summary", "manual__one", 4, dag.dag_id),
             ("ingest_daily_summary", "manual__one", 1, dag.dag_id),
             ("ingest_daily_summary", "manual__one", 1, "another_dag"),
             ("ingest_daily_summary", "manual__/../../" + "x" * 300, 1, dag.dag_id),
@@ -162,15 +161,17 @@ def test_paths_distinguish_endpoints_runs_dags_retries_and_repeated_try_numbers(
                     task, execution_dag, run_id=run_id, try_number=try_number
                 )
             )
-    directories = [Path(p) for p in paths]
-    assert len(set(directories)) == len(directories)
-    assert directories[0].parent == directories[4].parent == directories[5].parent
-    assert directories[0].parent != directories[2].parent != directories[6].parent
-    assert directories[0].parent.parent != directories[1].parent.parent
-    assert all(p.is_relative_to("/data/raw/garmin") for p in directories)
-    assert all(
-        ".." not in p.parts and max(map(len, p.parts)) < 256 for p in directories
-    )
+    summary = "/data/raw/garmin/daily-summary/2026-11-07/1"
+    assert paths == [
+        summary,
+        "/data/raw/garmin/sleep/2026-11-07/1",
+        summary,
+        summary,
+        "/data/raw/garmin/daily-summary/2026-11-07/4",
+        summary,
+        summary,
+        summary,
+    ]
 
 
 @pytest.fixture(params=[b'{"synthetic":', b'{ "synthetic": true }\n'])
@@ -209,9 +210,10 @@ def test_failed_and_successful_archives_survive_a_retry(
         with pytest.raises(AirflowException, match="synthetic ingestion failure"):
             render_and_run(failed_task, dag)
         output_dir = render_and_run(retry, dag, try_number=2)
-        # A cleared/manual rerun with a repeated try number also preserves both earlier attempts.
-        render_and_run(cleared, dag, try_number=2)
+        # A later task try preserves both earlier attempts.
+        render_and_run(cleared, dag, try_number=3)
     assert len(set(attempts)) == 3
+    assert [p.name for p in attempts] == ["1", "2", "3"]
     assert not (attempts[0] / "_SUCCESS").exists()
     assert (attempts[0] / "2026-11-07.json").read_bytes() == unmarked_attempt_bytes
     assert (attempts[1] / "2026-11-07.json").read_bytes() == completed_bytes

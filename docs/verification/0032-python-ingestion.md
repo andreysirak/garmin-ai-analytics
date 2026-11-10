@@ -132,3 +132,13 @@ default and custom mount paths while Pod execution was mocked. No Kubernetes or
 Garmin calls were made in this image check, and the image was not rolled out.
 Rebuild/load the normal Airflow image and restart scheduler/DAG processor before
 retrying the failed task.
+
+## Simplified directory layout (2026-11-11)
+
+At the owner's request, the DAG now selects
+`<mount_path>/<data-type>/<YYYY-MM-DD>/<try_number>`, and Java writes
+`<YYYY-MM-DD>.json` there. Run hashes, UUIDs, and attempt-name prefixes were removed.
+The host-backed PVC maps this to the project's `data/raw/garmin` directory.
+The same date and try select the same path across runs; Java's existing refusal
+to overwrite nonempty directories remains unchanged. All **38 DAG/operator tests**
+and Ruff passed, including exact directory rendering and retention of earlier tries.
