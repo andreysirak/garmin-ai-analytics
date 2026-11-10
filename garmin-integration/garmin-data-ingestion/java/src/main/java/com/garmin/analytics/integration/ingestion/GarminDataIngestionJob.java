@@ -6,9 +6,16 @@ import java.io.IOException;
 import java.net.http.HttpClient;
 import java.time.Duration;
 
-/** Application entry point: constructs dependencies and starts ingestion. */
+/** Launches the standalone Garmin ingestion application with its runtime dependencies. */
 public final class GarminDataIngestionJob {
 
+  /**
+   * Constructs dependencies and delegates to {@link GarminDataIngestionApp#run(String[])}.
+   *
+   * @param args the command-line arguments, passed unchanged to the application
+   * @throws IOException if configuration or ingestion fails
+   * @throws InterruptedException if the HTTP request is interrupted
+   */
   static void main(String[] args) throws IOException, InterruptedException {
     new GarminDataIngestionApp(
         new TokenService(System.getenv("GARMIN_TOKEN_FILE")),

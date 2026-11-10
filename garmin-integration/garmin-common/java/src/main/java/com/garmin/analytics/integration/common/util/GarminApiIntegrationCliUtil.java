@@ -19,13 +19,27 @@ import org.apache.commons.cli.Option;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 
-/** Parses and validates shared ingestion CLI arguments. */
+/**
+ * Parses and validates ingestion command-line arguments using Apache Commons CLI.
+ *
+ * <p>Archive settings and opaque request parameters are prepared before ingestion starts.
+ */
 public final class GarminApiIntegrationCliUtil {
 
   private static final Pattern ISO_DATE = Pattern.compile("\\d{4}-\\d{2}-\\d{2}");
 
   private GarminApiIntegrationCliUtil() {}
 
+  /**
+   * Parses and validates the runtime arguments for one ingestion invocation.
+   *
+   * <p>Repeated {@code --query-param key=value} entries become an insertion-ordered, unmodifiable
+   * map. Standalone help is handled separately through {@link #isHelp(String[])}.
+   *
+   * @param args the command-line arguments to parse
+   * @return validated archive settings and request parameters ready for ingestion
+   * @throws IngestionExecutionException if parsing or argument validation fails
+   */
   public static GarminApiIntegrationOptions process(String[] args)
       throws IngestionExecutionException {
     try {
@@ -40,6 +54,16 @@ public final class GarminApiIntegrationCliUtil {
           ? "Invalid --output-dir" : exception.getMessage();
       throw new IngestionExecutionException(message);
     }
+  }
+
+  /**
+   * Determines whether the arguments request standalone CLI help.
+   *
+   * @param args the arguments to inspect; may be {@code null}
+   * @return {@code true} only when the sole argument is {@code --help}; {@code false} otherwise
+   */
+  public static boolean isHelp(String[] args) {
+    return args != null && args.length == 1 && "--help".equals(args[0]);
   }
 
   private static void validateArguments(String[] args) {
@@ -101,10 +125,6 @@ public final class GarminApiIntegrationCliUtil {
           "--endpoint must be an absolute path without query or fragment");
     }
     return value;
-  }
-
-  public static boolean isHelp(String[] args) {
-    return args != null && args.length == 1 && "--help".equals(args[0]);
   }
 
   private static Options createOptions() {

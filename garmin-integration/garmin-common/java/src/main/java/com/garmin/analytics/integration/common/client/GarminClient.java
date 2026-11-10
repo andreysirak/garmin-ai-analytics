@@ -12,7 +12,13 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-/** Performs a single authenticated Garmin API request. */
+/**
+ * Fetches original response bodies through authenticated Garmin HTTP GET requests.
+ *
+ * <p>Requests use the fixed Garmin API base URI and are not retried. Callers validate endpoint
+ * paths, query parameters, and bearer tokens before use. The caller owns the injected HTTP client's
+ * lifetime.
+ */
 public final class GarminClient {
 
   private static final URI BASE_URI = URI.create("https://personal.connectapi.garmin.com/");
@@ -21,11 +27,26 @@ public final class GarminClient {
   private final HttpClient httpClient;
   private final String bearerToken;
 
+  /**
+   * Creates a client using an existing HTTP transport and a validated token.
+   *
+   * @param httpClient the non-null, configured HTTP client, owned by the caller
+   * @param bearerToken the validated token value, without the {@code Bearer} scheme prefix
+   */
   public GarminClient(HttpClient httpClient, String bearerToken) {
     this.httpClient = httpClient;
     this.bearerToken = bearerToken;
   }
 
+  /**
+   * Fetches a response from the supplied path with UTF-8 encoded query parameters.
+   *
+   * @param endpoint the validated absolute API path, without a query string or fragment
+   * @param queryParameters the non-null map of unencoded parameter names and values; may be empty
+   * @return the response body decoded as UTF-8, without parsing or rewriting
+   * @throws GarminApiException if transport fails or the HTTP response status is outside 200–299
+   * @throws InterruptedException if the HTTP request is interrupted
+   */
   public String callGet(String endpoint, Map<String, String> queryParameters)
       throws GarminApiException, InterruptedException {
     String query = queryParameters.entrySet().stream()
@@ -52,7 +73,7 @@ public final class GarminClient {
     return response.body();
   }
 
-  private static String encode(String value) {
+  private String encode(String value) {
     return URLEncoder.encode(value, StandardCharsets.UTF_8);
   }
 }

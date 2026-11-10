@@ -6,9 +6,23 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 
-/** Writes an unchanged UTF-8 response to the caller-selected destination file. */
+/**
+ * Archives unchanged response text in newly created UTF-8 files.
+ *
+ * <p>Missing parent directories are created and existing files are never replaced. A failed write
+ * may leave a partial file.
+ */
 public final class FileWriter {
 
+  /**
+   * Writes the response text to the caller-selected destination file.
+   *
+   * @param destination the non-null destination file path
+   * @param rawJson the non-null response text to write without modification
+   * @return the absolute, normalized path of the written file
+   * @throws java.nio.file.FileAlreadyExistsException if the destination already exists
+   * @throws IOException if parent directories cannot be created or the file cannot be written
+   */
   public Path write(Path destination, String rawJson) throws IOException {
     Path target = destination.toAbsolutePath().normalize();
     Files.createDirectories(target.getParent());

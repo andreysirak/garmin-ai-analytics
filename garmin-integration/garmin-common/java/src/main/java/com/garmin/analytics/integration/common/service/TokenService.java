@@ -6,15 +6,31 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-/** Reads and validates a Kubernetes-mounted bearer-token file. */
+/**
+ * Reads and validates a bearer token from a configured UTF-8 file.
+ *
+ * <p>The file is typically mounted from a Kubernetes Secret; this service does not call Kubernetes.
+ */
 public final class TokenService {
 
   private final String tokenFile;
 
+  /**
+   * Stores the token-file setting for validation when the token is read.
+   *
+   * @param tokenFile the {@code GARMIN_TOKEN_FILE} path, or {@code null} when unconfigured
+   */
   public TokenService(String tokenFile) {
     this.tokenFile = tokenFile;
   }
 
+  /**
+   * Reads the configured file and returns its validated, trimmed token text.
+   *
+   * @return a nonempty ASCII bearer token without surrounding whitespace
+   * @throws IngestionExecutionException if configuration is missing or invalid, the file cannot
+   *     be read, or its contents are not a single nonempty ASCII token
+   */
   public String readBearerToken() throws IngestionExecutionException {
     try {
       return readTokenFile();
