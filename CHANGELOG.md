@@ -4,6 +4,14 @@
 
 | Type | What changed | Breaking change | Upgrade steps | PR |
 | --- | --- | --- | --- | --- |
+| Changed | Inject FileWriter and TokenService interfaces; move local writing to common.io.impl.FileWriterLocalImpl and mounted-Secret token loading to common.service.impl.TokenServiceKubernetesImpl | No CLI or runtime configuration changes | Rebuild the Java ingestion image | |
+| Fixed | Create _SUCCESS in the supplied attempt directory beside its JSON archive | No | Rebuild the Java ingestion image | |
+| Added | Mark completed raw JSON ingestion attempts with an empty _SUCCESS file; reject nonempty attempt directories and preserve previous attempts | Yes: each invocation requires a new or empty --output-dir | Supply a distinct directory for every attempt, including retries; downstream readers must require _SUCCESS | #29 |
+| Changed | Consolidate Sleep and Daily Summary under garmin-data-ingestion/java and python; use one injected Java application and thin main, a fixed Garmin base URI, and caller-supplied endpoint paths and generic query parameters | Yes: Java module/JAR, entry point and required arguments changed | Remove --api-base-url; pass --endpoint and optional repeatable --query-param key=value; update Python operators in their follow-up and rebuild images | |
+| Docs | Document why Java ingestion was retained after evaluating the Airflow 3 Java Task SDK, while orchestration stays in Python | No | None | #29 |
+| Changed | Move output-directory selection out of Java; write unchanged JSON directly to the supplied final directory and reject existing files | Yes: --output-dir is now the final destination | Update DAG/XCom paths and operator mounts before running the pipeline | |
+| Changed | Remove response DTOs and mapping; verify JSON syntax with Jackson Core and persist the unchanged raw response | Yes: response DTO classes and field-level validation removed | Rebuild both Java images; perform schema and business validation downstream | |
+| Changed | Refactor Java ingestion into an injected application and thin entry point, with Apache Commons CLI parsing, natural exception propagation, and SLF4J/Logback application logging | No | Rebuild and load both Java images | |
 | Docs | Clarify local IDE AI coding vs browser GitHub write permissions and provide separate agent prompts | No | None | #27 |
 | Fixed | Model Garmin daily summary and sleep response fields as typed Java DTOs, handle flat or wrapped sleep responses, and test ingestion/date validation with synthetic JSON | No | Verify live response structure before downstream schema mapping | |
 | Docs | Set AI-assisted commit hygiene and require separate explicit consent for squash/history rewriting and force-push | No | None | #24 |

@@ -205,12 +205,15 @@ Use Java 25 and run from the project root or the Maven parent directory:
 ```sh
 cd garmin-integration
 mvn clean verify
-mvn -pl garmin-daily-summary/java -am package
-mvn -pl garmin-sleep/java -am package
+mvn -pl garmin-data-ingestion/java -am package
 ```
 
 `mvn verify` runs JUnit 5, SpotBugs, and PMD. Tests use synthetic data and
-local/mock HTTP servers; never use real Garmin credentials or personal data.
+mocked HTTP clients; never use real Garmin credentials or personal data.
+Mockito's subclass mock maker is selected in test resources. Application tests mock
+the injected JDK HTTP client and `TokenService` interface; failure tests can also mock
+`FileWriter`. Tests for `FileWriterLocalImpl` and `TokenServiceKubernetesImpl` use
+temporary files to verify the implementations independently.
 Dependency vulnerability scanning is temporarily excluded because the current
 Dependency-Check release fails without an NVD API key and unauthenticated NVD
 updates were rate-limited. See [issue #6](https://github.com/andreysirak/garmin-ai-analytics/issues/6)
@@ -226,16 +229,13 @@ source .venv/bin/activate
 constraints="https://raw.githubusercontent.com/apache/airflow/constraints-3.3.1/constraints-3.12.txt"
 python -m pip install --constraint "$constraints" \
   -e "garmin-integration/garmin-auth/python[airflow,dev]" \
-  -e "garmin-integration/garmin-daily-summary/python[dev]" \
-  -e "garmin-integration/garmin-sleep/python[dev]"
+  -e "garmin-integration/garmin-data-ingestion/python[dev]"
 ruff check airflow/dags airflow/tests \
   garmin-integration/garmin-auth/python \
-  garmin-integration/garmin-daily-summary/python \
-  garmin-integration/garmin-sleep/python
+  garmin-integration/garmin-data-ingestion/python
 pytest -q airflow/tests \
   garmin-integration/garmin-auth/python/tests \
-  garmin-integration/garmin-daily-summary/python/tests \
-  garmin-integration/garmin-sleep/python/tests
+  garmin-integration/garmin-data-ingestion/python/tests
 ```
 
 Python tests mock Kubernetes operations and use synthetic credentials and

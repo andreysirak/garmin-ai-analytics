@@ -50,25 +50,21 @@ jobs:
           cache: pip
           cache-dependency-path: |
             garmin-integration/garmin-auth/python/pyproject.toml
-            garmin-integration/garmin-daily-summary/python/pyproject.toml
-            garmin-integration/garmin-sleep/python/pyproject.toml
+            garmin-integration/garmin-data-ingestion/python/pyproject.toml
       - name: Install Python packages and verification tools
         run: |
           constraints="https://raw.githubusercontent.com/apache/airflow/constraints-3.3.1/constraints-3.12.txt"
           python -m pip install --constraint "$constraints" \
             -e "garmin-integration/garmin-auth/python[airflow,dev]" \
-            -e "garmin-integration/garmin-daily-summary/python[dev]" \
-            -e "garmin-integration/garmin-sleep/python[dev]"
+            -e "garmin-integration/garmin-data-ingestion/python[dev]"
       - name: Lint Python integration
         run: |
           ruff check airflow/dags airflow/tests \
             garmin-integration/garmin-auth/python \
-            garmin-integration/garmin-daily-summary/python \
-            garmin-integration/garmin-sleep/python
+            garmin-integration/garmin-data-ingestion/python
       - name: Test Python integration
         run: |
           pytest -q \
             airflow/tests \
             garmin-integration/garmin-auth/python/tests \
-            garmin-integration/garmin-daily-summary/python/tests \
-            garmin-integration/garmin-sleep/python/tests
+            garmin-integration/garmin-data-ingestion/python/tests

@@ -14,7 +14,8 @@ AIRFLOW_URL := http://localhost:8080
 
 .PHONY: help prepare-garmin-raw-data cluster-create cluster-status cluster-delete infra-validate infra-up airflow-operator-rollout infra-down \
         infra-status airflow-ui airflow-password airflow-logs test-infra java-verify \
-        java-package-summary java-package-sleep docker-build docker-build-summary docker-build-sleep \
+        java-package-ingestion java-package-summary java-package-sleep \
+        docker-build docker-build-summary docker-build-sleep \
         kind-load-images kind-load-ingestion-java-images \
         kind-load-ingestion-java-summary-image kind-load-ingestion-java-sleep-image \
         airflow-image kind-load-airflow-image auth-image kind-load-auth-image \
@@ -32,8 +33,9 @@ help:
 	@echo "  make infra-status           - Show Helm release and Pods"
 	@echo "Java:"
 	@echo "  make java-verify            - Run Java 25 Maven clean verify"
-	@echo "  make java-package-summary  - Package daily summary and common modules"
-	@echo "  make java-package-sleep    - Package sleep and common modules"
+	@echo "  make java-package-ingestion - Package the unified ingestion JAR and common module"
+	@echo "  make java-package-summary   - Alias for java-package-ingestion"
+	@echo "  make java-package-sleep     - Alias for java-package-ingestion"
 	@echo "  make docker-build           - Build both ingestion images"
 	@echo "  make kind-load-ingestion-java-summary-image - Build and load Java summary image into kind"
 	@echo "  make kind-load-ingestion-java-sleep-image   - Build and load Java sleep image into kind"
@@ -129,22 +131,20 @@ java-verify:
 	docker run --rm -v "$(PWD)/garmin-integration:/workspace" -w /workspace \
 		$(JAVA_MAVEN_IMAGE) mvn -B -ntp clean verify
 
-java-package-summary:
+java-package-ingestion:
 	docker run --rm -v "$(PWD)/garmin-integration:/workspace" -w /workspace \
-		$(JAVA_MAVEN_IMAGE) mvn -B -ntp -pl garmin-daily-summary/java -am package
+		$(JAVA_MAVEN_IMAGE) mvn -B -ntp -pl garmin-data-ingestion/java -am package
 
-java-package-sleep:
-	docker run --rm -v "$(PWD)/garmin-integration:/workspace" -w /workspace \
-		$(JAVA_MAVEN_IMAGE) mvn -B -ntp -pl garmin-sleep/java -am package
+java-package-summary java-package-sleep: java-package-ingestion
 
 docker-build: docker-build-summary docker-build-sleep
 
 docker-build-summary:
-	docker build -f garmin-integration/garmin-daily-summary/Dockerfile \
+	docker build -f garmin-integration/garmin-data-ingestion/Dockerfile \
 		-t garmin-daily-summary:local .
 
 docker-build-sleep:
-	docker build -f garmin-integration/garmin-sleep/Dockerfile \
+	docker build -f garmin-integration/garmin-data-ingestion/Dockerfile \
 		-t garmin-sleep:local .
 
 kind-load-ingestion-java-summary-image: docker-build-summary

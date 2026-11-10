@@ -34,9 +34,103 @@ kind cluster "garmin-ai-analytics"
 - Airflow images include the Garmin Python operator packages.
 
 Implemented ingestion flow: Garmin Personal API key -> cached bearer token ->
-validated daily summary/sleep responses -> atomic raw JSON files on
+daily summary/sleep JSON -> syntax validation -> unchanged raw JSON files on
 `garmin-raw-data`.
 PostgreSQL Bronze/Silver/Gold storage and downstream analytics remain out of scope.
+
+## Java ingestion boundaries
+
+`garmin-integration/garmin-data-ingestion` contains the `java/` application and
+`python/` operator packages. The Python source and tests were moved unchanged;
+operator consolidation and DAG/XCom changes remain separate work.
+
+`GarminDataIngestionJob.main(args)` constructs `TokenServiceKubernetesImpl`, a JDK
+`HttpClient`, and `FileWriterLocalImpl`, then calls `GarminDataIngestionApp.run(args)`.
+The application receives the `common.service.TokenService` and `common.io.FileWriter`
+interfaces through its constructor. Concrete implementations live in
+`common.service.impl` and `common.io.impl`; only the entry point selects them.
+Dependency construction remains explicit, without a DI framework.
+The application owns CLI processing, token reading, fetching, JSON syntax checking,
+writing the unchanged response, and marking the attempt complete. It closes the HTTP
+client on success, help, and failure. The 10-second connection and 30-second request
+timeouts are preserved.
+
+Each invocation fetches the caller-supplied `--endpoint` path. The caller may
+supply zero or more `--query-param key=value` options. `GarminApiIntegrationOptions`
+holds them as a `Map<String, String>`, passed directly to `GarminClient.callGet`.
+Keys must be nonblank and unique. Values remain opaque strings: empty values,
+Unicode, spaces, and additional `=` characters are preserved and URL-encoded when
+the request is built. Parameter order is retained. The archive `--date` is used
+for the filename, independently of all request parameters.
+`GarminApiIntegrationCliUtil` parses and validates all arguments and returns
+ready-to-use options. Endpoint validation checks HTTP path syntax; it does not
+recognize or restrict Garmin endpoints. Java has no endpoint registry, data-type
+selection, or image-provided request defaults. Both existing image tags build
+the same shared JAR. Their legacy JAR paths remain aliases, while the copied
+Python operators still need to supply the new request arguments in the follow-up.
+Authentication continues to gate independent Sleep and Daily Summary tasks,
+each with its own Airflow retries. Java performs no retries.
+
+`GarminClient` owns the fixed base URI `https://personal.connectapi.garmin.com/`.
+It combines that URI with the caller-supplied endpoint path. There is no runtime
+base URL option. `GarminClient.callGet` resolves the endpoint against `BASE_URI`
+and encodes the query parameters. CLI and token-file validation run before the
+client is called, so the client does not repeat input checks or normalization.
+HTTP tests mock the injected JDK `HttpClient` and capture the complete request;
+there is no alternate-URL constructor or application client factory. Application
+tests mock `TokenService` and can inject a failing `FileWriter`. Implementation
+tests exercise mounted-file token loading and local writes using temporary files.
+
+Apache Commons CLI handles required `--date`, `--output-dir`, and `--endpoint`,
+optional repeatable `--query-param`, and standalone `--help`. Required-option, argument,
+duplicate, blank, date, endpoint-path, and positional-argument checks happen before
+HTTP requests. `TokenServiceKubernetesImpl` implements `TokenService` by reading the
+bearer token from `GARMIN_TOKEN_FILE`, which Kubernetes provides through a read-only
+Secret mount. It reads the mounted file without calling the Kubernetes API. Token
+trimming, validation, and failure causes are preserved. Help requires neither a token
+nor request arguments. Authentication and HTTP request semantics are unchanged.
+The Python follow-up must remove `--api-base-url` and supply the endpoint path
+and any request query parameters before running the pipeline.
+
+`JsonValidationUtil` uses Jackson Core to check for exactly one complete JSON
+value. Objects, arrays, scalars, and JSON `null` are accepted. There are no response
+DTOs, field checks, response-date checks, or sleep-data classification.
+
+`--output-dir` remains the final attempt directory. The application writes the original
+UTF-8 response to `<output-dir>/<requested-date>.json` without adding subdirectories.
+`FileWriterLocalImpl` implements `FileWriter` using Java NIO. It creates parent
+directories and writes the unchanged UTF-8 response directly with `CREATE_NEW`.
+The application accepts only a new or empty attempt directory. Existing attempts
+are never overwritten or deleted. There are no temporary files or atomic moves.
+Response whitespace, unknown fields, timestamps, nulls, and numeric representations
+remain unchanged.
+
+After syntax validation and a successful JSON write, the application creates an
+empty `_SUCCESS` file in the same directory. A JSON write or marker-creation failure
+propagates as an ingestion failure. Failed attempts remain unmarked and may contain
+partial or complete JSON files. Downstream tasks must ignore directories without
+`_SUCCESS`. Directory naming and uniqueness belong to the caller; each invocation,
+including retries, must receive its own directory. Java does not allocate attempt
+numbers or perform downstream reads.
+
+DAG/XCom wiring remains pending. The DAG must supply distinct final directories
+per endpoint/download attempt, share those paths through XCom, and keep the PVC
+mounted at a stable archive root independently of each final output directory.
+Future downstream tasks must enforce the `_SUCCESS` requirement before reading JSON.
+Complete that wiring before running the pipeline with the new directory contract.
+
+`GarminApiException`, `InvalidResponseException`, and `IngestionExecutionException`
+distinguish HTTP/transport, JSON-syntax, and configuration/archive failures.
+Exceptions propagate out of `run` and `main`; the JVM produces a nonzero exit
+status. No code assigns exit codes or calls `System.exit`. Uncaught exceptions
+use the JVM's default stack trace; there is no custom exception handler or trace
+copying utility.
+JSON and CLI parsing report controlled errors without attaching parser exceptions,
+whose messages can contain private payloads or argument values. HTTP/transport,
+token-file, and archive failures retain their ordinary causes. Never include
+payloads or credentials in exception messages or logs.
+Token-file validation rejects non-ASCII and whitespace characters inside a token
+before the HTTP client can quote an invalid Authorization value in an exception.
 
 ## Security
 
