@@ -135,8 +135,8 @@ subdirectories. The operator mounts the PVC at the stable `/data/raw/garmin` roo
 The DAG supplies its required `output_dir` parameter as an Airflow template:
 
 ```python
-output_dir=f"{ARCHIVE_ROOT}/sleep/{ATTEMPT_PATH}",
-archive_root=ARCHIVE_ROOT,
+output_dir=f"{MOUNT_PATH}/sleep/{ATTEMPT_PATH}",
+mount_path=MOUNT_PATH,
 ```
 
 The template renders this layout (`daily-summary` uses its own sibling directory):
