@@ -2,11 +2,13 @@ package com.garmin.analytics.integration.common.util;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.garmin.analytics.integration.common.exception.InvalidResponseException;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -48,7 +50,23 @@ class JsonValidationUtilTest {
   void rejectsInvalidOrMultipleJsonValues(String rawJson) {
     InvalidResponseException failure = assertThrows(InvalidResponseException.class,
         () -> JsonValidationUtil.validate(rawJson));
-    assertInstanceOf(JsonProcessingException.class, failure.getCause());
+    assertNull(failure.getCause());
     assertEquals("Garmin response JSON error", failure.getMessage());
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {
+      "{\"private-health-value\":\"private-token\"",
+      "privateHealthValue",
+      "{privateHealthValue: 1}"})
+  void ordinaryStackTracesDoNotExposeTheResponse(String rawJson) {
+    InvalidResponseException failure = assertThrows(InvalidResponseException.class,
+        () -> JsonValidationUtil.validate(rawJson));
+    StringWriter trace = new StringWriter();
+    failure.printStackTrace(new PrintWriter(trace));
+
+    assertFalse(trace.toString().contains("private-health-value"));
+    assertFalse(trace.toString().contains("private-token"));
+    assertFalse(trace.toString().contains("privateHealthValue"));
   }
 }

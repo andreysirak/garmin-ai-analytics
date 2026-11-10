@@ -40,60 +40,78 @@ PostgreSQL Bronze/Silver/Gold storage and downstream analytics remain out of sco
 
 ## Java ingestion boundaries
 
-The existing JAR entry points delegate to endpoint-specific application `launch(args)`
-methods, which install a sanitized uncaught-exception handler and call the instance
-`run(args)` method. Applications parse the shared CLI options, read `GARMIN_TOKEN_FILE`,
-construct dependencies, and report the result. Constructor-injected Summary and
-Sleep jobs fetch responses, check JSON syntax, and archive the original strings without
-logging or terminating the process. Successful execution returns normally; failures
-propagate out of `main` and naturally produce a nonzero process exit status. There
-are no manually assigned exit codes or calls to `System.exit`.
+`garmin-integration/garmin-data-ingestion` contains the `java/` application and
+`python/` operator packages. The Python source and tests were moved unchanged;
+operator consolidation and DAG/XCom changes remain separate work.
 
-Shared argument parsing uses Apache Commons CLI. The existing `--date`,
-`--api-base-url`, `--output-dir`, and standalone `--help` remain supported.
-Commons CLI checks required options, required arguments, and unrecognized options.
-Raw arguments are checked before parsing; parsed options are validated and converted
-in one step into a ready-to-use `GarminApiIntegrationOptions` record.
-Date/URL, duplicate, blank-value, and positional-argument rules stay explicit.
-Parser exceptions retain their causes, while logged summaries exclude raw argument values.
-`TokenService` owns bearer-token file reading and validation. Each CLI launcher passes
-the `GARMIN_TOKEN_FILE` setting into its constructor and injects the service into the
-application. Configuration is validated when the token is read, so `--help` works
-without a token file.
+`GarminDataIngestionJob.main(args)` constructs a `TokenService`, JDK `HttpClient`,
+and `FileWriter`, then calls the constructor-injected `GarminDataIngestionApp.run(args)`.
+The application owns CLI processing, token reading, fetching, JSON syntax checking,
+and writing the unchanged response. It closes the HTTP client on success, help,
+and failure. The 10-second connection and 30-second request timeouts are preserved.
 
-`JsonValidationUtil` uses Jackson Core's streaming parser to check that each response
-contains exactly one complete JSON value. Objects, arrays, scalars, and JSON `null`
-are accepted. There are no response DTOs, field checks, response-date checks, or
-sleep-data classification. CLI validation of the requested date and URL remains
-separate from response validation.
+Each invocation fetches the caller-supplied `--endpoint` path. The caller may
+supply zero or more `--query-param key=value` options. `GarminApiIntegrationOptions`
+holds them as a `Map<String, String>`, passed directly to `GarminClient.callGet`.
+Keys must be nonblank and unique. Values remain opaque strings: empty values,
+Unicode, spaces, and additional `=` characters are preserved and URL-encoded when
+the request is built. Parameter order is retained. The archive `--date` is used
+for the filename, independently of all request parameters.
+`GarminApiIntegrationCliUtil` parses and validates all arguments and returns
+ready-to-use options. Endpoint validation checks HTTP path syntax; it does not
+recognize or restrict Garmin endpoints. Java has no endpoint registry, data-type
+selection, or image-provided request defaults. Both existing image tags build
+the same shared JAR. Their legacy JAR paths remain aliases, while the copied
+Python operators still need to supply the new request arguments in the follow-up.
+Authentication continues to gate independent Sleep and Daily Summary tasks,
+each with its own Airflow retries. Java performs no retries.
 
-Java treats `--output-dir` as the final output directory. Each job saves its response
-to `<output-dir>/<requested-date>.json`. It does not append endpoint/date folders,
-allocate download numbers, or select a run directory. `FileWriter.write` creates
-the destination's parent directories if needed and writes the original UTF-8 string
-directly using `CREATE_NEW`. Existing files are never overwritten. A failed write may
-leave a partial file; there are no temporary files or atomic moves.
+`GarminClient` owns the fixed base URI `https://personal.connectapi.garmin.com/`.
+It combines that URI with the caller-supplied endpoint path. There is no runtime
+base URL option. `GarminClient.callGet` resolves the endpoint against `BASE_URI`
+and encodes the query parameters. CLI and token-file validation run before the
+client is called, so the client does not repeat input checks or normalization.
+HTTP tests mock the injected JDK `HttpClient` and capture the complete request;
+there is no alternate-URL constructor or application client factory.
 
-The caller owns directory naming and uniqueness, so it can select numbered, dated,
-or run-specific directories and pass their paths downstream. Response whitespace,
-unknown fields, nulls, timestamps, and numeric representations remain unchanged.
-Java does not read or write XCom values or migrate existing archives.
+Apache Commons CLI handles required `--date`, `--output-dir`, and `--endpoint`,
+optional repeatable `--query-param`, and standalone `--help`. Required-option, argument,
+duplicate, blank, date, endpoint-path, and positional-argument checks happen before
+HTTP requests. `TokenService` still reads the bearer token from `GARMIN_TOKEN_FILE`,
+which Kubernetes provides through a read-only Secret mount. Help requires neither
+a token nor request arguments. Authentication and HTTP request semantics are unchanged.
+The Python follow-up must remove `--api-base-url` and supply the endpoint path
+and any request query parameters before running the pipeline.
 
-DAG/XCom wiring remains pending for the next change. The DAG must supply distinct
-final directories per endpoint/download attempt, share them through XCom, and keep the PVC mounted
-at a stable archive root independently of each final output directory. The current
-DAG/operator defaults are not yet updated for this Java contract; complete that
-wiring before executing the pipeline.
+`JsonValidationUtil` uses Jackson Core to check for exactly one complete JSON
+value. Objects, arrays, scalars, and JSON `null` are accepted. There are no response
+DTOs, field checks, response-date checks, or sleep-data classification.
+
+`--output-dir` remains the final directory. The application writes the original
+UTF-8 response to `<output-dir>/<requested-date>.json` without adding subdirectories.
+`FileWriter` creates parent directories and writes directly with `CREATE_NEW`.
+Existing files are never overwritten. Failed writes may leave partial files;
+there are no temporary files or atomic moves. Directory naming and uniqueness
+belong to the caller. Response whitespace, unknown fields, timestamps, nulls,
+and numeric representations remain unchanged.
+
+DAG/XCom wiring remains pending. The DAG must supply distinct final directories
+per endpoint/download attempt, share those paths through XCom, and keep the PVC
+mounted at a stable archive root independently of each final output directory.
+Complete that wiring before running the pipeline with the new directory contract.
 
 `GarminApiException`, `InvalidResponseException`, and `IngestionExecutionException`
 distinguish HTTP/transport, JSON-syntax, and configuration/archive failures.
-Causes remain attached for tests and debugging. The main thread's uncaught-exception
-handler logs failures once through SLF4J/Logback. `FailureLoggingUtil` copies stack
-frames and exception types, but excludes third-party exception messages, JSON field
-paths, and suppressed exceptions, which can contain private values. Dedicated
-exception messages must contain only controlled diagnostic context; never include
-payloads or credentials.
-Java performs no retries; Airflow remains responsible for retry policy.
+Exceptions propagate out of `run` and `main`; the JVM produces a nonzero exit
+status. No code assigns exit codes or calls `System.exit`. Uncaught exceptions
+use the JVM's default stack trace; there is no custom exception handler or trace
+copying utility.
+JSON and CLI parsing report controlled errors without attaching parser exceptions,
+whose messages can contain private payloads or argument values. HTTP/transport,
+token-file, and archive failures retain their ordinary causes. Never include
+payloads or credentials in exception messages or logs.
+Token-file validation rejects non-ASCII and whitespace characters inside a token
+before the HTTP client can quote an invalid Authorization value in an exception.
 
 ## Security
 

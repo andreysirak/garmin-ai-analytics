@@ -1,7 +1,6 @@
 package com.garmin.analytics.integration.common.util;
 
 import com.garmin.analytics.integration.common.cli.GarminApiIntegrationOptions;
-import com.garmin.analytics.integration.common.client.GarminClient;
 import com.garmin.analytics.integration.common.exception.IngestionExecutionException;
 import java.net.URI;
 import java.nio.file.InvalidPathException;
@@ -9,6 +8,9 @@ import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.regex.Pattern;
 import org.apache.commons.cli.CommandLine;
@@ -30,14 +32,13 @@ public final class GarminApiIntegrationCliUtil {
       validateArguments(args);
       return validateOptions(getOptions(args));
     } catch (ParseException exception) {
-      // Commons CLI messages can include raw argument values. Keep the cause for debugging only.
+      // Parser messages can contain credentials supplied as arguments.
       throw new IngestionExecutionException(
-          "Invalid ingestion arguments; expected --date, --api-base-url and --output-dir",
-          exception);
+          "Invalid ingestion arguments; expected --date, --endpoint and --output-dir");
     } catch (IllegalArgumentException exception) {
       String message = exception instanceof InvalidPathException
           ? "Invalid --output-dir" : exception.getMessage();
-      throw new IngestionExecutionException(message, exception);
+      throw new IngestionExecutionException(message);
     }
   }
 
@@ -56,14 +57,50 @@ public final class GarminApiIntegrationCliUtil {
       throw new IllegalArgumentException("Unexpected positional ingestion arguments");
     }
     String dateValue = requireValue(options, "date");
-    String baseUriValue = requireValue(options, "api-base-url");
     String outputDirectoryValue = requireValue(options, "output-dir");
-
+    String endpointValue = requireValue(options, "endpoint");
     LocalDate date = parseDate(dateValue);
-    URI baseUri = parseBaseUri(baseUriValue);
     Path outputDirectory = Path.of(outputDirectoryValue);
+    String endpoint = parseEndpoint(endpointValue);
+    Map<String, String> queryParameters = parseQueryParameters(options);
 
-    return new GarminApiIntegrationOptions(date, baseUri, outputDirectory);
+    return new GarminApiIntegrationOptions(
+        date, outputDirectory, endpoint, queryParameters);
+  }
+
+  private static Map<String, String> parseQueryParameters(CommandLine options) {
+    String[] entries = options.getOptionValues("query-param");
+    if (entries == null) {
+      return Map.of();
+    }
+    Map<String, String> parameters = new LinkedHashMap<>();
+    for (String entry : entries) {
+      int separator = entry.indexOf('=');
+      if (separator <= 0 || entry.substring(0, separator).isBlank()) {
+        throw new IllegalArgumentException("--query-param must use key=value with a nonblank key");
+      }
+      String key = entry.substring(0, separator);
+      String value = entry.substring(separator + 1);
+      if (parameters.putIfAbsent(key, value) != null) {
+        throw new IllegalArgumentException("Each --query-param key may only be specified once");
+      }
+    }
+    return Collections.unmodifiableMap(parameters);
+  }
+
+  private static String parseEndpoint(String value) {
+    URI endpoint;
+    try {
+      endpoint = URI.create(value);
+    } catch (IllegalArgumentException exception) {
+      throw new IllegalArgumentException("--endpoint must be a valid HTTP path");
+    }
+    if (!value.startsWith("/") || value.startsWith("//")
+        || endpoint.getRawQuery() != null || endpoint.getRawFragment() != null) {
+      throw new IllegalArgumentException(
+          "--endpoint must be an absolute path without query or fragment");
+    }
+    return value;
   }
 
   public static boolean isHelp(String[] args) {
@@ -73,8 +110,9 @@ public final class GarminApiIntegrationCliUtil {
   private static Options createOptions() {
     Options options = new Options();
     options.addOption(Option.builder().longOpt("date").hasArg().required().get());
-    options.addOption(Option.builder().longOpt("api-base-url").hasArg().required().get());
     options.addOption(Option.builder().longOpt("output-dir").hasArg().required().get());
+    options.addOption(Option.builder().longOpt("endpoint").hasArg().required().get());
+    options.addOption(Option.builder().longOpt("query-param").hasArg().get());
     return options;
   }
 
@@ -87,17 +125,6 @@ public final class GarminApiIntegrationCliUtil {
     } catch (DateTimeParseException exception) {
       throw new IllegalArgumentException("--date must be a valid calendar date", exception);
     }
-  }
-
-  private static URI parseBaseUri(String value) {
-    URI uri;
-    try {
-      uri = URI.create(value);
-    } catch (IllegalArgumentException exception) {
-      throw new IllegalArgumentException("--api-base-url must be a valid HTTP(S) URL", exception);
-    }
-    GarminClient.validateBaseUri(uri);
-    return uri;
   }
 
   private static String requireValue(CommandLine options, String name) {

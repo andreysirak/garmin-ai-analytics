@@ -23,7 +23,8 @@ public final class JsonValidationUtil {
         throw new JsonParseException(parser, "Expected exactly one JSON value");
       }
     } catch (IOException exception) {
-      throw new InvalidResponseException("Garmin response JSON error", exception);
+      // Jackson exception messages can include private response values.
+      throw new InvalidResponseException("Garmin response JSON error");
     }
   }
 }

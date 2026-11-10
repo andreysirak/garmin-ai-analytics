@@ -8,8 +8,4 @@ public final class InvalidResponseException extends IOException {
   public InvalidResponseException(String message) {
     super(message);
   }
-
-  public InvalidResponseException(String message, Throwable cause) {
-    super(message, cause);
-  }
 }

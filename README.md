@@ -41,6 +41,12 @@ Airflow manages scheduling, task dependencies, and retries. Authentication runs 
 
 The Java for Garmin data ingestion code has no Airflow dependency, so it can be run and tested independently.
 
+Daily Summary and Sleep share the `garmin-integration/garmin-data-ingestion` module,
+with `java/` and `python/` directories. `GarminDataIngestionJob.main()` constructs
+dependencies and calls `GarminDataIngestionApp.run()`. Each invocation handles one
+data type, preserving separate Pods and retries. The existing Python operator
+packages are copied into the new module without behavior changes.
+
 See [Architecture](docs/architecture.md) for component details, storage, and security boundaries.
 
 **Why Java for ingestion?** It started as an experiment with the Airflow 3 Java Task SDK (tasks and potentially DAGs). That SDK did not offer a practical benefit for this pipeline, so Python DAGs/operators now launch independent Java JARs with CLI arguments. Java is retained deliberately for hands-on development, not because Garmin requires it. See [Java ingestion decision](docs/decisions/0002-java-garmin-data-ingestion.md).
@@ -149,6 +155,19 @@ Run Java checks with:
 ```bash
 make java-verify
 ```
+
+The executable JAR is `garmin-integration/garmin-data-ingestion/java/target/garmin-data-ingestion.jar`.
+Supply `--endpoint /path/to/resource` alongside the archive date and final output
+directory. Add any number of request parameters by repeating `--query-param key=value`,
+for example `--query-param from=2026-10-01 --query-param limit=25`. Omit it to send
+no query parameters. Keys must be unique; values may be empty or contain `=`.
+The archive `--date` is independent of request parameters and is not added automatically.
+`GarminClient` uses the fixed base
+URI `https://personal.connectapi.garmin.com/`; it is not a CLI argument. Java sends that
+request without an endpoint registry or data-type selection. The copied Python
+operators must remove `--api-base-url` and pass the new arguments in their follow-up before the pipeline
+is run. `make java-package-ingestion` packages the shared JAR; the existing
+summary/sleep packaging targets remain aliases.
 
 Python tests verify authentication, custom Kubernetes operators, and DAG behavior using synthetic data. See [CONTRIBUTING.md](CONTRIBUTING.md) for Python installation, Ruff, and pytest commands.
 

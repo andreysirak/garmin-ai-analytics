@@ -10,29 +10,28 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Map;
-import java.util.Objects;
+import java.util.stream.Collectors;
 
 /** Performs a single authenticated Garmin API request. */
 public final class GarminClient {
 
+  private static final URI BASE_URI = URI.create("https://personal.connectapi.garmin.com/");
   private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(30);
 
   private final HttpClient httpClient;
-  private final URI baseUri;
   private final String bearerToken;
 
-  public GarminClient(HttpClient httpClient, URI baseUri, String bearerToken) {
-    this.httpClient = Objects.requireNonNull(httpClient, "httpClient is required");
-    this.baseUri = validateBaseUri(baseUri);
-    if (bearerToken == null || bearerToken.isBlank()) {
-      throw new IllegalArgumentException("GARMIN_TOKEN_FILE must contain a bearer token");
-    }
-    this.bearerToken = bearerToken.trim();
+  public GarminClient(HttpClient httpClient, String bearerToken) {
+    this.httpClient = httpClient;
+    this.bearerToken = bearerToken;
   }
 
-  public String callWithQueryParameters(String endpoint, Map<String, String> queryParameters)
+  public String callGet(String endpoint, Map<String, String> queryParameters)
       throws GarminApiException, InterruptedException {
-    URI uri = buildUri(endpoint, queryParameters);
+    String query = queryParameters.entrySet().stream()
+        .map(entry -> encode(entry.getKey()) + "=" + encode(entry.getValue()))
+        .collect(Collectors.joining("&"));
+    URI uri = BASE_URI.resolve(endpoint + (query.isEmpty() ? "" : "?" + query));
     HttpRequest request =
         HttpRequest.newBuilder(uri)
             .timeout(REQUEST_TIMEOUT)
@@ -51,39 +50,6 @@ public final class GarminClient {
       throw new GarminApiException("Garmin API request failed with HTTP " + status);
     }
     return response.body();
-  }
-
-  public static URI validateBaseUri(URI baseUri) {
-    Objects.requireNonNull(baseUri, "API base URL is required");
-    if (!("http".equalsIgnoreCase(baseUri.getScheme())
-            || "https".equalsIgnoreCase(baseUri.getScheme()))
-        || baseUri.getHost() == null
-        || baseUri.getUserInfo() != null
-        || baseUri.getRawQuery() != null
-        || baseUri.getFragment() != null) {
-      throw new IllegalArgumentException("--api-base-url must be a valid HTTP(S) URL");
-    }
-    return baseUri;
-  }
-
-  private URI buildUri(String endpoint, Map<String, String> queryParameters) {
-    if (endpoint == null || !endpoint.startsWith("/") || endpoint.startsWith("//")) {
-      throw new IllegalArgumentException("Garmin endpoint must be an absolute path");
-    }
-    String base = baseUri.toString().replaceAll("/+$", "");
-    StringBuilder result = new StringBuilder(base).append(endpoint);
-    if (queryParameters != null && !queryParameters.isEmpty()) {
-      boolean first = true;
-      for (Map.Entry<String, String> entry : queryParameters.entrySet()) {
-        result.append(first ? '?' : '&');
-        first = false;
-        result
-            .append(encode(entry.getKey()))
-            .append('=')
-            .append(encode(entry.getValue()));
-      }
-    }
-    return URI.create(result.toString());
   }
 
   private static String encode(String value) {

@@ -11,7 +11,7 @@ After experimenting with the Java Task SDK, the project owner did not find a pra
 ## Decision
 
 - **Python Airflow DAGs and operators** own scheduling, dependencies, retries, and launching containers.
-- Airflow's `KubernetesPodOperator` launches **standalone Java 25 JARs** in Kubernetes Pods and passes runtime values as CLI arguments.
+- Airflow's `KubernetesPodOperator` launches a **standalone Java 25 JAR** in separate Kubernetes Pods for Daily Summary and Sleep and passes runtime values as CLI arguments. Both use the `garmin-data-ingestion` module; the caller supplies the endpoint and any query parameters. Java contains no endpoint registry or date-specific query logic.
 - The Java applications have **no dependency on the Airflow Java Task SDK**. They acquire Garmin API responses and archive the original JSON without DTO round-tripping; only JSON syntax is checked.
 - Java remains an intentional technology choice for hands-on Java development and a standalone, independently testable ingestion component. It is **not** needed for Garmin specifically, and Python ingestion would also be viable.
 

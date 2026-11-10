@@ -31,6 +31,10 @@ public final class TokenService {
     if (token.isEmpty()) {
       throw new IllegalArgumentException("GARMIN_TOKEN_FILE does not contain a bearer token");
     }
+    // Invalid header characters can make HttpClient include the token in an error message.
+    if (token.chars().anyMatch(character -> character <= 32 || character >= 127)) {
+      throw new IllegalArgumentException("GARMIN_TOKEN_FILE must contain one ASCII bearer token");
+    }
     return token;
   }
 }
