@@ -11,7 +11,7 @@ from airflow.sdk import Context
 from kubernetes.client import models as k8s
 
 DEFAULT_IMAGE = "garmin-daily-summary:local"
-DEFAULT_ARCHIVE_ROOT = "/data/raw/garmin"
+DEFAULT_MOUNT_PATH = "/data/raw/garmin"
 OUTPUT_DIR_XCOM_KEY = "output_dir"
 TOKEN_SECRET = "garmin-access-token"
 TOKEN_SECRET_KEY = "access-token"
@@ -32,7 +32,7 @@ class GarminIngestionOperator(KubernetesPodOperator):
 
     ``date`` names the archive file only; include any request date in ``query_params``.
     The DAG supplies a distinct, templated ``output_dir`` for each attempt; the
-    operator passes it unchanged to Java. The PVC stays mounted at ``archive_root``.
+    operator passes it unchanged to Java. The PVC stays mounted at ``mount_path``.
     Synchronous execution publishes only the output directory after the Pod succeeds,
     without an XCom sidecar. Downstream readers must require the empty ``_SUCCESS`` marker.
     """
@@ -52,17 +52,17 @@ class GarminIngestionOperator(KubernetesPodOperator):
         date: str,
         output_dir: str,
         query_params: Mapping[str, str] | None = None,
-        archive_root: str = DEFAULT_ARCHIVE_ROOT,
+        mount_path: str = DEFAULT_MOUNT_PATH,
         image: str = DEFAULT_IMAGE,
         **kwargs: object,
     ) -> None:
-        if not archive_root.startswith("/"):
-            raise ValueError("archive_root must be an absolute container path")
+        if not mount_path.startswith("/"):
+            raise ValueError("mount_path must be an absolute container path")
         self.endpoint = endpoint
         self.date = date
         self.output_dir = output_dir
         self.query_params = dict(query_params or {})
-        self.archive_root = archive_root
+        self.mount_path = mount_path
 
         super().__init__(
             cmds=["java", "-jar", "/app/garmin-data-ingestion.jar"],
@@ -111,7 +111,7 @@ class GarminIngestionOperator(KubernetesPodOperator):
                 ),
                 k8s.V1VolumeMount(
                     name="garmin-raw-data",
-                    mount_path=archive_root,
+                    mount_path=mount_path,
                     read_only=False,
                 ),
             ],
