@@ -1,4 +1,4 @@
-# 0002. Java ingestion and Airflow integration
+# 0002. Java Garmin Data ingestion and Airflow integration
 
 Status: accepted — revisit if the execution model changes.
 
