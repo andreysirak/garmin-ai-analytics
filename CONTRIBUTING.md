@@ -243,7 +243,7 @@ The shared ingestion operator is exported as
 package alongside `garmin_auth`. Rebuild/load the Airflow image and run
 `make airflow-operator-rollout` after operator changes. Both ingestion image tags
 continue to use the same shared JAR. The DAG constructs the attempt-directory
-template and passes it through the required `output_dir` parameter; `archive_root`
+template and passes it through the required `output_dir` parameter; `mount_path`
 controls only the stable PVC mount.
 
 Python tests mock Kubernetes operations and use synthetic credentials and
