@@ -120,13 +120,13 @@ numbers or perform downstream reads.
 
 ## Python attempt allocation and handoff
 
-The PVC stays mounted at `/data/raw/garmin` (`archive_root` in the operator),
+The PVC stays mounted at `/data/raw/garmin` (`mount_path` in the operator),
 independently of the final `--output-dir`. The operator requires a templated
 `output_dir` parameter and forwards its rendered value unchanged. Path selection
 belongs to `garmin_daily_pipeline`, which supplies:
 
 ```text
-<archive_root>/<daily-summary|sleep>/<requested-date>/run-<SHA256(dag_id + NUL + run_id)>/attempt-<try_number>-<uuid>
+<mount_path>/<daily-summary|sleep>/<requested-date>/run-<SHA256(dag_id + NUL + run_id)>/attempt-<try_number>-<uuid>
 ```
 
 The DAG's `ATTEMPT_PATH` template uses `PROCESSING_DATE`, `ti.try_number`, the
