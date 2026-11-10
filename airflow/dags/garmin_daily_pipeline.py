@@ -9,7 +9,7 @@ from airflow.sdk import DAG, Param
 from garmin_auth.operator import GarminAuthOperator
 from garmin_data_ingestion import GarminIngestionOperator
 
-ARCHIVE_ROOT = "/data/raw/garmin"
+MOUNT_PATH = "/data/raw/garmin"
 PROCESSING_DATE = (
     "{{ (dag_run.conf.get('date', params.date) if dag_run and dag_run.conf else params.date) "
     "or ((dag_run.logical_date or dag_run.start_date).strftime('%Y-%m-%d') if dag_run else ds) }}"
@@ -51,8 +51,8 @@ with DAG(
     ingest_daily_summary = GarminIngestionOperator(
         task_id="ingest_daily_summary",
         endpoint="/usersummary-service/usersummary/daily",
-        output_dir=f"{ARCHIVE_ROOT}/daily-summary/{ATTEMPT_PATH}",
-        archive_root=ARCHIVE_ROOT,
+        output_dir=f"{MOUNT_PATH}/daily-summary/{ATTEMPT_PATH}",
+        mount_path=MOUNT_PATH,
         date=PROCESSING_DATE,
         query_params={"calendarDate": PROCESSING_DATE},
         image="garmin-daily-summary:local",
@@ -60,8 +60,8 @@ with DAG(
     ingest_sleep = GarminIngestionOperator(
         task_id="ingest_sleep",
         endpoint="/sleep-service/sleep/dailySleep",
-        output_dir=f"{ARCHIVE_ROOT}/sleep/{ATTEMPT_PATH}",
-        archive_root=ARCHIVE_ROOT,
+        output_dir=f"{MOUNT_PATH}/sleep/{ATTEMPT_PATH}",
+        mount_path=MOUNT_PATH,
         date=PROCESSING_DATE,
         query_params={"date": PROCESSING_DATE},
         image="garmin-sleep:local",
