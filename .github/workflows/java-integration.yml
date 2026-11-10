@@ -23,7 +23,7 @@ jobs:
           java-version: "25"
           cache: maven
       - name: Validate Airflow DAG syntax
-        run: python3 -m py_compile airflow/dags/garmin_daily_ingestion.py
+        run: python3 -m py_compile airflow/dags/garmin_daily_pipeline.py
       - name: Verify Java integration
         run: mvn -B -ntp -f garmin-integration/pom.xml clean verify
       - name: Upload Java reports after failure

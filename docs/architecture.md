@@ -24,7 +24,9 @@ kind cluster "garmin-ai-analytics"
 - Kustomize (`infrastructure/kubernetes`): namespaces, ServiceAccount, RBAC, volumes.
 - Helm (`infrastructure/helm/airflow`): Airflow chart 1.22.0, Airflow 3.3.1, bundled PostgreSQL subchart.
 - DAGs: `airflow/dags` is mounted from the host into the kind node and into Airflow.
-- The DAG runs token validation before either independent Java ingestion task.
+- `garmin_daily_pipeline` owns the daily workflow from ingestion through future
+  analytics stages. It currently runs token validation before either independent
+  Java ingestion task.
 - The auth Pod runs in `garmin-auth`; its ServiceAccount may get and update only
   the named `garmin-access-token` Secret in `airflow-jobs`.
 - Airflow has a separate, namespace-scoped Pod-launcher Role in both job
@@ -41,8 +43,11 @@ PostgreSQL Bronze/Silver/Gold storage and downstream analytics remain out of sco
 ## Java ingestion boundaries
 
 `garmin-integration/garmin-data-ingestion` contains the `java/` application and
-`python/` operator packages. The Python source and tests were moved unchanged;
-operator consolidation and DAG/XCom changes remain separate work.
+`python/` operator package. `garmin_data_ingestion.GarminIngestionOperator` shares
+the Kubernetes configuration for two independent DAG task instances. Each supplies
+its endpoint and an explicit date query parameter: Daily Summary uses
+`calendarDate`, while Sleep uses `date`. Both launch
+`java -jar /app/garmin-data-ingestion.jar` with the existing image tags.
 
 `GarminDataIngestionJob.main(args)` constructs `TokenServiceKubernetesImpl`, a JDK
 `HttpClient`, and `FileWriterLocalImpl`, then calls `GarminDataIngestionApp.run(args)`.
@@ -66,8 +71,8 @@ for the filename, independently of all request parameters.
 ready-to-use options. Endpoint validation checks HTTP path syntax; it does not
 recognize or restrict Garmin endpoints. Java has no endpoint registry, data-type
 selection, or image-provided request defaults. Both existing image tags build
-the same shared JAR. Their legacy JAR paths remain aliases, while the copied
-Python operators still need to supply the new request arguments in the follow-up.
+the same shared JAR. Their legacy JAR paths remain compatibility aliases; the
+Python operator uses the shared JAR path directly.
 Authentication continues to gate independent Sleep and Daily Summary tasks,
 each with its own Airflow retries. Java performs no retries.
 
@@ -89,8 +94,8 @@ bearer token from `GARMIN_TOKEN_FILE`, which Kubernetes provides through a read-
 Secret mount. It reads the mounted file without calling the Kubernetes API. Token
 trimming, validation, and failure causes are preserved. Help requires neither a token
 nor request arguments. Authentication and HTTP request semantics are unchanged.
-The Python follow-up must remove `--api-base-url` and supply the endpoint path
-and any request query parameters before running the pipeline.
+The Python operator supplies the endpoint and query parameters as separate CLI
+arguments without URL encoding. There is no Python base-URL setting.
 
 `JsonValidationUtil` uses Jackson Core to check for exactly one complete JSON
 value. Objects, arrays, scalars, and JSON `null` are accepted. There are no response
@@ -113,11 +118,48 @@ partial or complete JSON files. Downstream tasks must ignore directories without
 including retries, must receive its own directory. Java does not allocate attempt
 numbers or perform downstream reads.
 
-DAG/XCom wiring remains pending. The DAG must supply distinct final directories
-per endpoint/download attempt, share those paths through XCom, and keep the PVC
-mounted at a stable archive root independently of each final output directory.
-Future downstream tasks must enforce the `_SUCCESS` requirement before reading JSON.
-Complete that wiring before running the pipeline with the new directory contract.
+## Python attempt allocation and handoff
+
+The PVC stays mounted at `/data/raw/garmin` (`archive_root` in the operator),
+independently of the final `--output-dir`. The operator requires a templated
+`output_dir` parameter and forwards its rendered value unchanged. Path selection
+belongs to `garmin_daily_pipeline`, which supplies:
+
+```text
+<archive_root>/<daily-summary|sleep>/<requested-date>/run-<SHA256(dag_id + NUL + run_id)>/attempt-<try_number>-<uuid>
+```
+
+The DAG's `ATTEMPT_PATH` template uses `PROCESSING_DATE`, `ti.try_number`, the
+`archive_run_key` macro, and Airflow's `macros.uuid.uuid4()`. The requested date
+supports run configuration, parameters, and the logical-date/start-date fallback.
+The hash keeps arbitrary run identifiers bounded and inside the archive root.
+UUIDs are generated when a fresh task attempt renders its fields, never during DAG
+parsing or by the operator. Retry and cleared/manual/backfill attempts render fresh
+copies of the source template, preserving uniqueness even for repeated try numbers.
+The operator validates that the rendered path is absolute, without creating,
+inspecting, deleting, or rewriting archive contents. Java creates the directory
+and persists its response. Earlier failed and successful attempts are retained,
+including legacy layouts.
+
+The operator runs synchronously and disables Pod reattachment: a restarted worker
+launches a fresh Pod for its DAG-supplied directory. An orphaned Pod may finish
+its old attempt, which stays separate from the replacement. This avoids publishing
+paths that differ from a reused Pod's arguments. Airflow alone decides retries;
+Pod failures propagate and no archive XCom is published for a failed execution.
+The existing namespace, ServiceAccount, Secret/file access, resources, security
+settings, logging, startup timeout, and execution timeout are preserved.
+
+After successful completion, Python calls
+`ti.xcom_push(key="output_dir", value=self.output_dir)`. This string is the same
+final attempt directory supplied to Java. Java owns creation of `<date>.json` and
+`_SUCCESS` within that directory; Python does not construct or publish their paths.
+The provider may also publish its normal Pod name/namespace metadata. Java never
+writes an Airflow XCom return file, and `do_xcom_push=False` disables the provider's
+XCom sidecar. Future downstream tasks pull `output_dir` from the appropriate
+ingestion task, mount the same PVC root, and **require `_SUCCESS` before reading
+JSON**. An unmarked directory can contain partial or complete JSON; neither file
+existence nor the presence of metadata proves completion. No downstream reader or
+analytics is added here.
 
 `GarminApiException`, `InvalidResponseException`, and `IngestionExecutionException`
 distinguish HTTP/transport, JSON-syntax, and configuration/archive failures.

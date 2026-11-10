@@ -238,8 +238,20 @@ pytest -q airflow/tests \
   garmin-integration/garmin-data-ingestion/python/tests
 ```
 
+The shared ingestion operator is exported as
+`garmin_data_ingestion.GarminIngestionOperator`; `airflow/Dockerfile` copies this
+package alongside `garmin_auth`. Rebuild/load the Airflow image and run
+`make airflow-operator-rollout` after operator changes. Both ingestion image tags
+continue to use the same shared JAR. The DAG constructs the attempt-directory
+template and passes it through the required `output_dir` parameter; `archive_root`
+controls only the stable PVC mount.
+
 Python tests mock Kubernetes operations and use synthetic credentials and
-local HTTP fixtures. Do not run authentication against Garmin from tests.
+local HTTP fixtures. Ingestion tests cover explicit query dates, opaque query
+values, stable PVC mounts, directory-only XCom, and retry/cleared-run isolation with
+completed and unmarked archive fixtures. Do not run authentication against Garmin from tests.
+See [issue #32 verification](docs/verification/0032-python-ingestion.md) for the
+recorded isolated Airflow/Kubernetes retry check and its test-only substitutions.
 
 Pull requests should pass **Validate infrastructure**, **Garmin API Integration
 Java**, and **Garmin API Integration Python**. Run the optional **Airflow Smoke
