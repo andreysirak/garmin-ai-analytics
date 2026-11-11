@@ -1,0 +1,12 @@
+# Managed outside Helm so deployment rollback/uninstall cannot remove the claim.
+# Uses the local kind cluster's default StorageClass (node-local storage).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: garmin-postgresql-data
+  namespace: garmin-analytics
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi
