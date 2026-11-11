@@ -1,8 +1,8 @@
 # Garmin AI Analytics
 
-**A mobile companion that helps you get more out of your Garmin watch.**
+**Get the most out of your Garmin watch without spending hours on settings.**
 
-Garmin AI Analytics aims to help Garmin owners see what their watch records, choose settings and activity modes that fit their routines, and get personalized insights as their history grows.
+Garmin AI Analytics is a mobile app in development for everyday Garmin owners. It will use AI to explain what your metrics and activities show and suggest watch settings and activity modes that fit your routine.
 
 ## What the app will do
 
