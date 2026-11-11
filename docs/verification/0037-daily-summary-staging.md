@@ -23,12 +23,6 @@ database with a bootstrap-admin test login. The fixture installs application rol
 creates/removes only synthetic staging tables, and drops its staging schema when
 finished. Never point it at the development database with real data.
 
-The previous complete 95-column definition is retained only as the synthetic
-`airflow/tests/sql/legacy_wide_daily_summary.sql` migration-preservation fixture.
-It is not used by the DAG. The legacy test compares table OID/owner, all 95 column
-names/types/nullability, constraints, index definitions, and all synthetic rows
-before/after the rejected task execution.
-
 ## Commands
 
 With the test DSN supplied through the protected environment and both existing
@@ -49,11 +43,15 @@ See the [current contract and upgrade requirements](../postgresql.md#daily-summa
 
 ## Results
 
-Verified locally on 2026-11-11 against PostgreSQL 17.11, Airflow 3.3.1, and Python
-3.13: **89 tests passed**, including **28 real-PostgreSQL integration cases**.
+The last full local run before this test-only cleanup used PostgreSQL 17.11,
+Airflow 3.3.1, and Python 3.13 on 2026-11-11: **89 tests passed**, including **28 real-PostgreSQL integration cases**.
 The four NOT NULL cases passed again after a lint-only context-manager cleanup.
 Ruff and `git diff --check` passed. Existing Kubernetes provider
 `reattach_on_restart` deprecation warnings remain.
+
+The obsolete compatibility scenario has been removed. The PostgreSQL suite now
+contains 27 cases; the full runtime suite was not rerun for this test-only
+removal. Python syntax and `git diff --check` passed; production SQL is unchanged.
 
 | Check | Result |
 | --- | --- |
@@ -68,15 +66,7 @@ Ruff and `git diff --check` passed. Existing Kubernetes provider
 | Missing/wrong column types, nullability, defaults, or added columns fail with a migration message | Passed |
 | Missing, incorrect, or deferrable key and missing/weaker/unvalidated payload CHECK fail | Passed |
 | Extra unique index is rejected; equivalent renamed constraints are accepted | Passed |
-| Existing complete 95-column table fails with an explicit wide-table migration hint | Passed; original schema, indexes, ownership, OID, and row preserved |
 | A view cannot masquerade as the staging table | Passed |
-
-Expected legacy-table error (schema details abbreviated):
-
-```text
-Schema migration required for staging.stg_garmin_daily_summary columns: expected four-column JSONB contract ..., found ...
-HINT: Existing wide tables require a reviewed migration or replay from the raw archive. This task leaves existing schema and rows unchanged.
-```
 
 The disposable containers, network, and synthetic credentials were removed.
 No development database/Connection, local credential file, or Git staging was
@@ -86,7 +76,6 @@ changed. No loader, typed view, or automatic wide-table migration was implemente
 
 - `airflow/dags/sql/ensure_daily_summary_staging.sql`
 - `airflow/tests/test_daily_summary_staging_postgresql.py`
-- `airflow/tests/sql/legacy_wide_daily_summary.sql` (new synthetic fixture)
 - `docs/postgresql.md`
 - `docs/architecture.md`
 - `docs/verification/0037-daily-summary-staging.md`

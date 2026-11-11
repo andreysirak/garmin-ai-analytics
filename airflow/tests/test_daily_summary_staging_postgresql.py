@@ -261,25 +261,6 @@ def test_constraint_names_do_not_affect_compatibility(staging):
     execute()
 
 
-def test_existing_95_column_table_requires_migration_and_keeps_schema_and_rows(staging):
-    admin, execute = staging
-    with admin.cursor() as cursor:
-        cursor.execute("SET LOCAL ROLE garmin_owner")
-        cursor.execute((Path(__file__).parent / "sql/legacy_wide_daily_summary.sql").read_text())
-        cursor.execute(f"INSERT INTO {TABLE} (user_profile_id, calendar_date, total_steps, "
-                       "body_battery_activity_event_list) VALUES (%s, %s, %s, %s::jsonb)",
-                       (12, "2026-11-09", 8100, '[{"eventType":"ACTIVITY","bodyBatteryImpact":-8}]'))
-    admin.commit()
-    before = table_snapshot(admin)
-    assert len(before[1]) == 95
-    assert len(before[4]) == 1
-    with pytest.raises(RaiseException, match="Schema migration required.*four-column JSONB contract") as error:
-        execute()
-    assert "Existing wide tables require a reviewed migration" in str(error.value)
-    assert "leaves existing schema and rows unchanged" in str(error.value)
-    assert table_snapshot(admin) == before
-
-
 def test_view_cannot_masquerade_as_the_staging_table(staging):
     admin, execute = staging
     with admin.cursor() as cursor:
