@@ -261,3 +261,12 @@ authentication tests. Preserve this job name when editing CI so the required
 status-check configuration continues to match. Run the optional **Airflow Smoke
 Test** when changing Kubernetes or Airflow execution. Do not use Garmin
 credentials in CI.
+
+For analytics PostgreSQL infrastructure changes, also run the bootstrap tests with
+`python3 -m unittest discover -s infrastructure/tests -v`. On the local kind
+cluster, run `make postgresql-up`, set the loader password and import the local
+Airflow connection as documented, then run `make postgresql-verify` to check
+roles, Mac/internal client connectivity, and synthetic-row persistence across
+Pod replacement and deployment rollback. See
+[Local analytics PostgreSQL](docs/postgresql.md) for the verification behavior
+and storage lifecycle.

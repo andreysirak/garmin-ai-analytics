@@ -26,6 +26,30 @@ create_if_missing() {
     echo "secret/$name created"
   fi
 }
+bootstrap_postgresql() {
+  local existing_secret
+  # Fail on API/authorization errors rather than treating them as a missing Secret.
+  existing_secret="$(kubectl -n garmin-analytics get secret garmin-postgresql \
+    --ignore-not-found -o name)"
+  if [[ -n "$existing_secret" ]]; then
+    echo "secret/garmin-postgresql exists, skipping"
+  else
+    # Stream the password: no plaintext manifest, argument, or normal output.
+    random_secret | tr -d '\n' | kubectl -n garmin-analytics create secret generic \
+      garmin-postgresql --from-file=password=/dev/stdin >/dev/null
+    echo "secret/garmin-postgresql created"
+  fi
+}
+
+case "${1:-}" in
+  --postgresql-only)
+    bootstrap_postgresql
+    exit 0
+    ;;
+  "") ;;
+  *) echo "Usage: $0 [--postgresql-only]" >&2; exit 1 ;;
+esac
+
 bootstrap_garmin_credentials() {
   local credentials_file="${REPO_ROOT}/config/credentials.local.json"
   local expected_context="${KUBE_CONTEXT:-kind-garmin-ai-analytics}"

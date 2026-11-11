@@ -11,6 +11,8 @@ __pycache__/
 *.env.local
 kubeconfig*
 config/credentials.local.json
+config/connections.local.json
+config/connections.json
 airflow/config/simple_auth_passwords.json
 
 # Build output

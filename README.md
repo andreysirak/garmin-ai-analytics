@@ -76,6 +76,7 @@ See [Architecture](docs/architecture.md) for component details, storage, and sec
 - Task retries and parallel ingestion after an authentication gate.
 - Dedicated authentication namespace, restricted ServiceAccounts, and admission controls.
 - Java, Python, and infrastructure validation in GitHub Actions.
+- Optional, separate local PostgreSQL database with persistent storage and deployment rollback.
 
 The project currently **collects and archives** data; it does not yet compute health analytics or generate AI advice.
 
@@ -83,7 +84,7 @@ The project currently **collects and archives** data; it does not yet compute he
 
 ### Prerequisites
 
-Install Docker (or Colima), kind, kubectl, Helm, Python 3.12, and OpenSSL. Java 25 and Maven are needed for direct Java development; Make targets can build Java code using Docker.
+Install Docker (or Colima), kind, kubectl, Helm, Python 3.12, and OpenSSL. Analytics PostgreSQL also requires the local `psql` client (`brew install libpq` on macOS). Make checks find Homebrew libpq automatically, even when its `bin` directory is not on PATH. Java 25 and Maven are needed for direct Java development; Make targets can build Java code using Docker.
 
 ### 1. Create the cluster
 
@@ -108,6 +109,26 @@ make infra-up
 ```
 
 This builds and loads the local images, applies Kubernetes resources, bootstraps credentials when available, and deploys Airflow.
+After Airflow is ready, it imports `config/connections.json` if present. An absent
+file is skipped; a present but invalid file makes deployment return an error.
+
+To deploy the separate analytics database (no Garmin credentials required):
+
+```bash
+make postgresql-up
+make postgresql-loader-password
+# Copy config/connections.example.json to config/connections.json,
+# chmod 600 it, and manually fill in the loader password before importing.
+# If Airflow is not deployed yet, make infra-up will import the file automatically.
+make airflow-connections-import
+make postgresql-verify
+```
+
+See [Local analytics PostgreSQL](docs/postgresql.md) for connection details,
+credential handling, storage limits, and `make postgresql-rollback` scope.
+The Mac endpoint is `127.0.0.1:5432`; Airflow uses the internal Service through
+connection ID `garmin_analytics_loader`. Existing kind clusters without the host
+mapping fail safely and require manual backup/recreation as documented.
 
 ### 4. Run the pipeline
 
@@ -244,6 +265,7 @@ Interested in Java, Python, Airflow, Kubernetes, or data engineering? Contributi
 ## Documentation
 
 - [Architecture and security](docs/architecture.md)
+- [Local analytics PostgreSQL deployment and rollback](docs/postgresql.md)
 - [Kubernetes execution decision](docs/decisions/0001-kubernetes-execution.md)
 - [Java ingestion and Airflow integration decision](docs/decisions/0002-java-garmin-data-ingestion.md)
 - [Contributing, Story/Task workflow and PR review standards](CONTRIBUTING.md)

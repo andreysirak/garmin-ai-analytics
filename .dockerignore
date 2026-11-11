@@ -1,6 +1,8 @@
 .git
 .env
 config/credentials.local.json
+config/connections.local.json
+config/connections.json
 .idea
 **/target
 airflow/logs

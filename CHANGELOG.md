@@ -4,6 +4,11 @@
 
 | Type | What changed | Breaking change | Upgrade steps | PR |
 | --- | --- | --- | --- | --- |
+| Changed | make infra-up imports config/connections.json after Airflow readiness; absent files preserve existing connections and invalid files fail import | Local connection file becomes authoritative on infra-up | Fill in the loader password; use AIRFLOW_CONNECTIONS_FILE to override the path | |
+| Fixed | Discover the native PostgreSQL client in Homebrew libpq when psql is not on PATH; use the same executable in preflight and Mac connection checks | No | Install libpq if absent; no PATH change required for Make checks | |
+| Added | make postgresql-password displays the existing analytics bootstrap admin password without changing credentials | No | Loader passwords remain separately configured with make postgresql-loader-password | |
+| Added | Loopback PostgreSQL access on 127.0.0.1:5432 with a read-only kind mapping preflight; version-controlled owner/loader grants and manually imported Airflow loader connection | Existing clusters need a host mapping | Back up before manual cluster recreation; set the loader password and import config/connections.local.json; see docs/postgresql.md | |
+| Added | Separate local garmin_analytics database using the pinned Bitnami PostgreSQL chart, external PVC and generated Secret, Make rollback and synthetic persistence verification (#36) | No | Run make postgresql-up; see docs/postgresql.md for rollback scope and migration from the earlier custom chart | |
 | Changed | Store ingestion archives as data-type/YYYY-MM-DD/try-number/YYYY-MM-DD.json, without a run directory | New attempts use the simplified layout | Existing archives remain readable in their original locations | |
 | Fixed | Use mount_path consistently in ingestion containment validation and retry fixtures after the PVC setting rename | No | Rebuild/load the Airflow image and restart scheduler/DAG processor before retrying | |
 | Fixed | Reject rendered ingestion directories outside the mounted archive root, including parent traversal and sibling-prefix paths; explicitly validate DAG imports and registration in Python CI | No | Configure Garmin API Integration Python as required in the repository ruleset | |

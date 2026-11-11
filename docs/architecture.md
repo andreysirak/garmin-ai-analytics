@@ -14,15 +14,28 @@ kind cluster "garmin-ai-analytics"
 │   ├── garmin-auth ServiceAccount
 │   ├── auth ConfigMap and ValidatingAdmissionPolicy
 │   └── auth Pod (GarminAuthOperator)
-└── namespace airflow-jobs
-    ├── garmin-access-token Secret
-    └── ingestion Pods (ServiceAccount airflow-job)
-        ├── read-only garmin-access-token Secret mount
-        └── garmin-raw-data PVC (daily summary and sleep JSON)
+├── namespace airflow-jobs
+│   ├── garmin-access-token Secret
+│   └── ingestion Pods (ServiceAccount airflow-job)
+│       ├── read-only garmin-access-token Secret mount
+│       └── garmin-raw-data PVC (daily summary and sleep JSON)
+└── namespace garmin-analytics (optional: make postgresql-up)
+    ├── garmin-postgresql StatefulSet, NodePort Service and headless Service (Bitnami chart)
+    ├── garmin-postgresql password Secret
+    └── garmin-postgresql-data PVC (garmin_analytics database)
 ```
 
 - Kustomize (`infrastructure/kubernetes`): namespaces, ServiceAccount, RBAC, volumes.
 - Helm (`infrastructure/helm/airflow`): Airflow chart 1.22.0, Airflow 3.3.1, bundled PostgreSQL subchart.
+- Separate Bitnami PostgreSQL chart 18.12.18, configured through
+  `infrastructure/helm/postgresql/values.yaml` with the official PostgreSQL 17 image;
+  its PVC and Secret are managed outside Helm to preserve them across rollback.
+  See [deployment and rollback](postgresql.md) for commands and storage limits.
+- The analytics Service is exposed to the Mac as `127.0.0.1:5432` through kind
+  host port 5432 / NodePort 30432. A read-only preflight rejects older clusters
+  without this mapping before deployment changes. Airflow connects internally
+  using `garmin_analytics_loader` as `garmin_loader`; ownership is held by the
+  NOLOGIN `garmin_owner`, with setup/restore reserved for the bootstrap admin.
 - DAGs: `airflow/dags` is mounted from the host into the kind node and into Airflow.
 - `garmin_daily_pipeline` owns the daily workflow from ingestion through future
   analytics stages. It currently runs token validation before either independent
@@ -38,7 +51,8 @@ kind cluster "garmin-ai-analytics"
 Implemented ingestion flow: Garmin Personal API key -> cached bearer token ->
 daily summary/sleep JSON -> syntax validation -> unchanged raw JSON files on
 `garmin-raw-data`.
-PostgreSQL Bronze/Silver/Gold storage and downstream analytics remain out of scope.
+The analytics PostgreSQL instance can be deployed separately; schema creation,
+loading, and downstream analytics are not yet implemented.
 
 ## Java ingestion boundaries
 

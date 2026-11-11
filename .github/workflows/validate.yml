@@ -25,3 +25,5 @@ jobs:
           version: v1.33.7
       - name: Validate infrastructure
         run: make infra-validate
+      - name: Verify PostgreSQL bootstrap, preflight and connection configuration
+        run: python3 -m unittest discover -s infrastructure/tests -v
