@@ -1,12 +1,16 @@
 # Garmin AI Analytics
 
-**A personal health data platform built with Java, Apache Airflow, and Kubernetes.**
+**A mobile companion that helps you get more out of your Garmin watch.**
 
-Garmin AI Analytics is an evolving data engineering project that collects Garmin activity and sleep data, preserves original API JSON responses unchanged for later analytics and AI-powered insights.
+Garmin AI Analytics aims to help Garmin owners see what their watch records, choose settings and activity modes that fit their routines, and get personalized insights as their history grows.
 
-The goal is to turn daily wearable data into meaningful personal insights while practicing production-oriented data engineering.
+## What the app will do
 
-**Status:** Active development — Garmin ingestion is implemented; analytical processing and AI recommendations are not yet available.
+- **Show what your watch captures.** See which metrics are recorded consistently and where readings are missing.
+- **Suggest a change to try.** Get a recommendation about watch settings, syncing, or recording an activity, with an explanation grounded in your data.
+- **Check whether it helped.** Compare coverage before and after the change. As enough comparable activity records accumulate, explore personal forecasts, such as a range of likely times for a familiar route.
+
+**Current status.** The mobile app is the product goal. This repository implements Garmin ingestion and the raw data archive using Java, Airflow, and Kubernetes. The first milestone is a daily-summary demo that visualizes coverage and explains one evidence-backed recommendation. See the [product vision](https://github.com/andreysirak/garmin-ai-analytics/issues/44) and [first demo](https://github.com/andreysirak/garmin-ai-analytics/issues/18).
 
 ## Architecture
 
