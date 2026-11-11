@@ -444,7 +444,6 @@ The task creates `garmin_analytics.staging.stg_garmin_daily_summary` when missin
 | --- | --- | --- |
 | `user_profile_id` | bigint NOT NULL | Garmin profile ID |
 | `calendar_date` | date NOT NULL | Summary's calendar date |
-| `raw_file_path` | text NOT NULL | Path to the original archived JSON file |
 | `payload` | jsonb NOT NULL | Complete parsed Garmin daily-summary response object |
 
 The nondeferrable primary key is **(user_profile_id, calendar_date)**: one complete
@@ -465,13 +464,13 @@ Timestamp strings, whether offsetless or containing `Z`/another offset, stay
 strings in the payload without timezone conversion.
 
 Issue #38 will read a completed archive attempt (requiring `_SUCCESS`), obtain the
-profile/date key, and store both the complete object and its JSON file path in
-one transaction. `raw_file_path` refers to the JSON file, not merely its attempt
-directory or `_SUCCESS` marker. The intended upsert target remains
+profile/date key, and store that key and the complete object in one transaction.
+Only the key and payload are stored in PostgreSQL; original response bytes stay
+in the raw archive. The intended upsert target remains
 `ON CONFLICT (user_profile_id, calendar_date)`. Loading a corrected response should
-replace the full payload and update its archive path while keeping earlier raw
-files available for replay. The load task must depend on **both**
-`ensure_daily_summary_staging` and `ingest_daily_summary`.
+replace the full payload while keeping earlier raw files available for replay.
+The load task must depend on **both** `ensure_daily_summary_staging` and
+`ingest_daily_summary`.
 
 Typed SQL views will later extract only metrics needed for analysis from the
 JSONB object. Timestamp interpretation and explicit GMT/local timezone rules
@@ -484,7 +483,7 @@ steps and are not introduced by #37.
 
 An empty temporary contract table provides a single definition for creation and
 verification; it disappears on commit or rollback. Verification compares exactly
-four column names, types/precision, nullability, defaults, and identity/generated
+three column names, types/precision, nullability, defaults, and identity/generated
 properties. It also compares constraint definitions (including CHECK validation
 state) and requires one valid, immediate primary unique index. Constraint names
 and physical column order may differ, and extra nonunique indexes are allowed.
@@ -498,16 +497,13 @@ The `ACCESS SHARE` lock blocks operations requiring `ACCESS EXCLUSIVE` until
 transaction completion; compatible concurrent DDL is still possible, so schema
 changes must be coordinated with daily runs.
 
-### Existing wide tables
+### Existing tables
 
-If the earlier 95-column table is present, setup fails with
-`Schema migration required ... expected four-column JSONB contract`, plus a hint
-that existing wide tables require a reviewed migration or replay from the raw
-archive. The old table's columns, constraints, indexes, ownership, and rows remain
-unchanged. Schema setup never guesses `raw_file_path` or fabricates a complete
-response from metric columns; omitted source fields cannot be recovered that way.
-Prepare a separate reviewed migration/backfill from original archives before
-switching an existing database to this contract. No automatic migration is added.
+An existing table with a different definition fails verification with
+`Schema migration required ... expected three-column JSONB contract`.
+Schema setup never drops columns or changes existing rows automatically. Apply
+any required schema change separately before rerunning the task, or use a fresh
+database. Original archived responses remain available for replay.
 
 The Connection-name upgrade instructions above still apply independently: keep
 `garmin_schema_manager` and `postgresql-schema-manager-password`, and leave the

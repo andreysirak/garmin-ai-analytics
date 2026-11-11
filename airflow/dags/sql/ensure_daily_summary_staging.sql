@@ -14,7 +14,6 @@ SET LOCAL ROLE garmin_owner;
 CREATE TEMPORARY TABLE expected_daily_summary_staging (
     user_profile_id bigint NOT NULL,
     calendar_date date NOT NULL,
-    raw_file_path text NOT NULL,
     payload jsonb NOT NULL,
     PRIMARY KEY (user_profile_id, calendar_date),
     CONSTRAINT stg_garmin_daily_summary_payload_object
@@ -61,9 +60,9 @@ BEGIN
     INTO expected_columns, actual_columns;
 
     IF expected_columns IS DISTINCT FROM actual_columns THEN
-        RAISE EXCEPTION 'Schema migration required for staging.stg_garmin_daily_summary columns: expected four-column JSONB contract %, found %',
+        RAISE EXCEPTION 'Schema migration required for staging.stg_garmin_daily_summary columns: expected three-column JSONB contract %, found %',
             expected_columns, actual_columns
-            USING HINT = 'Existing wide tables require a reviewed migration or replay from the raw archive. This task leaves existing schema and rows unchanged.';
+            USING HINT = 'Apply a reviewed schema migration. This task leaves existing schema and rows unchanged.';
     END IF;
 
     -- Constraint names may differ; definitions, including validation state, must match.

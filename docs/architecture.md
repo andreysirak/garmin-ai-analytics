@@ -55,7 +55,7 @@ daily summary/sleep JSON -> syntax validation -> unchanged raw JSON files on
 `garmin-raw-data`.
 The analytics PostgreSQL instance can be deployed separately. The daily DAG
 creates/verifies `staging.stg_garmin_daily_summary`: one row per user/date with
-`raw_file_path` and the full parsed response in `payload jsonb`. Nested Body
+the full parsed response in `payload jsonb`. Nested Body
 Battery events stay inside the payload. Raw archive bytes remain unchanged.
 Loading and typed SQL views for selected metrics remain separate follow-up steps.
 The future daily-summary loader must depend on both schema setup and daily-summary

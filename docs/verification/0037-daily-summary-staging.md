@@ -1,8 +1,8 @@
 # Issue #37: full-response daily-summary staging
 
 The current contract stores one complete parsed response per user/date using
-`user_profile_id bigint NOT NULL`, `calendar_date date NOT NULL`,
-`raw_file_path text NOT NULL`, and `payload jsonb NOT NULL`. It has primary key
+`user_profile_id bigint NOT NULL`, `calendar_date date NOT NULL`, and
+`payload jsonb NOT NULL`. It has primary key
 `(user_profile_id, calendar_date)` and a validated payload-object CHECK.
 
 The daily DAG task still uses `garmin_analytics_schema` as `garmin_schema_manager`,
@@ -43,23 +43,18 @@ See the [current contract and upgrade requirements](../postgresql.md#daily-summa
 
 ## Results
 
-The last full local run before this test-only cleanup used PostgreSQL 17.11,
-Airflow 3.3.1, and Python 3.13 on 2026-11-11: **89 tests passed**, including **28 real-PostgreSQL integration cases**.
-The four NOT NULL cases passed again after a lint-only context-manager cleanup.
-Ruff and `git diff --check` passed. Existing Kubernetes provider
-`reattach_on_restart` deprecation warnings remain.
-
-The obsolete compatibility scenario has been removed. The PostgreSQL suite now
-contains 27 cases; the full runtime suite was not rerun for this test-only
-removal. Python syntax and `git diff --check` passed; production SQL is unchanged.
+Verified locally on 2026-11-11 with PostgreSQL 17.11, Airflow 3.3.1, and Python
+3.13: **87 tests passed**, including **26 real-PostgreSQL integration cases**.
+Ruff, Python syntax, and `git diff --check` passed. Existing Kubernetes provider
+deprecation warnings remain. Source/docs were checked for stale column references.
 
 | Check | Result |
 | --- | --- |
-| Fresh setup creates exactly four required columns, primary key, and payload-object CHECK | Passed |
+| Fresh setup creates exactly three required columns, primary key, and payload-object CHECK | Passed |
 | Table ownership and inherited loader DML grants | Passed |
-| Two setup reruns preserve committed row, archive path, full payload, and schema | Passed |
+| Two setup reruns preserve committed row, full payload, and schema | Passed |
 | Nested Body Battery objects/events, unknown fields, nulls, and timestamp strings survive JSONB round-trip | Passed |
-| Loader can upsert on the profile/date key and update the full payload/path | Passed |
+| Loader can upsert on the profile/date key and update the full payload | Passed |
 | Arrays, strings, numbers, booleans, and JSON null are rejected by the object CHECK | Passed |
 | SQL NULL in any contract column is rejected | Passed |
 | Empty JSON object is accepted without metric-quality checks | Passed |
@@ -70,7 +65,7 @@ removal. Python syntax and `git diff --check` passed; production SQL is unchange
 
 The disposable containers, network, and synthetic credentials were removed.
 No development database/Connection, local credential file, or Git staging was
-changed. No loader, typed view, or automatic wide-table migration was implemented.
+changed. No loader, typed view, or automatic alteration of existing tables was implemented.
 
 ## Files changed for the JSONB refactor
 
@@ -83,5 +78,5 @@ changed. No loader, typed view, or automatic wide-table migration was implemente
 - `CHANGELOG.md`
 
 The existing DAG task, Connection IDs, database roles/permissions, and password
-Make target remain unchanged by this refactor. Existing wide tables require a
-separate reviewed migration/backfill using original archived responses.
+Make target remain unchanged by this refactor. Existing tables with a different
+definition require a separate schema change before rerunning setup.

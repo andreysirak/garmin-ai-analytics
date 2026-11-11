@@ -91,7 +91,6 @@ def staging(postgres):
         admin.commit()
 
 
-RAW_FILE_PATH = "/data/raw/garmin/daily-summary/2026-11-09/1/2026-11-09.json"
 PAYLOAD_CHECK = "stg_garmin_daily_summary_payload_object"
 
 
@@ -147,12 +146,12 @@ def test_fresh_setup_preserves_full_response_and_supports_loader_upsert(staging,
         assert cursor.fetchall() == [
             ("user_profile_id", "bigint", "NO"),
             ("calendar_date", "date", "NO"),
-            ("raw_file_path", "text", "NO"),
             ("payload", "jsonb", "NO"),
         ]
         cursor.execute("SET SESSION AUTHORIZATION garmin_loader")
-        cursor.execute(f"INSERT INTO {TABLE} VALUES (%s, %s, %s, %s::jsonb)",
-                       (12, "2026-11-09", RAW_FILE_PATH, json.dumps(summary_payload)))
+        cursor.execute(f"INSERT INTO {TABLE} (user_profile_id, calendar_date, payload) "
+                       "VALUES (%s, %s, %s::jsonb)",
+                       (12, "2026-11-09", json.dumps(summary_payload)))
         cursor.execute("RESET SESSION AUTHORIZATION")
     admin.commit()
     before = table_snapshot(admin)
@@ -160,17 +159,17 @@ def test_fresh_setup_preserves_full_response_and_supports_loader_upsert(staging,
     execute()
     assert table_snapshot(admin) == before
     with admin.cursor() as cursor:
-        cursor.execute(f"SELECT user_profile_id, calendar_date::text, raw_file_path, payload FROM {TABLE}")
-        assert cursor.fetchall() == [(12, "2026-11-09", RAW_FILE_PATH, summary_payload)]
+        cursor.execute(f"SELECT user_profile_id, calendar_date::text, payload FROM {TABLE}")
+        assert cursor.fetchall() == [(12, "2026-11-09", summary_payload)]
         cursor.execute("SET SESSION AUTHORIZATION garmin_loader")
         corrected = {**summary_payload, "totalSteps": 8200}
-        corrected_path = RAW_FILE_PATH.replace("/1/", "/2/")
-        cursor.execute(f"INSERT INTO {TABLE} VALUES (%s, %s, %s, %s::jsonb) "
+        cursor.execute(f"INSERT INTO {TABLE} (user_profile_id, calendar_date, payload) "
+                       "VALUES (%s, %s, %s::jsonb) "
                        "ON CONFLICT (user_profile_id, calendar_date) "
-                       "DO UPDATE SET raw_file_path = EXCLUDED.raw_file_path, payload = EXCLUDED.payload",
-                       (12, "2026-11-09", corrected_path, json.dumps(corrected)))
-        cursor.execute(f"SELECT raw_file_path, payload FROM {TABLE}")
-        assert cursor.fetchall() == [(corrected_path, corrected)]
+                       "DO UPDATE SET payload = EXCLUDED.payload",
+                       (12, "2026-11-09", json.dumps(corrected)))
+        cursor.execute(f"SELECT payload FROM {TABLE}")
+        assert cursor.fetchall() == [(corrected,)]
         with pytest.raises(psycopg2.errors.InsufficientPrivilege):
             cursor.execute("SET ROLE garmin_owner")
     admin.rollback()
@@ -185,39 +184,40 @@ def test_non_object_payload_is_rejected(staging, payload):
     with admin.cursor() as cursor:
         cursor.execute("SET SESSION AUTHORIZATION garmin_loader")
         with pytest.raises(psycopg2.errors.CheckViolation, match=PAYLOAD_CHECK):
-            cursor.execute(f"INSERT INTO {TABLE} VALUES (%s, %s, %s, %s::jsonb)",
-                           (12, "2026-11-09", RAW_FILE_PATH, json.dumps(payload)))
+            cursor.execute(f"INSERT INTO {TABLE} (user_profile_id, calendar_date, payload) "
+                           "VALUES (%s, %s, %s::jsonb)",
+                           (12, "2026-11-09", json.dumps(payload)))
 
 
-@pytest.mark.parametrize("column", ["user_profile_id", "calendar_date", "raw_file_path", "payload"])
+@pytest.mark.parametrize("column", ["user_profile_id", "calendar_date", "payload"])
 def test_all_contract_columns_are_not_null(staging, column):
     import psycopg2
 
     admin, execute = staging
     execute()
-    values = {"user_profile_id": 12, "calendar_date": "2026-11-09",
-              "raw_file_path": RAW_FILE_PATH, "payload": "{}"}
+    values = {"user_profile_id": 12, "calendar_date": "2026-11-09", "payload": "{}"}
     values[column] = None
     with admin.cursor() as cursor, pytest.raises(psycopg2.errors.NotNullViolation, match=column):
-        cursor.execute(f"INSERT INTO {TABLE} VALUES (%s, %s, %s, %s::jsonb)", tuple(values.values()))
+        cursor.execute(f"INSERT INTO {TABLE} (user_profile_id, calendar_date, payload) "
+                       "VALUES (%s, %s, %s::jsonb)", tuple(values.values()))
 
 
 def test_empty_object_is_allowed_without_metric_quality_checks(staging):
     admin, execute = staging
     execute()
     with admin.cursor() as cursor:
-        cursor.execute(f"INSERT INTO {TABLE} VALUES (12, '2026-11-09', %s, '{{}}'::jsonb)",
-                       (RAW_FILE_PATH,))
+        cursor.execute(f"INSERT INTO {TABLE} (user_profile_id, calendar_date, payload) "
+                       "VALUES (12, '2026-11-09', '{}'::jsonb)")
         cursor.execute(f"SELECT payload FROM {TABLE}")
         assert cursor.fetchall() == [({},)]
 
 
 @pytest.mark.parametrize("ddl, section", [
-    ("DROP COLUMN raw_file_path", "columns"),
-    ("ALTER COLUMN raw_file_path TYPE varchar(12)", "columns"),
+    ("DROP COLUMN payload CASCADE", "columns"),
+    ("ALTER COLUMN calendar_date TYPE timestamp without time zone", "columns"),
     ("ALTER COLUMN user_profile_id TYPE integer", "columns"),
     ("ALTER COLUMN payload DROP NOT NULL", "columns"),
-    ("ALTER COLUMN raw_file_path SET DEFAULT ''", "columns"),
+    ("ALTER COLUMN payload SET DEFAULT '{}'::jsonb", "columns"),
     ("ADD COLUMN unexpected text", "columns"),
     ("DROP CONSTRAINT stg_garmin_daily_summary_pkey", "constraints"),
     ("DROP CONSTRAINT stg_garmin_daily_summary_pkey, ADD PRIMARY KEY (user_profile_id)", "constraints"),
@@ -245,7 +245,7 @@ def test_extra_unique_index_requires_migration(staging):
     admin, execute = staging
     execute()
     with admin.cursor() as cursor:
-        cursor.execute(f"CREATE UNIQUE INDEX unexpected_unique ON {TABLE} (raw_file_path)")
+        cursor.execute(f"CREATE UNIQUE INDEX unexpected_unique ON {TABLE} (user_profile_id)")
     admin.commit()
     with pytest.raises(RaiseException, match="indexes: expected only a valid"):
         execute()
