@@ -2,7 +2,7 @@
 
 Issue [#36](https://github.com/andreysirak/garmin-ai-analytics/issues/36) deploys
 `garmin_analytics` independently of the Airflow metadata database. Schema creation
-and migrations belong to #37; loading archived summaries belongs to #38.
+is implemented by #37 in the daily DAG; loading archived summaries belongs to #38.
 
 ## Deploy and inspect
 
@@ -53,11 +53,12 @@ neither its database nor its release is changed by these targets.
    PostgreSQL itself is not running yet. An existing cluster is left unchanged.
 2. Run `make postgresql-up`. It generates the bootstrap password if missing,
    deploys PostgreSQL, applies roles/grants, and verifies Mac access on port 5432.
-3. Run `make postgresql-loader-password` and choose the `garmin_loader` password.
+3. Run `make postgresql-loader-password` and `make postgresql-schema-manager-password`
+   to choose separate passwords for `garmin_loader` and `garmin_schema_manager`.
 4. Create `config/connections.json` from `config/connections.example.json` if it
    does not already exist, set permissions to `0600`, and manually enter the same
-   loader password. Keep the internal Service host, port 5432, database
-   `garmin_analytics`, and login `garmin_loader` from the template.
+   passwords. Keep the internal Service host, port 5432, database
+   `garmin_analytics`, and dedicated logins from the template.
 5. Run `make infra-up` to build/load workload images, deploy Airflow, wait for
    scheduler/DAG processor readiness, and import `config/connections.json` if it
    exists. Configure Garmin credentials separately for Garmin ingestion.
@@ -156,13 +157,15 @@ after a restore, use `make postgresql-roles`.
 | `garmin_analytics` | Bootstrap superuser; trusted setup, backups, and restore only |
 | `garmin_owner` | NOLOGIN owner of the database and application schemas/objects |
 | `garmin_loader` | LOGIN with CONNECT, staging schema USAGE, table SELECT/INSERT/UPDATE/DELETE, and sequence USAGE/SELECT |
+| `garmin_schema_manager` | LOGIN with CONNECT and explicit SET ROLE permission for `garmin_owner`; schema setup only |
 
 The loader is not a member of `garmin_owner`, cannot create schemas/tables or drop
 owner tables, and has no administrative privileges. PUBLIC database privileges
 and public-schema access are revoked. Future staging objects inherit loader
 grants only when created **as `garmin_owner`**. During trusted setup use
 `SET ROLE garmin_owner` before DDL and `RESET ROLE` afterward. Application table
-definitions remain for #37; this setup creates only the staging schema and grants.
+definitions live in `airflow/dags/sql/ensure_daily_summary_staging.sql`; bootstrap
+creates only the staging schema and grants.
 
 Set the loader password separately, without putting it in SQL files or shell
 arguments:
@@ -180,11 +183,44 @@ stores a verifier rather than a retrievable plaintext password. If you forget it
 set a new one and update/reimport the local connection file. `garmin_owner` is
 NOLOGIN and has no password.
 
-Schema setup/migration does not run in Airflow in this change. If #37 introduces
-Airflow migrations, use a separate connection such as
-`garmin_analytics_migrations` with a dedicated migration login allowed to
-`SET ROLE garmin_owner`. Never grant ownership membership to the daily loader or
-reuse its connection for migrations; never store the bootstrap admin in that DAG.
+The daily DAG's `ensure_daily_summary_staging` SQL operator uses only Connection
+ID `garmin_analytics_schema` (login `garmin_schema_manager`). Its transaction runs
+`SET LOCAL ROLE garmin_owner`, so the table has the correct owner and inherits
+loader DML grants. The schema-manager login does not inherit ownership automatically
+and has no superuser, role-management, or database-creation privileges. Never
+reuse the loader or bootstrap-admin connection for this task.
+
+For an existing installation, run `make postgresql-roles`, then set the new
+password interactively:
+
+```bash
+make postgresql-schema-manager-password
+```
+
+Add the `garmin_analytics_schema` entry from the example to the ignored local
+connection file, fill in that password manually, and reimport it. Do not replace
+an existing loader password. Existing loader-only files remain importable, but
+schema setup requires the schema Connection to be configured separately.
+
+### Upgrade an existing schema Connection
+
+If schema setup was already configured, manually rename the JSON entry key
+`garmin_analytics_migrations` to `garmin_analytics_schema` in the Git-ignored
+`config/connections.json`. Keep its existing password and connection settings,
+including login `garmin_schema_manager`, and leave `garmin_analytics_loader`
+unchanged. This naming-only upgrade requires no password reset or database-role
+changes; keep using `postgresql-schema-manager-password` for password changes.
+
+Then rerun:
+
+```bash
+make airflow-connections-import
+```
+
+The import creates/updates `garmin_analytics_schema` in Airflow. It does not delete
+the previously named Connection; that unused entry can be removed manually after
+checking any other consumers. Local credential files and deployed Connections
+must be updated by the owner, separately from the source change.
 
 ### Airflow connection and Mac access
 
@@ -194,12 +230,15 @@ chmod 600 config/connections.json
 ```
 
 Edit `config/connections.json` manually and replace
-`SET_GARMIN_LOADER_PASSWORD_MANUALLY` with the password you chose. The local file
+`SET_GARMIN_LOADER_PASSWORD_MANUALLY` and `SET_GARMIN_SCHEMA_MANAGER_PASSWORD_MANUALLY`
+with the corresponding passwords you chose. The local file
 is excluded from Git and Docker build contexts. Keep these template settings:
 
 - Connection ID: `garmin_analytics_loader`
 - Type: `postgres`; host: `garmin-postgresql.garmin-analytics.svc.cluster.local`
 - Port: `5432`; schema/database: `garmin_analytics`; login: `garmin_loader`
+- Schema-setup Connection: `garmin_analytics_schema`, same Service/port/database,
+  login `garmin_schema_manager`
 
 `make infra-up` automatically imports this file after Airflow is ready. If the
 file is absent, it reports a skip and preserves existing Connections. If the file
@@ -221,7 +260,9 @@ make infra-up AIRFLOW_CONNECTIONS_FILE=config/connections.local.json
 make airflow-connections-import AIRFLOW_CONNECTIONS_FILE=config/connections.local.json
 ```
 
-The importer rejects the example placeholder, an admin login, or a Mac endpoint.
+The importer accepts either known Connection independently or both together. It
+rejects placeholders, unknown Connection IDs, an incorrect login (including the
+bootstrap admin), or a Mac endpoint.
 It streams the local JSON into a permission-restricted temporary file inside the
 scheduler, invokes `airflow connections import --overwrite`, and removes the
 temporary file. PostgreSQL deployment does not generate or rotate loader
@@ -386,3 +427,97 @@ References: [Bitnami PostgreSQL chart](https://github.com/bitnami/charts/tree/ma
 [PostgreSQL official image initialization and volume behavior](https://hub.docker.com/_/postgres),
 [Helm rollback](https://helm.sh/docs/helm/helm_rollback/), and
 [Kubernetes persistent volume lifecycle](https://kubernetes.io/docs/concepts/storage/persistent-volumes/).
+
+
+## Daily-summary staging contract (#37)
+
+`garmin_daily_pipeline.ensure_daily_summary_staging` runs independently of Garmin
+authentication and ingestion. Its `SQLExecuteQueryOperator` uses only Airflow
+Connection `garmin_analytics_schema` (login `garmin_schema_manager`). The versioned
+SQL runs as one transaction with autocommit disabled and assumes `garmin_owner`
+locally, preserving the existing owner/default-grant setup and separate loader
+Connection `garmin_analytics_loader`.
+
+The task creates `garmin_analytics.staging.stg_garmin_daily_summary` when missing:
+
+| Column | Type | Required meaning |
+| --- | --- | --- |
+| `user_profile_id` | bigint NOT NULL | Garmin profile ID |
+| `calendar_date` | date NOT NULL | Summary's calendar date |
+| `payload` | jsonb NOT NULL | Complete parsed Garmin daily-summary response object |
+
+The nondeferrable primary key is **(user_profile_id, calendar_date)**: one complete
+summary per user and date. `CHECK (jsonb_typeof(payload) = 'object')` rejects arrays,
+scalars, and JSON null; NOT NULL also rejects SQL NULL. An empty object is allowed
+by this structural check. Metric completeness, value ranges, and agreement
+between the business key and payload fields belong to downstream quality checks.
+No metric columns, event tables, or timestamp columns are created here.
+
+### Raw archive, loader, and typed views
+
+The original Garmin response remains unchanged in the raw archive, including
+whitespace and original timestamp/numeric representations. JSONB holds the full
+**parsed response**, not a byte-for-byte copy. It retains nested objects, lists,
+nulls, unknown response fields, and all Body Battery feedback/activity events
+inside `payload`; the loader must not project only a known subset of fields.
+Timestamp strings, whether offsetless or containing `Z`/another offset, stay
+strings in the payload without timezone conversion.
+
+Issue #38 will read a completed archive attempt (requiring `_SUCCESS`), obtain the
+profile/date key, and store that key and the complete object in one transaction.
+Only the key and payload are stored in PostgreSQL; original response bytes stay
+in the raw archive. The intended upsert target remains
+`ON CONFLICT (user_profile_id, calendar_date)`. Loading a corrected response should
+replace the full payload while keeping earlier raw files available for replay.
+The load task must depend on **both** `ensure_daily_summary_staging` and
+`ingest_daily_summary`.
+
+Typed SQL views will later extract only metrics needed for analysis from the
+JSONB object. Timestamp interpretation and explicit GMT/local timezone rules
+belong to those typed projections, with tests independent of the session timezone.
+Nested events remain in the payload until an actual query needs another model.
+Loader implementation, typed views, and downstream row-quality tasks are separate
+steps and are not introduced by #37.
+
+### Exact versioned schema-contract verification
+
+An empty temporary contract table provides a single definition for creation and
+verification; it disappears on commit or rollback. Verification compares exactly
+three column names, types/precision, nullability, defaults, and identity/generated
+properties. It also compares constraint definitions (including CHECK validation
+state) and requires one valid, immediate primary unique index. Constraint names
+and physical column order may differ, and extra nonunique indexes are allowed.
+Additional columns, constraints, or unique indexes require a reviewed contract
+change, even if an extra nullable column would allow some loader writes.
+
+Reruns preserve existing schema and rows. This task reads PostgreSQL metadata,
+not stored health data, and never repairs, truncates, or replaces an existing
+table. Errors include the expected and actual contract and a migration hint.
+The `ACCESS SHARE` lock blocks operations requiring `ACCESS EXCLUSIVE` until
+transaction completion; compatible concurrent DDL is still possible, so schema
+changes must be coordinated with daily runs.
+
+### Existing tables
+
+An existing table with a different definition fails verification with
+`Schema migration required ... expected three-column JSONB contract`.
+Schema setup never drops columns or changes existing rows automatically. Apply
+any required schema change separately before rerunning the task, or use a fresh
+database. Original archived responses remain available for replay.
+
+The Connection-name upgrade instructions above still apply independently: keep
+`garmin_schema_manager` and `postgresql-schema-manager-password`, and leave the
+loader Connection separate. This refactor does not modify local credential files
+or deployed Airflow Connections.
+
+### Verification
+
+The pinned Airflow image includes the PostgreSQL/common-SQL providers; Python CI
+installs the PostgreSQL provider using Airflow constraints. For local Python tests,
+include `apache-airflow-providers-postgres` in the constrained installation from
+CONTRIBUTING.md. Opt-in integration tests require `GARMIN_STAGING_TEST_DSN` pointing
+to an **empty disposable** `garmin_analytics` database with a bootstrap-admin test
+login. They install roles, execute the real DAG operator/PostgresHook as
+`garmin_schema_manager`, and remove their synthetic staging schema afterward.
+Never point them at a database containing real data. See the
+[verification results](verification/0037-daily-summary-staging.md).

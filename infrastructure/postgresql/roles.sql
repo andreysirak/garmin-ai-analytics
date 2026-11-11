@@ -10,15 +10,21 @@ BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'garmin_loader') THEN
     CREATE ROLE garmin_loader LOGIN;
   END IF;
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'garmin_schema_manager') THEN
+    CREATE ROLE garmin_schema_manager LOGIN;
+  END IF;
 END
 $$;
 ALTER ROLE garmin_owner NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
 ALTER ROLE garmin_loader LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+ALTER ROLE garmin_schema_manager LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
 REVOKE garmin_owner FROM garmin_loader;
+GRANT garmin_owner TO garmin_schema_manager WITH INHERIT FALSE, SET TRUE;
 
 ALTER DATABASE garmin_analytics OWNER TO garmin_owner;
 REVOKE ALL ON DATABASE garmin_analytics FROM PUBLIC;
 GRANT CONNECT ON DATABASE garmin_analytics TO garmin_loader;
+GRANT CONNECT ON DATABASE garmin_analytics TO garmin_schema_manager;
 ALTER SCHEMA public OWNER TO garmin_owner;
 REVOKE ALL ON SCHEMA public FROM PUBLIC;
 

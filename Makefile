@@ -27,7 +27,8 @@ AIRFLOW_URL := http://localhost:8080
         kind-load-ingestion-java-summary-image kind-load-ingestion-java-sleep-image \
         airflow-image kind-load-airflow-image auth-image kind-load-auth-image \
         auth-policy-verify postgresql-up postgresql-rollback postgresql-status postgresql-verify \
-        postgresql-preflight postgresql-roles postgresql-password postgresql-loader-password airflow-connections-import
+        postgresql-preflight postgresql-roles postgresql-password postgresql-loader-password \
+        postgresql-schema-manager-password airflow-connections-import
 
 help:
 	@echo "Cluster and infrastructure:"
@@ -47,6 +48,7 @@ help:
 	@echo "  make postgresql-roles       - Apply version-controlled ownership and staging grants as admin"
 	@echo "  make postgresql-password    - Print the analytics PostgreSQL bootstrap admin password"
 	@echo "  make postgresql-loader-password - Set garmin_loader password interactively (not stored in SQL)"
+	@echo "  make postgresql-schema-manager-password - Set garmin_schema_manager password interactively (not stored in SQL)"
 	@echo "  make airflow-connections-import - Import configured connections.json into Airflow"
 	@echo "Java:"
 	@echo "  make java-verify            - Run Java 25 Maven clean verify"
@@ -145,6 +147,11 @@ postgresql-loader-password:
 	$(KUBECTL) -n $(POSTGRESQL_NAMESPACE) exec -it statefulset/$(POSTGRESQL_RELEASE) -c postgresql -- \
 		sh -ec 'export PGPASSWORD="$$(cat "$$POSTGRES_PASSWORD_FILE")"; \
 		exec psql -X -h 127.0.0.1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "\password garmin_loader"'
+
+postgresql-schema-manager-password:
+	$(KUBECTL) -n $(POSTGRESQL_NAMESPACE) exec -it statefulset/$(POSTGRESQL_RELEASE) -c postgresql -- \
+		sh -ec 'export PGPASSWORD="$$(cat "$$POSTGRES_PASSWORD_FILE")"; \
+		exec psql -X -h 127.0.0.1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "\password garmin_schema_manager"'
 
 airflow-connections-import:
 	KUBE_CONTEXT="$(CONTEXT)" python3 infrastructure/scripts/import_airflow_connections.py "$(AIRFLOW_CONNECTIONS_FILE)"

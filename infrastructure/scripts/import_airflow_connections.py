@@ -1,4 +1,4 @@
-"""Validate and stream a manually configured loader connection into Airflow."""
+"""Validate and stream manually configured analytics connections into Airflow."""
 
 import argparse
 import json
@@ -8,18 +8,19 @@ import sys
 from pathlib import Path
 
 REMOTE_IMPORT = '''
-import os, subprocess, sys, tempfile
+import json, os, subprocess, sys, tempfile
+contents = sys.stdin.read()
 fd, path = tempfile.mkstemp(suffix=".json")
 try:
     with os.fdopen(fd, "w") as stream:
-        stream.write(sys.stdin.read())
+        stream.write(contents)
     result = subprocess.run(["airflow", "connections", "import", path, "--overwrite"],
                             capture_output=True)
     if result.returncode:
         sys.exit("Airflow connection import failed; check the Airflow metadata database")
 finally:
     os.unlink(path)
-print("Imported garmin_analytics_loader")
+print("Imported " + ", ".join(sorted(json.loads(contents))))
 '''
 
 
@@ -29,16 +30,22 @@ def validate(connections: dict) -> None:
         "host": "garmin-postgresql.garmin-analytics.svc.cluster.local",
         "port": 5432,
         "schema": "garmin_analytics",
-        "login": "garmin_loader",
     }
-    if not isinstance(connections, dict) or set(connections) != {"garmin_analytics_loader"}:
-        raise ValueError("Expected only the garmin_analytics_loader connection")
-    connection = connections["garmin_analytics_loader"]
-    if not isinstance(connection, dict) or any(connection.get(k) != v for k, v in expected.items()):
-        raise ValueError("Loader connection must use the internal Service and garmin_loader login")
-    password = connection.get("password")
-    if not isinstance(password, str) or not password or password == "SET_GARMIN_LOADER_PASSWORD_MANUALLY":
-        raise ValueError("Fill in the garmin_loader password manually before importing")
+    logins = {
+        "garmin_analytics_loader": "garmin_loader",
+        "garmin_analytics_schema": "garmin_schema_manager",
+    }
+    # Preserve support for existing loader-only files and independently imported connections.
+    if not isinstance(connections, dict) or not connections or set(connections) - logins.keys():
+        raise ValueError("Expected only known analytics connections")
+    for conn_id, connection in connections.items():
+        if (not isinstance(connection, dict)
+                or any(connection.get(k) != v for k, v in expected.items())
+                or connection.get("login") != logins[conn_id]):
+            raise ValueError("Analytics connections must use the internal Service and dedicated login")
+        password = connection.get("password")
+        if not isinstance(password, str) or not password or password.startswith("SET_GARMIN_"):
+            raise ValueError("Fill in each analytics password manually before importing")
 
 
 def main() -> None:
@@ -55,7 +62,7 @@ def main() -> None:
             print("Local Airflow connection file is absent; preserving existing connections")
             return
         sys.exit("Connection file is missing. Copy config/connections.example.json to the ignored "
-                 "config/connections.json and fill in the loader password.")
+                 "config/connections.json and fill in the passwords.")
     except (OSError, ValueError):
         sys.exit("Invalid connection file. Copy config/connections.example.json to the ignored "
                  "config/connections.json, keep the Service/login settings, and fill in the password.")

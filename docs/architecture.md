@@ -35,11 +35,13 @@ kind cluster "garmin-ai-analytics"
   host port 5432 / NodePort 30432. A read-only preflight rejects older clusters
   without this mapping before deployment changes. Airflow connects internally
   using `garmin_analytics_loader` as `garmin_loader`; ownership is held by the
-  NOLOGIN `garmin_owner`, with setup/restore reserved for the bootstrap admin.
+  NOLOGIN `garmin_owner`. The separate `garmin_analytics_schema` Connection
+  uses `garmin_schema_manager` to assume that owner for versioned staging DDL.
 - DAGs: `airflow/dags` is mounted from the host into the kind node and into Airflow.
 - `garmin_daily_pipeline` owns the daily workflow from ingestion through future
   analytics stages. It currently runs token validation before either independent
-  Java ingestion task.
+  Java ingestion task. Independently, `ensure_daily_summary_staging` creates and
+  verifies the full-response JSONB staging table in one transaction.
 - The auth Pod runs in `garmin-auth`; its ServiceAccount may get and update only
   the named `garmin-access-token` Secret in `airflow-jobs`.
 - Airflow has a separate, namespace-scoped Pod-launcher Role in both job
@@ -51,8 +53,13 @@ kind cluster "garmin-ai-analytics"
 Implemented ingestion flow: Garmin Personal API key -> cached bearer token ->
 daily summary/sleep JSON -> syntax validation -> unchanged raw JSON files on
 `garmin-raw-data`.
-The analytics PostgreSQL instance can be deployed separately; schema creation,
-loading, and downstream analytics are not yet implemented.
+The analytics PostgreSQL instance can be deployed separately. The daily DAG
+creates/verifies `staging.stg_garmin_daily_summary`: one row per user/date with
+the full parsed response in `payload jsonb`. Nested Body
+Battery events stay inside the payload. Raw archive bytes remain unchanged.
+Loading and typed SQL views for selected metrics remain separate follow-up steps.
+The future daily-summary loader must depend on both schema setup and daily-summary
+ingestion.
 
 ## Java ingestion boundaries
 

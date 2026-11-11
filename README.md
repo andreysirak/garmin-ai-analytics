@@ -151,8 +151,12 @@ Sign in to Airflow as `admin` using the printed password, then trigger or unpaus
 
 `garmin_daily_pipeline` is the workflow for the full ingestion-to-analytics flow;
 currently its implemented stages authenticate and archive daily summary and sleep
-data. Processing and analytics stages will extend this DAG. When upgrading from
-`garmin_daily_ingestion`, pause the old DAG before enabling the new one. Airflow
+data, and independently create/verify the daily-summary JSONB staging schema.
+That table stores one complete response per user/date;
+loading and typed SQL views are separate follow-up steps. See the
+[staging contract and Connection setup](docs/postgresql.md#daily-summary-staging-contract-37).
+When upgrading from `garmin_daily_ingestion`, pause the old DAG before enabling
+the new one. Airflow
 treats the renamed DAG as a new workflow; earlier run history and archives are retained.
 
 Java treats `--output-dir` as the **final attempt directory** and writes
