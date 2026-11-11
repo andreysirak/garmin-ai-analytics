@@ -8,6 +8,7 @@ import pytest
 from airflow.dag_processing.dagbag import DagBag
 from airflow.exceptions import AirflowException
 from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
+from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 from garmin_auth.operator import GarminAuthOperator
 from garmin_data_ingestion import GarminIngestionOperator
 from garmin_data_ingestion.operator import OUTPUT_DIR_XCOM_KEY
@@ -63,6 +64,7 @@ def test_authentication_gates_independent_tasks_and_retries(dag):
         "ensure_garmin_token",
         "ingest_daily_summary",
         "ingest_sleep",
+        "ensure_daily_summary_staging",
     }
     assert isinstance(auth, GarminAuthOperator)
     assert all(isinstance(task, GarminIngestionOperator) for task in (summary, sleep))
@@ -83,6 +85,19 @@ def test_authentication_gates_independent_tasks_and_retries(dag):
         assert task.retries == 2
         assert task.retry_delay.total_seconds() == 60
         assert task.trigger_rule == "all_success"
+
+
+def test_staging_setup_is_an_independent_transactional_sql_task(dag):
+    task = dag.get_task("ensure_daily_summary_staging")
+    assert isinstance(task, SQLExecuteQueryOperator)
+    assert task.conn_id == "garmin_analytics_schema"
+    assert task.autocommit is False
+    assert task.split_statements is False
+    assert task.do_xcom_push is False
+    assert not task.upstream_task_ids and not task.downstream_task_ids
+    task.render_template_fields({}, jinja_env=dag.get_template_env())
+    assert "CREATE TABLE IF NOT EXISTS staging.stg_garmin_daily_summary" in task.sql
+    assert "SET LOCAL ROLE garmin_owner" in task.sql
 
 
 @pytest.mark.parametrize(

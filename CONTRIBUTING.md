@@ -228,6 +228,7 @@ python3.12 -m venv .venv
 source .venv/bin/activate
 constraints="https://raw.githubusercontent.com/apache/airflow/constraints-3.3.1/constraints-3.12.txt"
 python -m pip install --constraint "$constraints" \
+  apache-airflow-providers-postgres \
   -e "garmin-integration/garmin-auth/python[airflow,dev]" \
   -e "garmin-integration/garmin-data-ingestion/python[dev]"
 ruff check airflow/dags airflow/tests \

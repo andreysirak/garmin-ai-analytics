@@ -1,4 +1,13 @@
 {
+  "garmin_analytics_schema": {
+    "conn_type": "postgres",
+    "description": "Schema setup only; assumes garmin_owner inside the transaction",
+    "host": "garmin-postgresql.garmin-analytics.svc.cluster.local",
+    "port": 5432,
+    "schema": "garmin_analytics",
+    "login": "garmin_schema_manager",
+    "password": "SET_GARMIN_SCHEMA_MANAGER_PASSWORD_MANUALLY"
+  },
   "garmin_analytics_loader": {
     "conn_type": "postgres",
     "description": "Daily staging writes; never use the bootstrap admin for this connection",

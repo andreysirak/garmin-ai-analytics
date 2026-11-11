@@ -1,9 +1,10 @@
-"""Daily Garmin pipeline, starting with authentication and independent raw-data ingestion."""
+"""Daily Garmin ingestion and analytics staging schema setup."""
 
 from __future__ import annotations
 
 from datetime import datetime, timedelta
 
+from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 from airflow.sdk import DAG, Param
 from garmin_auth.operator import GarminAuthOperator
 from garmin_data_ingestion import GarminIngestionOperator
@@ -33,6 +34,14 @@ with DAG(
     max_active_runs=1,
     tags=["garmin", "pipeline", "ingestion", "kubernetes"],
 ) as dag:
+    ensure_daily_summary_staging = SQLExecuteQueryOperator(
+        task_id="ensure_daily_summary_staging",
+        conn_id="garmin_analytics_schema",
+        sql="sql/ensure_daily_summary_staging.sql",
+        autocommit=False,
+        split_statements=False,
+        do_xcom_push=False,
+    )
     ensure_garmin_token = GarminAuthOperator(
         task_id="ensure_garmin_token",
     )
