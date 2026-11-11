@@ -2,13 +2,15 @@
 
 **Get the most out of your Garmin watch without spending hours on settings.**
 
-Garmin AI Analytics is a mobile app in development for everyday Garmin owners. It will use AI to explain what your metrics and activities show and suggest watch settings and activity modes that fit your routine.
+Garmin AI Analytics is a mobile app in development for everyday Garmin owners. It will use AI to explain what your metrics and activities show and suggest watch settings and activity modes that fit your routine and goals.
 
 ## What the app will do
 
 - **Show what your watch captures.** See which metrics are recorded consistently and where readings are missing.
 - **Suggest a change to try.** Get a recommendation about watch settings, syncing, or recording an activity, with an explanation grounded in your data.
-- **Check whether it helped.** Compare coverage before and after the change. As enough comparable activity records accumulate, explore personal forecasts, such as a range of likely times for a familiar route.
+- **See your activity and trends at a glance.** View daily steps, recorded workouts, and metrics such as resting heart rate and Body Battery. See how they change over time and where readings are missing.
+
+**Your watch. Your goals. Less time in settings.**
 
 **Current status.** The mobile app is the product goal. This repository implements Garmin ingestion and the raw data archive using Java, Airflow, and Kubernetes. The first milestone is a daily-summary demo that visualizes coverage and explains one evidence-backed recommendation. See the [product vision](https://github.com/andreysirak/garmin-ai-analytics/issues/44) and [first demo](https://github.com/andreysirak/garmin-ai-analytics/issues/18).
 
