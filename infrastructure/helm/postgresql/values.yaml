@@ -1,0 +1,72 @@
+# Upstream Bitnami chart; keep all workload templates in the upstream dependency.
+fullnameOverride: garmin-postgresql
+architecture: standalone
+commonLabels:
+  app.kubernetes.io/version: "17.11"
+
+# Use the maintained Docker Official Image without Bitnami registry credentials
+# or archived bitnamilegacy images. Compatibility overrides are below.
+global:
+  security:
+    allowInsecureImages: true  # Allow a non-Bitnami image in this chart.
+image:
+  registry: docker.io
+  repository: library/postgres
+  tag: 17.11-bookworm
+
+auth:
+  enablePostgresUser: false
+  username: garmin_analytics
+  database: garmin_analytics
+  existingSecret: garmin-postgresql
+  secretKeys:
+    userPasswordKey: password
+  usePasswordFiles: true
+
+postgresqlDataDir: /var/lib/postgresql/data/pgdata
+primary:
+  service:
+    type: NodePort
+    nodePorts:
+      postgresql: 30432
+  fips:
+    openssl: "off"
+  persistence:
+    enabled: true
+    existingClaim: garmin-postgresql-data
+    mountPath: /var/lib/postgresql/data
+  # Official postgres uses UID/GID 999, POSTGRES_DB, and pg_isready without
+  # Bitnami's .initialized marker. Other Bitnami-specific image features stay off.
+  podSecurityContext:
+    fsGroup: 999
+  containerSecurityContext:
+    runAsUser: 999
+    runAsGroup: 999
+    readOnlyRootFilesystem: false
+  extraEnvVars:
+    - name: POSTGRES_DB
+      value: '{{ .Values.auth.database }}'
+  terminationGracePeriodSeconds: 60
+  startupProbe:
+    enabled: true
+    initialDelaySeconds: 0
+    periodSeconds: 2
+    failureThreshold: 150
+  customReadinessProbe:
+    exec:
+      command: ["sh", "-ec", 'exec pg_isready -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"']
+    periodSeconds: 5
+    timeoutSeconds: 3
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 512Mi}
+
+# These optional features depend on Bitnami-specific container behavior.
+volumePermissions:
+  enabled: false
+metrics:
+  enabled: false
+backup:
+  enabled: false
+passwordUpdateJob:
+  enabled: false

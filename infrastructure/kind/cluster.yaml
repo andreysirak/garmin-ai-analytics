@@ -17,3 +17,8 @@ nodes:
         hostPort: 8080
         listenAddress: 127.0.0.1
         protocol: TCP
+      # PostgreSQL NodePort -> password-authenticated access from the Mac.
+      - containerPort: 30432
+        hostPort: 5432
+        listenAddress: 127.0.0.1
+        protocol: TCP

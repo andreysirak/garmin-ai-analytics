@@ -8,6 +8,13 @@ AIRFLOW_CHART_REPO := https://airflow.apache.org
 AIRFLOW_CHART := airflow --repo $(AIRFLOW_CHART_REPO) --version $(AIRFLOW_CHART_VERSION)
 KUBECTL := kubectl --context $(CONTEXT)
 HELM := helm --kube-context $(CONTEXT)
+POSTGRESQL_NAMESPACE := garmin-analytics
+POSTGRESQL_RELEASE := garmin-postgresql
+POSTGRESQL_CHART := oci://registry-1.docker.io/bitnamicharts/postgresql
+POSTGRESQL_CHART_VERSION := 18.12.18
+POSTGRESQL_VALUES := infrastructure/helm/postgresql/values.yaml
+POSTGRESQL_REVISION ?= 0
+AIRFLOW_CONNECTIONS_FILE ?= config/connections.json
 SCHEDULER_EXEC := $(KUBECTL) -n $(NAMESPACE) exec airflow-scheduler-0 -c scheduler --
 JAVA_MAVEN_IMAGE := maven:3.9-eclipse-temurin-25
 AIRFLOW_URL := http://localhost:8080
@@ -19,7 +26,8 @@ AIRFLOW_URL := http://localhost:8080
         kind-load-images kind-load-ingestion-java-images \
         kind-load-ingestion-java-summary-image kind-load-ingestion-java-sleep-image \
         airflow-image kind-load-airflow-image auth-image kind-load-auth-image \
-        auth-policy-verify
+        auth-policy-verify postgresql-up postgresql-rollback postgresql-status postgresql-verify \
+        postgresql-preflight postgresql-roles postgresql-password postgresql-loader-password airflow-connections-import
 
 help:
 	@echo "Cluster and infrastructure:"
@@ -28,9 +36,18 @@ help:
 	@echo "  make cluster-status         - Show cluster and node status"
 	@echo "  make cluster-delete         - Delete the cluster and its in-cluster data"
 	@echo "  make infra-validate         - Render Kustomize and Helm manifests"
-	@echo "  make infra-up               - Apply resources, bootstrap Secrets and install Airflow"
+	@echo "  make infra-up               - Deploy Airflow and import the local connection file if present"
 	@echo "  make infra-down             - Uninstall Airflow (keeps volumes, Secrets and cluster)"
 	@echo "  make infra-status           - Show Helm release and Pods"
+	@echo "PostgreSQL (separate from Airflow metadata):"
+	@echo "  make postgresql-up          - Deploy garmin_analytics, preserving its PVC and Secret"
+	@echo "  make postgresql-rollback    - Restore previous release (or POSTGRESQL_REVISION=N), keeping data"
+	@echo "  make postgresql-status      - Show PostgreSQL release, Pods and PVC"
+	@echo "  make postgresql-verify      - Check a synthetic row across Pod replacement and rollback"
+	@echo "  make postgresql-roles       - Apply version-controlled ownership and staging grants as admin"
+	@echo "  make postgresql-password    - Print the analytics PostgreSQL bootstrap admin password"
+	@echo "  make postgresql-loader-password - Set garmin_loader password interactively (not stored in SQL)"
+	@echo "  make airflow-connections-import - Import configured connections.json into Airflow"
 	@echo "Java:"
 	@echo "  make java-verify            - Run Java 25 Maven clean verify"
 	@echo "  make java-package-ingestion - Package the unified ingestion JAR and common module"
@@ -69,6 +86,9 @@ cluster-delete:
 
 infra-validate:
 	kubectl kustomize infrastructure/kubernetes/overlays/local > /dev/null
+	kubectl kustomize infrastructure/kubernetes/postgresql > /dev/null
+	helm template $(POSTGRESQL_RELEASE) $(POSTGRESQL_CHART) --version $(POSTGRESQL_CHART_VERSION) \
+		-n $(POSTGRESQL_NAMESPACE) -f $(POSTGRESQL_VALUES) > /dev/null
 	helm template airflow $(AIRFLOW_CHART) -n $(NAMESPACE) \
 		-f infrastructure/helm/airflow/values.yaml \
 		--set-string garminRawDataGid=$(GARMIN_RAW_DATA_GID) > /dev/null
@@ -81,6 +101,8 @@ infra-up: prepare-garmin-raw-data kind-load-ingestion-java-images kind-load-airf
 		--namespace $(NAMESPACE) -f infrastructure/helm/airflow/values.yaml \
 		--set-string garminRawDataGid=$(GARMIN_RAW_DATA_GID) --wait --timeout 10m
 	$(MAKE) airflow-operator-rollout
+	KUBE_CONTEXT="$(CONTEXT)" python3 infrastructure/scripts/import_airflow_connections.py \
+		--if-present "$(AIRFLOW_CONNECTIONS_FILE)"
 
 airflow-operator-rollout:
 	$(KUBECTL) -n $(NAMESPACE) rollout restart statefulset/airflow-scheduler deployment/airflow-dag-processor
@@ -94,6 +116,55 @@ infra-status:
 	$(HELM) list -n $(NAMESPACE)
 	$(KUBECTL) get pods -n $(NAMESPACE)
 	$(KUBECTL) get pods -n $(JOBS_NAMESPACE)
+
+# PVC and Secret are deliberately managed outside the Helm release.
+postgresql-preflight:
+	python3 infrastructure/scripts/check_postgresql_host_port.py --cluster "$(CLUSTER)" --context "$(CONTEXT)"
+
+postgresql-up: postgresql-preflight
+	$(KUBECTL) apply -k infrastructure/kubernetes/postgresql
+	KUBE_CONTEXT="$(CONTEXT)" ./infrastructure/scripts/bootstrap.sh --postgresql-only
+	$(HELM) upgrade --install $(POSTGRESQL_RELEASE) $(POSTGRESQL_CHART) \
+		--version $(POSTGRESQL_CHART_VERSION) -f $(POSTGRESQL_VALUES) \
+		--namespace $(POSTGRESQL_NAMESPACE) --wait --timeout 5m
+	$(MAKE) postgresql-roles
+	KUBE_CONTEXT="$(CONTEXT)" python3 infrastructure/scripts/verify_postgresql_host.py
+
+postgresql-roles:
+	$(KUBECTL) -n $(POSTGRESQL_NAMESPACE) exec -i statefulset/$(POSTGRESQL_RELEASE) -c postgresql -- \
+		sh -ec 'export PGPASSWORD="$$(cat "$$POSTGRES_PASSWORD_FILE")"; \
+		exec psql -X -h 127.0.0.1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -v ON_ERROR_STOP=1' \
+		< infrastructure/postgresql/roles.sql
+
+# Read-only, independent of the host-port preflight; never generates/rotates credentials.
+postgresql-password:
+	@$(KUBECTL) -n $(POSTGRESQL_NAMESPACE) get secret garmin-postgresql -o json | \
+		python3 -c 'import base64,json,sys; print(base64.b64decode(json.load(sys.stdin)["data"]["password"], validate=True).decode())'
+
+postgresql-loader-password:
+	$(KUBECTL) -n $(POSTGRESQL_NAMESPACE) exec -it statefulset/$(POSTGRESQL_RELEASE) -c postgresql -- \
+		sh -ec 'export PGPASSWORD="$$(cat "$$POSTGRES_PASSWORD_FILE")"; \
+		exec psql -X -h 127.0.0.1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "\password garmin_loader"'
+
+airflow-connections-import:
+	KUBE_CONTEXT="$(CONTEXT)" python3 infrastructure/scripts/import_airflow_connections.py "$(AIRFLOW_CONNECTIONS_FILE)"
+
+postgresql-rollback:
+	$(HELM) rollback $(POSTGRESQL_RELEASE) $(POSTGRESQL_REVISION) \
+		--namespace $(POSTGRESQL_NAMESPACE) --wait --timeout 5m
+
+postgresql-status:
+	$(HELM) history $(POSTGRESQL_RELEASE) -n $(POSTGRESQL_NAMESPACE)
+	$(KUBECTL) -n $(POSTGRESQL_NAMESPACE) get statefulset,service,pods,pvc
+
+postgresql-verify:
+	$(KUBECTL) -n $(POSTGRESQL_NAMESPACE) exec -i statefulset/$(POSTGRESQL_RELEASE) -c postgresql -- \
+		sh -ec 'export PGPASSWORD="$$(cat "$$POSTGRES_PASSWORD_FILE")"; \
+		exec psql -X -h 127.0.0.1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -v ON_ERROR_STOP=1' \
+		< infrastructure/postgresql/verify_roles.sql
+	KUBE_CONTEXT="$(CONTEXT)" POSTGRESQL_CHART="$(POSTGRESQL_CHART)" \
+		POSTGRESQL_CHART_VERSION="$(POSTGRESQL_CHART_VERSION)" \
+		python3 infrastructure/scripts/verify_postgresql_persistence.py
 
 airflow-ui:
 	@echo "$(AIRFLOW_URL)  (user: admin, password: make airflow-password)"
