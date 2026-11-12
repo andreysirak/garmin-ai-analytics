@@ -254,13 +254,13 @@ and packaged SQL resources. `GarminDailySummaryLoadOperator` inherits archive
 validation and transactional execution from `JsonArchiveLoadOperator`. Ingestion
 remains in its existing project. The shared archive reader can be unit-tested
 with temporary files without running a DAG or accessing PostgreSQL. The loader's unit tests mock XCom and
-PostgresHook; the DAG tests inspect wiring and rendered dates without executing
-tasks. See [issue #38 verification](docs/verification/0038-daily-summary-loader.md)
+PostgresHook; the DAG tests resolve the named file XCom reference with a mocked
+task instance and inspect wiring and rendered dates without executing DAG tasks. See [issue #38 verification](docs/verification/0038-daily-summary-loader.md)
 for the unit-only commands.
 
 Python tests mock Kubernetes operations and use synthetic credentials and
 local HTTP fixtures. Ingestion tests cover explicit query dates, opaque query
-values, stable PVC mounts, directory-only XCom, and the date/try-number layout with
+values, stable PVC mounts, directory and JSON-file path XComs, and the date/try-number layout with
 completed and unmarked archive fixtures. Do not run authentication against Garmin from tests.
 See [issue #32 verification](docs/verification/0032-python-ingestion.md) for the
 recorded isolated Airflow/Kubernetes retry check and its test-only substitutions.

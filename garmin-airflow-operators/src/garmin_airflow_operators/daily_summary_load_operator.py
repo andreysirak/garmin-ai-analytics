@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from datetime import date
-from pathlib import Path
 
 from airflow.exceptions import AirflowException
+from airflow.sdk import XComArg
 
 from garmin_airflow_operators.json_archive_load_operator import JsonArchiveLoadOperator
 
@@ -23,8 +23,21 @@ def _calendar_date(value: object, field: str) -> date:
 class GarminDailySummaryLoadOperator(JsonArchiveLoadOperator):
     """Validate the daily-summary business key and bind the full original JSON."""
 
-    archive_root = Path("/data/raw/garmin/daily-summary")
-    sql_resource = "sql/daily_summary_upsert.sql"
+    def __init__(
+        self,
+        *,
+        json_file: str | XComArg,
+        processing_date: str,
+        postgres_conn_id: str,
+        **kwargs: object,
+    ) -> None:
+        super().__init__(
+            json_file=json_file,
+            processing_date=processing_date,
+            postgres_conn_id=postgres_conn_id,
+            sql_resource="sql/daily_summary_upsert.sql",
+            **kwargs,
+        )
 
     def prepare_parameters(self, payload: dict, raw_json: str) -> tuple[int, date, str]:
         expected_date = _calendar_date(self.processing_date, "Resolved processing date")

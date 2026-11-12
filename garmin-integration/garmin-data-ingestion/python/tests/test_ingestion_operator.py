@@ -1,5 +1,6 @@
+from pathlib import PurePosixPath
 from types import SimpleNamespace
-from unittest.mock import MagicMock, PropertyMock, patch
+from unittest.mock import MagicMock, PropertyMock, call, patch
 
 import pytest
 from airflow.exceptions import AirflowException
@@ -7,7 +8,7 @@ from airflow.providers.cncf.kubernetes.hooks.kubernetes import KubernetesHook
 from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
 
 from garmin_data_ingestion import GarminIngestionOperator
-from garmin_data_ingestion.operator import OUTPUT_DIR_XCOM_KEY
+from garmin_data_ingestion.operator import OUTPUT_DIR_XCOM_KEY, OUTPUT_JSON_FILE_XCOM_KEY
 
 
 def task_context(*, run_id="manual__one", try_number=1, dag_id="garmin_daily_pipeline"):
@@ -49,7 +50,7 @@ def test_generic_query_values_are_separate_unencoded_arguments(query_params):
         operator.execute(context)
     pod = build_pod(operator)
     container = pod.spec.containers[0]
-    output_dir = context["ti"].xcom_push.call_args.kwargs["value"]
+    output_dir = operator.output_dir
     assert container.command == ["java", "-jar", "/app/garmin-data-ingestion.jar"]
     assert container.args[:6] == [
         "--endpoint",
@@ -81,6 +82,10 @@ def test_templates_render_before_building_request_arguments():
         operator.execute(context)
     assert operator.arguments[:4] == ["--endpoint", "/synthetic/daily", "--date", "2026-11-08"]
     assert operator.output_dir == "/data/raw/garmin/2026-11-08/1"
+    context["ti"].xcom_push.assert_any_call(
+        key=OUTPUT_JSON_FILE_XCOM_KEY,
+        value="/data/raw/garmin/2026-11-08/1/2026-11-08.json",
+    )
     assert operator.arguments[5] == operator.output_dir
     assert operator.arguments[6:] == [
         "--query-param",
@@ -207,10 +212,13 @@ def test_contained_output_directory_is_forwarded_unchanged(mount_path, output_di
     with patch.object(KubernetesPodOperator, "execute_sync"):
         operator.execute(context)
     assert operator.arguments[5] == output_dir
-    context["ti"].xcom_push.assert_called_once_with(key=OUTPUT_DIR_XCOM_KEY, value=output_dir)
+    context["ti"].xcom_push.assert_has_calls([
+        call(key=OUTPUT_DIR_XCOM_KEY, value=output_dir),
+        call(key=OUTPUT_JSON_FILE_XCOM_KEY, value=str(PurePosixPath(output_dir) / "2026-11-07.json")),
+    ])
 
 
-def test_failure_propagates_without_publishing_output_directory():
+def test_failure_propagates_without_publishing_any_archive_paths():
     context = task_context()
     with patch.object(
         KubernetesPodOperator, "execute_sync", side_effect=AirflowException("fixture")
@@ -220,14 +228,25 @@ def test_failure_propagates_without_publishing_output_directory():
     context["ti"].xcom_push.assert_not_called()
 
 
-def test_xcom_contains_only_output_directory_after_success():
+def test_xcom_publishes_only_directory_and_json_file_paths_after_success():
     context = task_context()
     operator = ingestion_task()
-    with patch.object(KubernetesPodOperator, "execute_sync") as run_pod:
+    with patch.object(
+        KubernetesPodOperator, "execute_sync",
+        side_effect=lambda ctx: ctx["ti"].xcom_push.assert_not_called(),
+    ) as run_pod:
         operator.execute(context)
     run_pod.assert_called_once_with(context)
-    context["ti"].xcom_push.assert_called_once()
-    assert context["ti"].xcom_push.call_args.kwargs["key"] == OUTPUT_DIR_XCOM_KEY
-    output_dir = context["ti"].xcom_push.call_args.kwargs["value"]
-    assert isinstance(output_dir, str)
-    assert output_dir == operator.arguments[5] == "/data/raw/garmin/synthetic-attempt"
+    assert context["ti"].xcom_push.call_args_list == [
+        call(key=OUTPUT_DIR_XCOM_KEY, value="/data/raw/garmin/synthetic-attempt"),
+        call(key=OUTPUT_JSON_FILE_XCOM_KEY,
+             value="/data/raw/garmin/synthetic-attempt/2026-11-07.json"),
+    ]
+
+
+def test_exposes_named_file_xcom_reference_at_construction():
+    operator = ingestion_task()
+    assert operator.output_json_file == operator.output[OUTPUT_JSON_FILE_XCOM_KEY]
+    assert operator.output_json_file.operator is operator
+    assert operator.output_json_file.key == OUTPUT_JSON_FILE_XCOM_KEY
+    assert operator.do_xcom_push is False

@@ -7,13 +7,10 @@ from datetime import datetime, timedelta
 from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 from airflow.sdk import DAG, Param
 from garmin_airflow_operators import GarminDailySummaryLoadOperator
-from garmin_airflow_operators.sql_identifiers import quote_sql_identifier
 from garmin_auth.operator import GarminAuthOperator
 from garmin_data_ingestion import GarminIngestionOperator
 
 MOUNT_PATH = "/data/raw/garmin"
-STAGING_SCHEMA = "staging"
-DAILY_SUMMARY_TABLE = "stg_garmin_daily_summary"
 PROCESSING_DATE = (
     "{{ (dag_run.conf.get('date', params.date) if dag_run and dag_run.conf else params.date) "
     "or ((dag_run.logical_date or dag_run.start_date).strftime('%Y-%m-%d') if dag_run else ds) }}"
@@ -37,13 +34,11 @@ with DAG(
     default_args={"retries": 2, "retry_delay": timedelta(minutes=1)},
     max_active_runs=1,
     tags=["garmin", "pipeline", "ingestion", "kubernetes"],
-    user_defined_filters={"sql_identifier": quote_sql_identifier},
 ) as dag:
     ensure_daily_summary_staging = SQLExecuteQueryOperator(
         task_id="ensure_daily_summary_staging",
         conn_id="garmin_analytics_schema",
         sql="sql/ensure_daily_summary_staging.sql",
-        params={"schema": STAGING_SCHEMA, "table": DAILY_SUMMARY_TABLE},
         autocommit=False,
         split_statements=False,
         do_xcom_push=False,
@@ -71,12 +66,9 @@ with DAG(
     )
     load_daily_summary_staging = GarminDailySummaryLoadOperator(
         task_id="load_daily_summary_staging",
-        source_task_id=ingest_daily_summary.task_id,
+        json_file=ingest_daily_summary.output_json_file,
         processing_date=PROCESSING_DATE,
-        json_filename=f"{PROCESSING_DATE}.json",
         postgres_conn_id="garmin_analytics_loader",
-        schema=STAGING_SCHEMA,
-        table=DAILY_SUMMARY_TABLE,
     )
     ensure_garmin_token >> [ingest_daily_summary, ingest_sleep]
     [ensure_daily_summary_staging, ingest_daily_summary] >> load_daily_summary_staging

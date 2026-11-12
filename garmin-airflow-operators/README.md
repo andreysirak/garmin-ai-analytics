@@ -6,28 +6,29 @@ Ingestion remains in `garmin-integration/garmin-data-ingestion/python`.
 The loader hierarchy is `BaseOperator` → `JsonArchiveLoadOperator` →
 `GarminDailySummaryLoadOperator`. The generic operator validates the archive,
 loads a subclass's packaged SQL, and executes one parameterized transaction.
-The daily-summary subclass owns its archive root, business-key validation, and
-`sql/daily_summary_upsert.sql` resource.
+The daily-summary subclass owns business-key validation and explicitly passes
+`sql/daily_summary_upsert.sql` to the base constructor.
 
 ```python
 from garmin_airflow_operators import GarminDailySummaryLoadOperator
 
 load_daily_summary_staging = GarminDailySummaryLoadOperator(
     task_id="load_daily_summary_staging",
-    source_task_id=ingest_daily_summary.task_id,
+    json_file=ingest_daily_summary.output_json_file,
     processing_date=PROCESSING_DATE,
-    json_filename=f"{PROCESSING_DATE}.json",
     postgres_conn_id="garmin_analytics_loader",
-    schema=STAGING_SCHEMA,
-    table=DAILY_SUMMARY_TABLE,
 )
 ```
 
-Both `processing_date` and `json_filename` are templated. The source task must
-publish its completed archive directory under the current run's `output_dir`
-XCom key. The filename must be relative to that directory. Resolved directories
-stay within the subclass archive root; JSON and `_SUCCESS` paths stay within the
-source directory, including symlinks. The success marker must be empty.
+Both `json_file` and `processing_date` are templated. Ingestion publishes the full
+archived JSON path under `output_json_file` after success and exposes its named
+XCom reference as `output_json_file`. Airflow resolves that reference for the
+loader. The legacy `output_dir` XCom remains available to existing callers.
+The loader takes an absolute file path directly; it does not pull XCom, search
+attempts, or construct a filename from the processing date. There is no configured
+archive root. Its parent must contain an empty `_SUCCESS` marker; file and marker
+symlinks must stay within that parent directory. The DAG keeps the path sourced
+from ingestion through the named XCom reference.
 
 The reader requires a UTF-8 JSON object. Daily summaries additionally require a
 positive bigint `userProfileId` and `calendarDate` matching the processing date.
@@ -35,23 +36,17 @@ The original JSON text is bound directly to JSONB, retaining all nested data,
 numeric precision, and line endings. Archive files are never rewritten.
 Loader XCom output and SQL parameter logging are disabled.
 
-To extend the base class, define `archive_root`, `sql_resource`, and
-`prepare_parameters(payload, raw_json)`. That method validates payload-specific
-fields and returns bind parameters. SQL resources are relative to `sql_package`,
-which defaults to `garmin_airflow_operators`; external subclasses can use their
-own package. Include SQL files as package data. SQL resources use `{schema}` and
-`{table}` placeholders. The base operator validates and double-quotes these names
-before substitution, while payload values remain separate SQL bind parameters.
+To extend the base class, pass `sql_resource` explicitly to its constructor and
+implement `prepare_parameters(payload, raw_json)`. That method validates
+payload-specific fields and returns bind parameters. SQL resources are relative
+to `sql_package`, which defaults to `garmin_airflow_operators`; external subclasses
+can use their own package. Include SQL files as package data.
 
-The DAG owns the destination: define `STAGING_SCHEMA` and `DAILY_SUMMARY_TABLE`
-once, then pass them to the loader and the setup SQL operator
-(`params={"schema": STAGING_SCHEMA, "table": DAILY_SUMMARY_TABLE}`). Setup SQL
-uses the shared `sql_identifier` Jinja filter on `task.params`, so run-level
-parameter overrides cannot redirect setup away from the loader destination.
-Accepted identifiers are 1–63 ASCII letters, digits, or underscores, starting
-with a letter or underscore. Mixed case and reserved words are safely quoted.
-Qualified names, quotes, SQL syntax, and overlong names are rejected. The DAG
-does not choose the loader SQL resource; that remains subclass configuration.
+The daily-summary UPSERT and staging setup SQL both target the fixed table
+`staging.stg_garmin_daily_summary`. Schema/table names are not constructor inputs
+and SQL is not formatted with identifiers. Profile ID, date, and the full JSON
+text remain separate bind parameters. The DAG supplies only the task ID, file
+reference, processing date, and PostgreSQL Connection ID to the daily loader.
 
 Use the constrained environment in [CONTRIBUTING.md](../CONTRIBUTING.md), including
 `pip install -e 'garmin-airflow-operators[dev]'`. Unit/static checks from repo root:

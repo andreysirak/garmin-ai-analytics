@@ -22,16 +22,8 @@ def payload():
 
 
 @pytest.fixture
-def archive_root(tmp_path, monkeypatch):
-    root = tmp_path / "archive"
-    root.mkdir()
-    monkeypatch.setattr(GarminDailySummaryLoadOperator, "archive_root", root)
-    return root
-
-
-@pytest.fixture
-def archive(archive_root, payload):
-    directory = archive_root / "2026-11-09/4"
+def archive(tmp_path, payload):
+    directory = tmp_path / "2026-11-09/4"
     directory.mkdir(parents=True)
     (directory / "_SUCCESS").touch()
     path = directory / "2026-11-09.json"
@@ -40,11 +32,11 @@ def archive(archive_root, payload):
 
 
 @pytest.fixture
-def task():
+def task(archive):
     return GarminDailySummaryLoadOperator(
-        task_id="load_test", source_task_id="synthetic_source",
-        processing_date="{{ ds }}", json_filename="{{ ds }}.json",
-        postgres_conn_id="synthetic_loader", schema="test_staging", table="test_summary",
+        task_id="load_test",
+        processing_date="{{ ds }}", json_file="{{ params.json_file }}",
+        postgres_conn_id="synthetic_loader",
         do_xcom_push=True,
     )
 
@@ -53,8 +45,9 @@ def task():
 def context(archive):
     return {
         "ti": SimpleNamespace(
-            try_number=99, xcom_pull=MagicMock(return_value=str(archive.parent)),
+            try_number=99, xcom_pull=MagicMock(side_effect=AssertionError("Loader must not pull XCom")),
             xcom_push=MagicMock(),
         ),
         "ds": "2026-11-09",
+        "params": {"json_file": str(archive)},
     }

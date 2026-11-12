@@ -2,19 +2,20 @@
 
 from datetime import datetime
 from types import SimpleNamespace
+from unittest.mock import ANY, MagicMock
 
 import pytest
 from garmin_airflow_operators import GarminDailySummaryLoadOperator
-from garmin_airflow_operators.json_archive_load_operator import OUTPUT_DIR_XCOM_KEY
-from garmin_data_ingestion.operator import (
-    OUTPUT_DIR_XCOM_KEY as INGESTION_OUTPUT_DIR_XCOM_KEY,
-)
+from garmin_data_ingestion.operator import OUTPUT_JSON_FILE_XCOM_KEY
 
 
 def test_loader_configuration_and_dependencies(dag):
     task = dag.get_task("load_daily_summary_staging")
     assert isinstance(task, GarminDailySummaryLoadOperator)
-    assert task.source_task_id == dag.get_task("ingest_daily_summary").task_id
+    ingestion = dag.get_task("ingest_daily_summary")
+    assert task.json_file == ingestion.output_json_file
+    assert task.json_file.operator is ingestion
+    assert task.json_file.key == OUTPUT_JSON_FILE_XCOM_KEY
     assert task.postgres_conn_id == "garmin_analytics_loader"
     assert task.upstream_task_ids == {"ensure_daily_summary_staging", "ingest_daily_summary"}
     assert task.trigger_rule == "all_success"
@@ -22,7 +23,8 @@ def test_loader_configuration_and_dependencies(dag):
     assert task.do_xcom_push is False
     assert dag.get_task("ingest_sleep").upstream_task_ids == {"ensure_garmin_token"}
     assert not dag.get_task("ingest_sleep").downstream_task_ids
-    assert OUTPUT_DIR_XCOM_KEY == INGESTION_OUTPUT_DIR_XCOM_KEY
+    assert not hasattr(task, "source_task_id")
+    assert not hasattr(task, "json_filename")
 
 
 @pytest.mark.parametrize("conf, logical_date, param_date, expected", [
@@ -37,7 +39,7 @@ def test_loader_and_ingestion_render_same_processing_date(
     dag, conf, logical_date, param_date, expected
 ):
     context = {
-        "ti": SimpleNamespace(try_number=99),
+        "ti": SimpleNamespace(try_number=4, xcom_pull=MagicMock()),
         "dag_run": SimpleNamespace(
             conf=conf, logical_date=logical_date, start_date=datetime(2026, 11, 9, 12, 30)
         ),
@@ -46,71 +48,49 @@ def test_loader_and_ingestion_render_same_processing_date(
     }
     loader = dag.get_task("load_daily_summary_staging")
     ingestion = dag.get_task("ingest_daily_summary")
-    for task in (loader, ingestion):
-        task.render_template_fields(context, jinja_env=dag.get_template_env())
+    ingestion.render_template_fields(context, jinja_env=dag.get_template_env())
+    archived_file = f"{ingestion.output_dir}/{ingestion.date}.json"
+    context["ti"].xcom_pull.return_value = archived_file
+    context["ti"].try_number = 99
+    loader.render_template_fields(context, jinja_env=dag.get_template_env())
     assert loader.processing_date == ingestion.date == expected
-    assert loader.json_filename == f"{expected}.json"
-    assert loader.template_fields == ("processing_date", "json_filename")
+    assert loader.json_file == archived_file
+    assert loader.json_file.endswith(f"/{expected}/4/{expected}.json")
+    assert loader.template_fields == ("json_file", "processing_date")
+    context["ti"].xcom_pull.assert_called_once_with(
+        task_ids=ingestion.task_id, key=OUTPUT_JSON_FILE_XCOM_KEY,
+        default=ANY, map_indexes=None,
+    )
 
 
-def test_setup_and_loader_share_dag_destination(dag):
+def test_loader_has_only_file_date_and_connection_configuration(dag):
     setup = dag.get_task("ensure_daily_summary_staging")
     loader = dag.get_task("load_daily_summary_staging")
-    assert setup.params["schema"] == loader.schema == "staging"
-    assert setup.params["table"] == loader.table == "stg_garmin_daily_summary"
+    assert loader.sql_resource == "sql/daily_summary_upsert.sql"
+    assert not hasattr(loader, "archive_root")
+    assert not hasattr(loader, "schema")
+    assert not hasattr(loader, "table")
+    assert "schema" not in setup.params and "table" not in setup.params
+    assert not dag.user_defined_filters
     assert setup.conn_id == "garmin_analytics_schema"
     assert loader.postgres_conn_id == "garmin_analytics_loader"
 
 
-@pytest.mark.parametrize("schema, table", [
-    ("staging", "stg_garmin_daily_summary"),
-    ("select", "DailySummary"),
-    ("OtherSchema", "OtherTable"),
-])
-def test_setup_renders_configured_destination_everywhere(dag, schema, table):
+def test_setup_hands_fixed_table_sql_to_mocked_hook(dag):
     from unittest.mock import patch
 
     setup = dag.get_task("ensure_daily_summary_staging")
-    setup.params = {**setup.params, "schema": schema, "table": table}
-    context = {"task": setup}
+    context = {"params": {"schema": "ignored", "table": "ignored"}}
     setup.render_template_fields(context, jinja_env=dag.get_template_env())
-    target = f'"{schema}"."{table}"'
+    target = "staging.stg_garmin_daily_summary"
     assert f"CREATE TABLE IF NOT EXISTS {target}" in setup.sql
     assert f"LOCK TABLE {target} IN ACCESS SHARE MODE" in setup.sql
     assert f"'{target}'::regclass" in setup.sql
-    assert f"Schema migration required for {target}" in setup.sql
-    assert "{{" not in setup.sql
     assert "SET LOCAL ROLE garmin_owner" in setup.sql
-    # Unit-test the real SQL operator handoff with a mocked database hook.
+    assert "{{" not in setup.sql
     with patch.object(setup, "get_db_hook") as hook:
         setup.execute(context)
     hook.return_value.run.assert_called_once_with(
         sql=setup.sql, autocommit=False, parameters=None, handler=None,
         return_last=True, split_statements=False,
     )
-
-
-@pytest.mark.parametrize("field, value", [
-    ("schema", 'bad"schema'), ("table", "x; DROP TABLE users"),
-    ("schema", "x$$"), ("table", "a" * 64),
-])
-def test_setup_rejects_unsafe_identifiers_before_database(dag, field, value):
-    from unittest.mock import patch
-
-    from airflow.exceptions import AirflowException
-
-    setup = dag.get_task("ensure_daily_summary_staging")
-    setup.params = {**setup.params, field: value}
-    with patch.object(setup, "get_db_hook") as hook, \
-         pytest.raises(AirflowException, match="SQL identifiers must"):
-        setup.render_template_fields({"task": setup}, jinja_env=dag.get_template_env())
-    hook.assert_not_called()
-
-
-def test_run_params_cannot_redirect_setup_away_from_loader_destination(dag):
-    setup = dag.get_task("ensure_daily_summary_staging")
-    loader = dag.get_task("load_daily_summary_staging")
-    context = {"task": setup, "params": {"schema": "OtherSchema", "table": "OtherTable"}}
-    setup.render_template_fields(context, jinja_env=dag.get_template_env())
-    assert f'CREATE TABLE IF NOT EXISTS "{loader.schema}"."{loader.table}"' in setup.sql
-    assert '"OtherSchema"."OtherTable"' not in setup.sql

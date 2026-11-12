@@ -205,13 +205,18 @@ run configuration, then `params.date`, then the logical date (or run start date
 when no logical date is available). Each task has its own Airflow retries.
 
 After a successful Pod exit, Python publishes the output-directory path as a
-string under the task's `output_dir` XCom key. Future tasks can pull it with
+string under the task's existing `output_dir` XCom key. Current callers can pull it with
 `ti.xcom_pull(task_ids="ingest_sleep", key="output_dir")`. This is the same directory
 passed to Java through `--output-dir`; Java creates `<requested-date>.json` and
 `_SUCCESS` inside it. Downstream Pods need the same shared PVC mount and must
 require `_SUCCESS` in that directory before reading JSON.
 
-The handoff contains only the directory path. Java does not write an Airflow XCom
+Ingestion also publishes the full `<output-dir>/<requested-date>.json` path under
+`output_json_file`. The daily-summary DAG passes
+`json_file=ingest_daily_summary.output_json_file` to the loader, making the exact
+file handoff visible. `processing_date` validates the payload date; the loader
+opens the supplied path directly and requires an empty `_SUCCESS` in its parent.
+Only paths are published, never payloads. Java does not write an Airflow XCom
 return file, and no XCom sidecar is used.
 
 Responses are checked only for syntactically valid JSON, then saved as the original

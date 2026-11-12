@@ -12,18 +12,18 @@ from garmin_airflow_operators import json_archive_load_operator as loader_module
 from garmin_airflow_operators.json_archive_load_operator import read_json_archive
 
 
-def test_reader_preserves_object_original_text_and_bytes(archive, archive_root, payload):
+def test_reader_preserves_object_original_text_and_bytes(archive, payload):
     before = archive.read_bytes()
-    result = read_json_archive(str(archive.parent), archive.name, archive_root=archive_root)
+    result = read_json_archive(str(archive))
     assert result == (payload, before.decode("utf-8"))
     assert archive.read_bytes() == before
     assert (archive.parent / "_SUCCESS").read_bytes() == b""
 
 
 @pytest.mark.parametrize("payload", [{}, {"generic": [1, None, {"nested": True}]}])
-def test_generic_reader_has_no_garmin_key_requirements(archive, archive_root, payload):
+def test_generic_reader_has_no_garmin_key_requirements(archive, payload):
     archive.write_text(json.dumps(payload))
-    assert read_json_archive(str(archive.parent), archive.name, archive_root=archive_root)[0] == payload
+    assert read_json_archive(str(archive))[0] == payload
 
 
 @pytest.mark.parametrize("contents, error", [
@@ -38,92 +38,63 @@ def test_generic_reader_has_no_garmin_key_requirements(archive, archive_root, pa
     (b'{"value": Infinity}', "not valid JSON"),
     (b'{"value": -Infinity}', "not valid JSON"),
 ])
-def test_reader_rejects_invalid_json_without_changing_archive(archive, archive_root, contents, error):
+def test_reader_rejects_invalid_json_without_changing_archive(archive, contents, error):
     archive.write_bytes(contents)
     with pytest.raises(AirflowException, match=error):
-        read_json_archive(str(archive.parent), archive.name, archive_root=archive_root)
+        read_json_archive(str(archive))
     assert archive.read_bytes() == contents
 
 
-@pytest.mark.parametrize("output_dir", [None, "", "relative/4", 42])
-def test_reader_requires_absolute_directory(archive_root, output_dir):
-    with pytest.raises(AirflowException, match="output_dir XCom must be an absolute directory"):
-        read_json_archive(output_dir, "response.json", archive_root=archive_root)
-
-
-@pytest.mark.parametrize("path_kind", ["outside", "sibling_prefix", "traversal", "symlink"])
-def test_reader_rejects_directories_resolving_outside_root(archive_root, tmp_path, path_kind):
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    if path_kind == "sibling_prefix":
-        directory = tmp_path / "archive-other"
-        directory.mkdir()
-    elif path_kind == "traversal":
-        directory = archive_root / "../outside"
-    elif path_kind == "symlink":
-        directory = archive_root / "escaped"
-        directory.symlink_to(outside, target_is_directory=True)
-    else:
-        directory = outside
-    with pytest.raises(AirflowException, match="must stay within the archive root"):
-        read_json_archive(str(directory), "response.json", archive_root=archive_root)
+@pytest.mark.parametrize("json_file", [None, "", "relative/response.json", 42])
+def test_reader_requires_absolute_file_path(json_file):
+    with pytest.raises(AirflowException, match="json_file must be an absolute file path"):
+        read_json_archive(json_file)
 
 
 @pytest.mark.parametrize("path_kind", ["missing", "file"])
-def test_reader_requires_existing_directory(archive_root, path_kind):
-    directory = archive_root / "attempt"
+def test_reader_requires_existing_directory(tmp_path, path_kind):
+    directory = tmp_path / "attempt"
     if path_kind == "file":
         directory.touch()
     with pytest.raises(AirflowException, match="not an existing archive directory"):
-        read_json_archive(str(directory), "response.json", archive_root=archive_root)
-
-
-@pytest.mark.parametrize("filename", [None, "", "/tmp/outside.json"])
-def test_reader_requires_relative_filename(archive, archive_root, filename):
-    with pytest.raises(AirflowException, match="json_filename must be a nonempty relative path"):
-        read_json_archive(str(archive.parent), filename, archive_root=archive_root)
-
-
-@pytest.mark.parametrize("filename", ["../outside.json", "nested/../../outside.json"])
-def test_reader_rejects_filename_traversal(archive, archive_root, filename):
-    with pytest.raises(AirflowException, match="must stay within the source directory"):
-        read_json_archive(str(archive.parent), filename, archive_root=archive_root)
+        read_json_archive(str(directory / "response.json"))
 
 
 @pytest.mark.parametrize("filename", ["_SUCCESS", "2026-11-09.json"])
-def test_reader_rejects_file_symlinks_outside_source(archive, archive_root, tmp_path, filename):
+def test_reader_rejects_file_symlinks_outside_source(archive, tmp_path, filename):
     target = tmp_path / "outside"
     target.write_bytes(b"")
     path = archive.parent / filename
     path.unlink()
     path.symlink_to(target)
     with pytest.raises(AirflowException, match="must stay within the source directory"):
-        read_json_archive(str(archive.parent), archive.name, archive_root=archive_root)
+        read_json_archive(str(archive))
 
 
 @pytest.mark.parametrize("directory_kind", ["normalized", "symlink"])
-def test_reader_accepts_contained_directory(archive, archive_root, directory_kind):
+def test_reader_accepts_normalized_or_symlink_parent(archive, directory_kind):
     directory = archive.parent / "../4"
     if directory_kind == "symlink":
-        directory = archive_root / "alias"
+        directory = archive.parent.parent / "alias"
         directory.symlink_to(archive.parent, target_is_directory=True)
-    assert read_json_archive(str(directory), archive.name, archive_root=archive_root)[0]["userProfileId"] == 12
+    assert read_json_archive(str(directory / archive.name))[0]["userProfileId"] == 12
 
 
 @pytest.mark.parametrize("filename", ["nested/response.json", "alias.json"])
-def test_reader_accepts_contained_relative_filename(archive, archive_root, filename):
+def test_reader_accepts_contained_relative_filename(archive, filename):
     path = archive.parent / filename
     if filename == "alias.json":
         path.symlink_to(archive)
     else:
         path.parent.mkdir()
         path.write_bytes(archive.read_bytes())
-    result = read_json_archive(str(archive.parent), filename, archive_root=archive_root)
+        (path.parent / "_SUCCESS").touch()
+    result = read_json_archive(str(path))
     assert result[1] == archive.read_bytes().decode("utf-8")
 
 
 @pytest.mark.parametrize("missing", ["_SUCCESS", "2026-11-09.json", "nonempty_marker", "marker_directory"])
-def test_reader_requires_completed_archive(archive, archive_root, missing):
+def test_reader_requires_completed_archive(archive, missing):
     before = archive.read_bytes()
     if missing == "nonempty_marker":
         (archive.parent / "_SUCCESS").write_text("incomplete")
@@ -134,42 +105,40 @@ def test_reader_requires_completed_archive(archive, archive_root, missing):
         (archive.parent / missing).unlink()
     error = "Cannot read JSON archive" if missing == archive.name else "_SUCCESS"
     with pytest.raises(AirflowException, match=error):
-        read_json_archive(str(archive.parent), archive.name, archive_root=archive_root)
+        read_json_archive(str(archive))
     if archive.exists():
         assert archive.read_bytes() == before
 
 
 class SyntheticLoadOperator(JsonArchiveLoadOperator):
     sql_package = "synthetic_sql_package"
-    sql_resource = "sql/synthetic.sql"
 
     def prepare_parameters(self, payload, raw_json):
         return (payload["synthetic"], raw_json)
 
 
-def test_base_requires_subclass_configuration():
-    with pytest.raises(TypeError, match="subclasses must define archive_root and sql_resource"):
+def test_base_requires_sql_resource_constructor_argument():
+    with pytest.raises(TypeError, match="sql_resource"):
         JsonArchiveLoadOperator(
-            task_id="unconfigured", source_task_id="source", processing_date="2026-11-09",
-            json_filename="response.json", postgres_conn_id="test", schema="test_schema", table="test_table",
+            task_id="unconfigured", processing_date="2026-11-09",
+            json_file="/tmp/response.json", postgres_conn_id="test",
         )
 
 
-def test_generic_operator_delegates_parameters_and_loads_subclass_sql(archive, archive_root, context):
+def test_generic_operator_delegates_parameters_and_loads_subclass_sql(archive, context):
     class TestLoadOperator(SyntheticLoadOperator):
         pass
 
-    TestLoadOperator.archive_root = archive_root
     archive.write_text('{"synthetic": "custom value"}\r\n')
     task = TestLoadOperator(
-        task_id="custom_load", source_task_id="custom_source", processing_date="{{ ds }}",
-        json_filename=archive.name, postgres_conn_id="custom_postgres",
-        schema="select", table="MixedCase",
+        task_id="custom_load", processing_date="{{ ds }}",
+        json_file=str(archive), postgres_conn_id="custom_postgres",
+        sql_resource="sql/synthetic.sql",
     )
     assert isinstance(task, BaseOperator)
     task.render_template_fields(context)
     resource = MagicMock()
-    resource.joinpath.return_value.read_text.return_value = "SELECT %s, %s::jsonb FROM {schema}.{table}"
+    resource.joinpath.return_value.read_text.return_value = "SELECT %s, %s::jsonb"
     with patch.object(loader_module.resources, "files", return_value=resource) as files, \
          patch.object(loader_module, "PostgresHook") as hook:
         assert task.execute(context) is None
@@ -177,23 +146,18 @@ def test_generic_operator_delegates_parameters_and_loads_subclass_sql(archive, a
     resource.joinpath.assert_called_once_with("sql/synthetic.sql")
     hook.assert_called_once_with(postgres_conn_id="custom_postgres", log_sql=False)
     hook.return_value.run.assert_called_once_with(
-        sql='SELECT %s, %s::jsonb FROM "select"."MixedCase"',
+        sql="SELECT %s, %s::jsonb",
         parameters=("custom value", archive.read_bytes().decode("utf-8")), autocommit=False,
     )
-    context["ti"].xcom_pull.assert_called_once_with(
-        task_ids="custom_source", key=loader_module.OUTPUT_DIR_XCOM_KEY, include_prior_dates=False
-    )
+    context["ti"].xcom_pull.assert_not_called()
     context["ti"].xcom_push.assert_not_called()
 
 
-def test_subclass_must_implement_payload_validation(archive_root, archive, context):
-    class IncompleteLoadOperator(JsonArchiveLoadOperator):
-        sql_resource = "sql/daily_summary_upsert.sql"
-
-    IncompleteLoadOperator.archive_root = archive_root
-    task = IncompleteLoadOperator(
-        task_id="incomplete", source_task_id="source", processing_date="2026-11-09",
-        json_filename=archive.name, postgres_conn_id="test", schema="test_schema", table="test_table",
+def test_subclass_must_implement_payload_validation(archive, context):
+    task = JsonArchiveLoadOperator(
+        task_id="incomplete", processing_date="2026-11-09",
+        json_file=str(archive), postgres_conn_id="test",
+        sql_resource="sql/daily_summary_upsert.sql",
     )
     with patch.object(loader_module, "PostgresHook") as hook, \
          pytest.raises(NotImplementedError, match="prepare_parameters"):
@@ -213,29 +177,17 @@ def test_missing_or_invalid_sql_fails_before_database(task, context, error):
     hook.assert_not_called()
 
 
-@pytest.mark.parametrize("field, value", [
-    ("schema", 'bad"schema'), ("table", "table; DROP TABLE users"),
-    ("schema", "a" * 64), ("table", "schema.table"),
-])
-def test_constructor_rejects_unsafe_identifiers(field, value):
-    from garmin_airflow_operators import GarminDailySummaryLoadOperator
-
-    kwargs = {"schema": "test_schema", "table": "test_table", field: value}
-    with patch.object(loader_module, "PostgresHook") as hook, \
-         pytest.raises(AirflowException, match="SQL identifiers must"):
-        GarminDailySummaryLoadOperator(
-            task_id="invalid_identifiers", source_task_id="source",
-            processing_date="2026-11-09", json_filename="response.json",
-            postgres_conn_id="test", **kwargs,
-        )
-    hook.assert_not_called()
+def test_reader_requires_marker_in_the_files_own_parent(archive):
+    nested = archive.parent / "nested" / "response.json"
+    nested.parent.mkdir()
+    nested.write_bytes(archive.read_bytes())
+    # The completed outer directory must not mark the nested directory as complete.
+    with pytest.raises(AirflowException, match="_SUCCESS"):
+        read_json_archive(str(nested))
 
 
-@pytest.mark.parametrize("field", ["schema", "table"])
-def test_identifiers_are_revalidated_before_sql_execution(task, context, field):
-    setattr(task, field, 'bad"identifier')
-    task.render_template_fields(context)
-    with patch.object(loader_module, "PostgresHook") as hook, \
-         pytest.raises(AirflowException, match="SQL identifiers must"):
-        task.execute(context)
-    hook.assert_not_called()
+def test_reader_rejects_a_directory_in_place_of_the_json_file(archive):
+    directory = archive.parent / "not-a-file.json"
+    directory.mkdir()
+    with pytest.raises(AirflowException, match="Cannot read JSON archive"):
+        read_json_archive(str(directory))

@@ -61,11 +61,14 @@ the full parsed response in `payload jsonb`. Nested Body
 Battery events stay inside the payload. Raw archive bytes remain unchanged.
 The `GarminDailySummaryLoadOperator` in the standalone `garmin-airflow-operators`
 project inherits archive reading and database execution from `JsonArchiveLoadOperator`.
-It reads the ingestion task's current-run `output_dir` XCom, confines its
-resolved directory to the daily-summary archive root, and requires the empty
-`_SUCCESS` marker. The DAG configures the templated JSON filename; the subclass
+The DAG passes `json_file=ingest_daily_summary.output_json_file`; Airflow resolves
+that named XCom reference to the successful ingestion file path. The loader opens
+that exact absolute file path and requires an empty
+`_SUCCESS` marker in its parent. The subclass
 validates the profile/date key against the processing date and selects its
-packaged `sql/daily_summary_upsert.sql` before opening a transaction. Corrected responses replace the
+packaged `sql/daily_summary_upsert.sql` through the base constructor before
+opening a transaction. Both setup and UPSERT SQL name the fixed
+`staging.stg_garmin_daily_summary` table. Corrected responses replace the
 entire payload on the same key. With LocalExecutor, the scheduler reads the
 existing kind archive mount read-only and receives its host GID through Makefile.
 Sleep loading and typed SQL views for selected metrics remain follow-up steps.
@@ -183,15 +186,17 @@ settings, logging, startup timeout, and execution timeout are preserved.
 
 After successful completion, Python calls
 `ti.xcom_push(key="output_dir", value=self.output_dir)`. This string is the same
-final attempt directory supplied to Java. Java owns creation of `<date>.json` and
-`_SUCCESS` within that directory; Python does not construct or publish their paths.
+final attempt directory supplied to Java. Python also publishes the full path to
+`<date>.json` under `output_json_file` after success, exposing the reference as
+`self.output_json_file = self.output[OUTPUT_JSON_FILE_XCOM_KEY]`. Java owns creation
+of the JSON file and `_SUCCESS` within that directory.
 The provider may also publish its normal Pod name/namespace metadata. Java never
 writes an Airflow XCom return file, and `do_xcom_push=False` disables the provider's
-XCom sidecar. Future downstream tasks pull `output_dir` from the appropriate
-ingestion task, mount the same PVC root, and **require `_SUCCESS` before reading
-JSON**. An unmarked directory can contain partial or complete JSON; neither file
-existence nor the presence of metadata proves completion. No downstream reader or
-analytics is added here.
+XCom sidecar. Existing consumers can keep pulling `output_dir`. The daily-summary
+loader receives the file reference directly through its templated `json_file`
+field and performs no internal XCom lookup. All readers need access to the archive
+and **require an empty `_SUCCESS` in the file's parent before reading JSON**. An unmarked directory can contain partial or complete JSON; neither file
+existence nor the presence of metadata proves completion.
 
 `GarminApiException`, `InvalidResponseException`, and `IngestionExecutionException`
 distinguish HTTP/transport, JSON-syntax, and configuration/archive failures.

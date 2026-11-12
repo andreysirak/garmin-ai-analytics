@@ -261,16 +261,12 @@ def test_view_cannot_masquerade_as_the_staging_table(staging):
 
 
 @pytest.fixture
-def loader(staging, dag, tmp_path, monkeypatch):
+def loader(staging, dag):
     """Real load operator -> Connection -> PostgresHook -> restricted login."""
     from airflow.providers.common.sql.operators.sql import BaseHook
     from airflow.sdk import Connection
     from psycopg2 import sql
 
-    monkeypatch.setattr(
-        "garmin_airflow_operators.GarminDailySummaryLoadOperator.archive_root",
-        tmp_path / "daily-summary",
-    )
     admin, ensure_staging = staging
     ensure_staging()
     password = secrets.token_urlsafe(32)
@@ -287,7 +283,7 @@ def loader(staging, dag, tmp_path, monkeypatch):
     def execute(directory):
         task = deepcopy(dag.get_task("load_daily_summary_staging"))
         context = {
-            "ti": SimpleNamespace(xcom_pull=lambda **_: str(directory), try_number=99),
+            "ti": SimpleNamespace(xcom_pull=lambda **_: str(directory / "2026-11-09.json"), try_number=99),
             "dag_run": SimpleNamespace(conf={"date": "2026-11-09"}),
             "params": {"date": None},
         }

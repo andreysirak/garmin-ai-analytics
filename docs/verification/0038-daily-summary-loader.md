@@ -1,110 +1,77 @@
-# Issue #38: JSON archive loader refactoring
+# Issue #38: simplified JSON archive loader
 
-## Implementation
+## Current implementation
 
-The standalone `garmin-airflow-operators/` Python project uses `pyproject.toml`
-and a standard `src/garmin_airflow_operators` package. The hierarchy is:
+The DAG call is:
 
-```text
-BaseOperator
-    └── JsonArchiveLoadOperator
-            └── GarminDailySummaryLoadOperator
+```python
+load_daily_summary_staging = GarminDailySummaryLoadOperator(
+    task_id="load_daily_summary_staging",
+    json_file=ingest_daily_summary.output_json_file,
+    processing_date=PROCESSING_DATE,
+    postgres_conn_id="garmin_analytics_loader",
+)
 ```
 
-`JsonArchiveLoadOperator` accepts `source_task_id`, `processing_date`,
-`json_filename`, `postgres_conn_id`, `schema`, and `table`. Both date and filename
-are templated; destination identifiers are explicit pipeline configuration.
-It retrieves the source's `output_dir` XCom from the current run, requires a
-completed archive, delegates payload validation/parameter preparation to the
-subclass, reads its packaged SQL resource, and executes it through PostgresHook.
-XCom publication and SQL parameter logging are disabled. Execute returns `None`.
+The file stays sourced from ingestion's named file XCom reference. Both
+`json_file` and `processing_date` remain templated. Task IDs, setup/ingestion
+upstream dependencies, Connection IDs, and the existing directory XCom remain
+unchanged. The loader has no internal XCom pull or filename construction.
 
-The independent `read_json_archive` helper requires:
+Neither loader class nor the DAG configures an archive root. The shared reader
+requires an absolute JSON file path and an empty `_SUCCESS` marker in that file's
+parent directory. File and marker symlinks must still remain within that resolved
+parent. There is no global filesystem-root restriction. Files are never rewritten.
 
-- An absolute existing directory resolving under the subclass archive root.
-- A nonempty relative JSON filename, resolved inside that source directory.
-- JSON and marker paths that remain inside the source directory after resolving
-  traversal and symlinks, and an empty `_SUCCESS` marker.
-- Valid UTF-8 and a JSON object, rejecting nonstandard numeric constants.
+`JsonArchiveLoadOperator` accepts `sql_resource` explicitly in its constructor and
+keeps archive reading and SQL execution. `GarminDailySummaryLoadOperator.__init__`
+passes `sql_resource="sql/daily_summary_upsert.sql"` directly to `super().__init__`;
+there is no subclass resource class attribute. The subclass retains profile-ID,
+calendar-date, and SQL-parameter validation/preparation.
 
-The helper returns the parsed object and original JSON text without modifying
-archive bytes. Nested data, unknown fields, timestamps, line endings, and decimal
-text remain in the bound JSON. No Python JSON reserialization is used.
-
-`GarminDailySummaryLoadOperator` defines `/data/raw/garmin/daily-summary` and
-`sql/daily_summary_upsert.sql` internally. Its parameter hook validates a positive
-bigint `userProfileId` and a valid ISO `calendarDate` matching `processing_date`.
-The SQL remains one parameterized upsert into the three-column JSONB table:
-conflicts on `(user_profile_id, calendar_date)` replace the entire payload, with
-`autocommit=False` preserving the existing transaction behavior.
-
-The DAG supplies the templated filename, source task ID, processing date, and
-existing `garmin_analytics_loader` Connection ID. `STAGING_SCHEMA` and
-`DAILY_SUMMARY_TABLE` are defined once in the DAG and passed to the loader and
-the setup SQL operator (via its `params`). It preserves task ID
-`load_daily_summary_staging` and both `all_success` dependencies on setup and
-summary ingestion. SQL resource selection stays inside the subclass; schema and
-table selection belong to the DAG.
-Ingestion's package, `output_dir` contract, Java behavior, and archive format
-remain unchanged. No Sleep/Steps loaders or database migrations were added.
-
-The Airflow Dockerfile copies the new package including its SQL directory.
-Setuptools includes `sql/*.sql` as package data. Python CI installs, lints, and
-unit-tests the new project alongside existing packages. Existing opt-in database
-test fixtures were updated to reference the relocated class but were not run.
-
-## Centralized destination configuration
-
-`daily_summary_upsert.sql` uses `{schema}` and `{table}` placeholders. The base
-loader validates and double-quotes each identifier before formatting SQL. Values
-remain separate bind parameters; the raw JSON text and transaction settings are
-unchanged. `ensure_daily_summary_staging.sql` uses the same quoting function as
-an Airflow Jinja filter, including every target reference in DDL, regclass text,
-and PL/pgSQL messages. Its `task.params` hold the DAG-configured destination,
-preventing run-level params from redirecting setup away from the loader.
-
-The supported identifier subset is 1–63 ASCII letters, digits, or underscores,
-starting with a letter or underscore. Mixed case and reserved words are quoted;
-qualified names, quotes, SQL syntax/delimiters, and overlong names are rejected.
-Both existing Connection IDs, role handling, table definition, JSONB payload,
-XCom behavior, and UPSERT/transaction semantics are preserved. No database schema
-changes or Flyway implementation were introduced.
+Both SQL files name the fixed `staging.stg_garmin_daily_summary` table. Dynamic
+schema/table arguments, identifier formatting, the DAG's identifier filter, and
+`sql_identifiers.py` were removed. The existing table definition is unchanged.
+Profile ID, date, and original JSON text remain three separate query parameters.
+The full JSONB payload, nested Body Battery data, conflict replacement, and one
+transaction with autocommit disabled are preserved. Payloads remain excluded
+from SQL parameter logging and XCom output.
 
 ## Unit and static verification
 
 Verified on 2026-11-12 with the existing Airflow 3.3.1 image as an isolated Python
-3.13 environment:
+3.13 unit/static-check environment:
 
-- **163 unit tests passed**: generic archive reader/base class, daily-summary
-  subclass, packaged SQL, mocked database calls, ingestion regressions, and DAG
-  configuration/template checks, identifier validation, and setup SQL handoff.
-- Ruff passed across the new project, DAGs/Airflow tests, and both existing Garmin
-  Python packages.
-- Python syntax and project TOML static checks passed.
-- `git diff --check` passed.
+- **124 unit tests passed** across ingestion, archive/loader behavior, and DAG
+  configuration/SQL handoff checks.
+- Ruff passed across both operator projects, authentication code, DAGs, and
+  Airflow tests.
+- Python syntax, project TOML, and `git diff --check` passed.
 
-All archive fixtures were temporary. Operator tests mocked XCom and PostgresHook;
-DAG wiring/date tests inspect configuration and templates. Setup-operator unit
-tests execute only its handoff through a mocked database hook.
-Tests include containment and symlink escapes for directories/files, filename
-traversal, missing/nonempty markers, malformed UTF-8/JSON, non-object JSON,
-invalid/missing business keys, bigint bounds, and date mismatches. They check
-unchanged archives, original text binding, no payload in logs/XCom, inherited
-subclass behavior, SQL resource loading/failures, and rejection before connection.
-Tests also verify custom schema/table names in both SQL paths, consistent DAG
-configuration, unchanged value binds, quoted reserved words/mixed case, and
-rejection of unsafe identifiers before database access. A packaging test verifies
-SQL is declared as package data and accessible through
-`importlib.resources`. No distribution build or image build was performed.
+Archive fixtures are temporary files outside the former fixed archive root.
+Tests cover absolute paths, parent completion markers, missing files/markers,
+malformed UTF-8/JSON, non-object payloads, file/marker symlinks, unchanged bytes,
+profile/date validation before connection, raw JSON parameter binding, packaged
+SQL loading/failure, and transaction settings. The generic operator is tested
+with an explicitly supplied SQL resource, while subclass tests verify its
+constructor-selected resource and absence of the removed configuration fields.
 
-No functional, integration, live DAG, PostgreSQL-write, or end-to-end testing
-was performed for this refactor. Earlier database results do not verify this
-implementation. Existing Kubernetes provider deprecation warnings remain.
+DAG tests inspect and resolve the ingestion file XComArg using a mocked task
+instance, including ingestion attempt 4 with loader try 99. They verify the
+requested constructor wiring, unchanged dependencies, fixed setup SQL, and no
+identifier filter. PostgreSQL/Kubernetes calls are mocked. Existing opt-in
+PostgreSQL fixtures were adapted to remove root configuration but were not run.
+Existing Kubernetes provider deprecation warnings remain.
+
+No functional, integration, live DAG, PostgreSQL-write, or end-to-end tests were
+run. No image build or deployment was performed. Live task/Connection resolution,
+archive access in the scheduler, and database writes remain for manual
+verification after review and an Airflow image rebuild/load.
 
 ## Reproduce
 
-Use the constrained environment in CONTRIBUTING.md, installing both existing
-Garmin packages and `garmin-airflow-operators[dev]`:
+Use the constrained environment from CONTRIBUTING.md with the Garmin Python
+packages and `garmin-airflow-operators[dev]` installed:
 
 ```bash
 python -m pytest -q --tb=short --show-capture=no -p no:cacheprovider \
@@ -118,25 +85,33 @@ ruff check airflow/dags airflow/tests garmin-airflow-operators \
 git diff --check
 ```
 
-## Files changed by destination centralization
+## Pending files
 
+This list includes retained, uncommitted file-handoff changes from the preceding
+review and the current simplification. The identifier helper and its tests are
+deleted:
+
+- `CONTRIBUTING.md`
+- `README.md`
 - `airflow/dags/garmin_daily_pipeline.py`
 - `airflow/dags/sql/ensure_daily_summary_staging.sql`
 - `airflow/tests/test_daily_summary_loader.py`
+- `airflow/tests/test_daily_summary_staging_postgresql.py`
 - `airflow/tests/test_garmin_daily_pipeline.py`
-- `airflow/tests/test_daily_summary_staging_postgresql.py` (fixture context only; not run)
+- `docs/architecture.md`
+- `docs/postgresql.md`
+- `docs/verification/0038-daily-summary-loader.md`
+- `garmin-airflow-operators/README.md`
+- `garmin-airflow-operators/src/garmin_airflow_operators/daily_summary_load_operator.py`
 - `garmin-airflow-operators/src/garmin_airflow_operators/json_archive_load_operator.py`
-- `garmin-airflow-operators/src/garmin_airflow_operators/sql_identifiers.py`
 - `garmin-airflow-operators/src/garmin_airflow_operators/sql/daily_summary_upsert.sql`
+- `garmin-airflow-operators/src/garmin_airflow_operators/sql_identifiers.py`
 - `garmin-airflow-operators/tests/conftest.py`
 - `garmin-airflow-operators/tests/test_daily_summary_load_operator.py`
 - `garmin-airflow-operators/tests/test_json_archive_load_operator.py`
 - `garmin-airflow-operators/tests/test_sql_identifiers.py`
-- `garmin-airflow-operators/README.md`
-- `docs/postgresql.md`
-- `docs/verification/0038-daily-summary-loader.md`
+- `garmin-integration/garmin-data-ingestion/python/src/garmin_data_ingestion/operator.py`
+- `garmin-integration/garmin-data-ingestion/python/tests/test_ingestion_operator.py`
 
-Changes remain unstaged and uncommitted for manual review. No commits, pushes,
-merges, PRs, tags, or releases were created. No functional, integration, or
-end-to-end checks were run. The existing Airflow image was used only as an
-isolated unit/static-check Python environment.
+All work remains unstaged and uncommitted for manual review. No Git staging,
+commits, pushes, or PR creation were performed.

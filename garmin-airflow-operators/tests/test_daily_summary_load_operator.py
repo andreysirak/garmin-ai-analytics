@@ -56,10 +56,9 @@ def test_daily_summary_loads_dag_filename_and_packaged_upsert(
     task, archive, context, caplog, json_filename
 ):
     assert isinstance(task, JsonArchiveLoadOperator)
-    assert task.archive_root.is_absolute()
     before = archive.read_bytes()
     archive.rename(archive.parent / json_filename)
-    task.json_filename = json_filename
+    task.json_file = str(archive.parent / json_filename)
     # Neither a newer attempt nor loader try 99 should replace the published path.
     other = archive.parent.parent / "5"
     other.mkdir()
@@ -67,16 +66,14 @@ def test_daily_summary_loads_dag_filename_and_packaged_upsert(
     task.render_template_fields(context)
     with patch.object(loader_module, "PostgresHook") as hook:
         assert task.execute(context) is None
-    context["ti"].xcom_pull.assert_called_once_with(
-        task_ids="synthetic_source", key="output_dir", include_prior_dates=False
-    )
+    context["ti"].xcom_pull.assert_not_called()
     hook.assert_called_once_with(postgres_conn_id="synthetic_loader", log_sql=False)
     hook.return_value.run.assert_called_once()
     call = hook.return_value.run.call_args.kwargs
     assert call["sql"] == resources.files("garmin_airflow_operators").joinpath(
         "sql/daily_summary_upsert.sql"
-    ).read_text(encoding="utf-8").format(schema='"test_staging"', table='"test_summary"')
-    assert 'INSERT INTO "test_staging"."test_summary"' in call["sql"]
+    ).read_text(encoding="utf-8")
+    assert "INSERT INTO staging.stg_garmin_daily_summary" in call["sql"]
     assert "(user_profile_id, calendar_date, payload)" in call["sql"]
     assert "ON CONFLICT (user_profile_id, calendar_date)" in call["sql"]
     assert "DO UPDATE SET payload = EXCLUDED.payload" in call["sql"]
@@ -90,19 +87,19 @@ def test_daily_summary_loads_dag_filename_and_packaged_upsert(
     assert (archive.parent / json_filename).read_bytes() == before
 
 
-def test_both_fields_are_templated(task, context):
+def test_both_fields_are_templated(task, context, archive):
     task.render_template_fields(context)
-    assert task.template_fields == ("processing_date", "json_filename")
+    assert task.template_fields == ("json_file", "processing_date")
     assert task.processing_date == "2026-11-09"
-    assert task.json_filename == "2026-11-09.json"
+    assert task.json_file == str(archive)
 
 
-@pytest.mark.parametrize("failure", ["xcom", "outside_root", "marker", "json", "date", "profile"])
+@pytest.mark.parametrize("failure", ["missing_path", "missing_file", "marker", "json", "date", "profile"])
 def test_validation_failure_precedes_sql_loading_and_database(task, archive, context, tmp_path, failure):
-    if failure == "xcom":
-        context["ti"].xcom_pull.return_value = None
-    elif failure == "outside_root":
-        context["ti"].xcom_pull.return_value = str(tmp_path)
+    if failure == "missing_path":
+        task.json_file = None
+    elif failure == "missing_file":
+        context["params"]["json_file"] = str(tmp_path / "outside.json")
     elif failure == "marker":
         (archive.parent / "_SUCCESS").unlink()
     elif failure == "json":
@@ -134,11 +131,19 @@ def test_database_failure_propagates_without_changing_archive(task, archive, con
     context["ti"].xcom_push.assert_not_called()
 
 
-def test_sql_is_declared_as_package_data():
+def test_sql_is_declared_as_package_data(task):
     project = Path(__file__).resolve().parents[1]
     config = tomllib.loads((project / "pyproject.toml").read_text())
     assert config["tool"]["setuptools"]["packages"]["find"]["where"] == ["src"]
     assert "sql/*.sql" in config["tool"]["setuptools"]["package-data"]["garmin_airflow_operators"]
     assert resources.files("garmin_airflow_operators").joinpath(
-        GarminDailySummaryLoadOperator.sql_resource
+        task.sql_resource
     ).is_file()
+
+
+def test_subclass_passes_sql_resource_through_its_constructor(task):
+    assert task.sql_resource == "sql/daily_summary_upsert.sql"
+    assert "sql_resource" not in GarminDailySummaryLoadOperator.__dict__
+    assert not hasattr(task, "archive_root")
+    assert not hasattr(task, "schema")
+    assert not hasattr(task, "table")

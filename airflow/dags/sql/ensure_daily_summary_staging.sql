@@ -20,7 +20,7 @@ CREATE TEMPORARY TABLE expected_daily_summary_staging (
         CHECK (jsonb_typeof(payload) = 'object')
 ) ON COMMIT DROP;
 
-CREATE TABLE IF NOT EXISTS {{ task.params.schema | sql_identifier }}.{{ task.params.table | sql_identifier }}
+CREATE TABLE IF NOT EXISTS staging.stg_garmin_daily_summary
     (LIKE pg_temp.expected_daily_summary_staging INCLUDING ALL);
 
 DO $$
@@ -31,12 +31,12 @@ DECLARE
     actual_constraints text[];
 BEGIN
     IF (SELECT relkind FROM pg_class
-        WHERE oid = '{{ task.params.schema | sql_identifier }}.{{ task.params.table | sql_identifier }}'::regclass) <> 'r' THEN
-        RAISE EXCEPTION 'Schema migration required for {{ task.params.schema | sql_identifier }}.{{ task.params.table | sql_identifier }}: expected an ordinary table';
+        WHERE oid = 'staging.stg_garmin_daily_summary'::regclass) <> 'r' THEN
+        RAISE EXCEPTION 'Schema migration required for staging.stg_garmin_daily_summary: expected an ordinary table';
     END IF;
 
     -- Block ACCESS EXCLUSIVE operations until transaction end; other DDL may run.
-    LOCK TABLE {{ task.params.schema | sql_identifier }}.{{ task.params.table | sql_identifier }} IN ACCESS SHARE MODE;
+    LOCK TABLE staging.stg_garmin_daily_summary IN ACCESS SHARE MODE;
     WITH definitions AS (
         SELECT a.attrelid, jsonb_object_agg(a.attname, jsonb_build_object(
             'type', format_type(a.atttypid, a.atttypmod),
@@ -48,7 +48,7 @@ BEGIN
         FROM pg_attribute a
         LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
         WHERE a.attrelid IN ('pg_temp.expected_daily_summary_staging'::regclass,
-                            '{{ task.params.schema | sql_identifier }}.{{ task.params.table | sql_identifier }}'::regclass)
+                            'staging.stg_garmin_daily_summary'::regclass)
           AND a.attnum > 0 AND NOT a.attisdropped
         GROUP BY a.attrelid
     )
@@ -56,11 +56,11 @@ BEGIN
         (SELECT columns FROM definitions
          WHERE attrelid = 'pg_temp.expected_daily_summary_staging'::regclass),
         (SELECT columns FROM definitions
-         WHERE attrelid = '{{ task.params.schema | sql_identifier }}.{{ task.params.table | sql_identifier }}'::regclass)
+         WHERE attrelid = 'staging.stg_garmin_daily_summary'::regclass)
     INTO expected_columns, actual_columns;
 
     IF expected_columns IS DISTINCT FROM actual_columns THEN
-        RAISE EXCEPTION 'Schema migration required for {{ task.params.schema | sql_identifier }}.{{ task.params.table | sql_identifier }} columns: expected three-column JSONB contract %, found %',
+        RAISE EXCEPTION 'Schema migration required for staging.stg_garmin_daily_summary columns: expected three-column JSONB contract %, found %',
             expected_columns, actual_columns
             USING HINT = 'Apply a reviewed schema migration. This task leaves existing schema and rows unchanged.';
     END IF;
@@ -71,20 +71,20 @@ BEGIN
         FROM pg_constraint WHERE conrelid = 'pg_temp.expected_daily_summary_staging'::regclass;
     SELECT array_agg(pg_get_constraintdef(oid) ORDER BY pg_get_constraintdef(oid))
         INTO actual_constraints
-        FROM pg_constraint WHERE conrelid = '{{ task.params.schema | sql_identifier }}.{{ task.params.table | sql_identifier }}'::regclass;
+        FROM pg_constraint WHERE conrelid = 'staging.stg_garmin_daily_summary'::regclass;
     IF expected_constraints IS DISTINCT FROM actual_constraints THEN
-        RAISE EXCEPTION 'Schema migration required for {{ task.params.schema | sql_identifier }}.{{ task.params.table | sql_identifier }} constraints: expected %, found %',
+        RAISE EXCEPTION 'Schema migration required for staging.stg_garmin_daily_summary constraints: expected %, found %',
             expected_constraints, coalesce(actual_constraints, ARRAY['<none>'])
             USING HINT = 'Require a nondeferrable PRIMARY KEY (user_profile_id, calendar_date) and a validated CHECK (jsonb_typeof(payload) = ''object''). Apply a reviewed migration; existing schema and rows are unchanged.';
     END IF;
     IF (SELECT count(*) FROM pg_index
-        WHERE indrelid = '{{ task.params.schema | sql_identifier }}.{{ task.params.table | sql_identifier }}'::regclass AND indisunique) <> 1
+        WHERE indrelid = 'staging.stg_garmin_daily_summary'::regclass AND indisunique) <> 1
        OR NOT EXISTS (
            SELECT FROM pg_index
-           WHERE indrelid = '{{ task.params.schema | sql_identifier }}.{{ task.params.table | sql_identifier }}'::regclass
+           WHERE indrelid = 'staging.stg_garmin_daily_summary'::regclass
              AND indisprimary AND indisvalid AND indisready AND indislive AND indimmediate
        ) THEN
-        RAISE EXCEPTION 'Schema migration required for {{ task.params.schema | sql_identifier }}.{{ task.params.table | sql_identifier }} indexes: expected only a valid, immediate primary unique index on (user_profile_id, calendar_date)'
+        RAISE EXCEPTION 'Schema migration required for staging.stg_garmin_daily_summary indexes: expected only a valid, immediate primary unique index on (user_profile_id, calendar_date)'
             USING HINT = 'Apply a reviewed migration; existing schema and rows are unchanged.';
     END IF;
 END

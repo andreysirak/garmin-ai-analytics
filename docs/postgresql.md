@@ -466,22 +466,23 @@ strings in the payload without timezone conversion.
 `load_daily_summary_staging` (#38) configures `GarminDailySummaryLoadOperator` from
 `garmin_airflow_operators.daily_summary_load_operator` in the standalone
 `garmin-airflow-operators/` project. It inherits archive validation and database
-execution from `JsonArchiveLoadOperator`. The DAG supplies its source task ID,
-templated processing date and JSON filename, PostgreSQL Connection ID, and
-destination schema/table. `STAGING_SCHEMA` and `DAILY_SUMMARY_TABLE` are defined
-once in the DAG and passed to both setup and loading. A shared validator
-restricts names to the supported ASCII identifier subset (1–63 characters) and
-always double-quotes them, including metadata references in setup. The setup
-SQL reads its configured `task.params`, keeping run-level overrides from
-redirecting only one task. The subclass selects its archive root and packaged
-`sql/daily_summary_upsert.sql`; the DAG does not select the loader SQL resource. The operator
-reads the exact completed archive attempt from
-`ingest_daily_summary`'s `output_dir` XCom in the same DAG run. It requires an empty
-`_SUCCESS` marker and reads `<resolved-processing-date>.json` from that directory;
-it never searches for a latest attempt or uses the loader's own try number.
-The XCom directory must be absolute and resolve under
-`/data/raw/garmin/daily-summary`, including after symlink resolution. Archive and
-marker files must also resolve within that source directory.
+execution from `JsonArchiveLoadOperator`. The DAG supplies
+`json_file=ingest_daily_summary.output_json_file`, the templated processing date,
+and PostgreSQL Connection ID. The daily-summary subclass passes
+`sql_resource="sql/daily_summary_upsert.sql"` explicitly to the base constructor;
+it does not define a resource class attribute. Setup and loading target the
+fixed `staging.stg_garmin_daily_summary` table in their SQL files. There are no
+schema/table constructor arguments, dynamic SQL identifiers, or identifier filters.
+After successful ingestion, the producer publishes the exact full JSON path under
+`OUTPUT_JSON_FILE_XCOM_KEY` (`output_json_file`) and retains the legacy directory
+XCom. Airflow resolves the named file reference before loader execution. The
+loader opens that path directly without an internal `xcom_pull`, filename
+construction, or latest-attempt search. `json_file` and `processing_date` are
+template fields; the latter verifies the payload date independently of its filename.
+The file path must be absolute and comes directly from ingestion; no archive
+root is configured in either loader class. The file's parent
+must contain an empty `_SUCCESS` marker, and JSON/marker symlinks must resolve
+within that parent.
 It validates an object with a positive integer `userProfileId` that fits bigint
 and a valid `calendarDate` in `YYYY-MM-DD` form matching the DAG's processing date.
 Missing files, invalid JSON/keys, and date mismatches fail before database access.

@@ -10,7 +10,10 @@ from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperato
 from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 from garmin_auth.operator import GarminAuthOperator
 from garmin_data_ingestion import GarminIngestionOperator
-from garmin_data_ingestion.operator import OUTPUT_DIR_XCOM_KEY
+from garmin_data_ingestion.operator import (
+    OUTPUT_DIR_XCOM_KEY,
+    OUTPUT_JSON_FILE_XCOM_KEY,
+)
 
 
 def render_and_run(
@@ -40,7 +43,10 @@ def render_and_run(
     }
     task.render_template_fields(context, jinja_env=dag.get_template_env())
     task.execute(context)
-    return context["ti"].xcom_push.call_args.kwargs["value"]
+    return next(
+        call.kwargs["value"] for call in context["ti"].xcom_push.call_args_list
+        if call.kwargs["key"] == OUTPUT_DIR_XCOM_KEY
+    )
 
 
 def test_authentication_gates_independent_tasks_and_retries(dag):
@@ -86,7 +92,7 @@ def test_staging_setup_is_an_independent_transactional_sql_task(dag):
     assert not task.upstream_task_ids
     assert task.downstream_task_ids == {"load_daily_summary_staging"}
     task.render_template_fields({"task": task}, jinja_env=dag.get_template_env())
-    assert 'CREATE TABLE IF NOT EXISTS "staging"."stg_garmin_daily_summary"' in task.sql
+    assert "CREATE TABLE IF NOT EXISTS staging.stg_garmin_daily_summary" in task.sql
     assert "SET LOCAL ROLE garmin_owner" in task.sql
 
 
@@ -226,3 +232,4 @@ def test_failed_and_successful_archives_survive_a_retry(
     assert (Path(output_dir) / "_SUCCESS").read_bytes() == b""
     assert isinstance(output_dir, str) and output_dir.startswith(str(tmp_path))
     assert OUTPUT_DIR_XCOM_KEY == "output_dir"
+    assert retry.output_json_file.key == OUTPUT_JSON_FILE_XCOM_KEY

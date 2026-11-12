@@ -8,34 +8,23 @@ from pathlib import Path
 
 from airflow.exceptions import AirflowException
 from airflow.providers.postgres.hooks.postgres import PostgresHook
-from airflow.sdk import BaseOperator, Context
-
-from garmin_airflow_operators.sql_identifiers import quote_sql_identifier
-
-# Contract with archive-producing tasks, including GarminIngestionOperator.
-OUTPUT_DIR_XCOM_KEY = "output_dir"
+from airflow.sdk import BaseOperator, Context, XComArg
 
 
 def _reject_json_constant(value: str) -> None:
     raise ValueError("Non-standard JSON constant")
 
 
-def read_json_archive(
-    output_dir: object, json_filename: str, *, archive_root: Path
-) -> tuple[dict, str]:
+def read_json_archive(json_file: object) -> tuple[dict, str]:
     """Read a completed archive and return its object and unchanged UTF-8 text."""
-    if not isinstance(output_dir, str) or not Path(output_dir).is_absolute():
-        raise AirflowException("Source task output_dir XCom must be an absolute directory")
-    if not isinstance(json_filename, str) or not json_filename or Path(json_filename).is_absolute():
-        raise AirflowException("json_filename must be a nonempty relative path")
+    if not isinstance(json_file, str) or not Path(json_file).is_absolute():
+        raise AirflowException("json_file must be an absolute file path")
     try:
-        root = archive_root.resolve()
-        directory = Path(output_dir).resolve()
-        if not directory.is_relative_to(root):
-            raise AirflowException("Source task output_dir must stay within the archive root")
+        file_path = Path(json_file)
+        directory = file_path.parent.resolve()
         if not directory.is_dir():
-            raise AirflowException("Source task output_dir is not an existing archive directory")
-        archive = directory / json_filename
+            raise AirflowException("JSON file parent is not an existing archive directory")
+        archive = file_path.resolve()
         marker = directory / "_SUCCESS"
         if any(not path.resolve().is_relative_to(directory) for path in (archive, marker)):
             raise AirflowException("JSON archive and marker must stay within the source directory")
@@ -60,36 +49,26 @@ def read_json_archive(
 class JsonArchiveLoadOperator(BaseOperator):
     """Load a completed source archive using subclass validation and packaged SQL.
 
-    Subclasses define ``archive_root`` and ``sql_resource``, and implement
-    ``prepare_parameters``. SQL paths are relative to ``sql_package``.
+    Callers supply a SQL resource and subclasses implement ``prepare_parameters``.
+    SQL paths are relative to ``sql_package``.
     """
 
-    template_fields = ("processing_date", "json_filename")
-    archive_root: Path | None = None
+    template_fields = ("json_file", "processing_date")
     sql_package = "garmin_airflow_operators"
-    sql_resource: str | None = None
 
     def __init__(
         self,
         *,
-        source_task_id: str,
+        json_file: str | XComArg,
         processing_date: str,
-        json_filename: str,
         postgres_conn_id: str,
-        schema: str,
-        table: str,
+        sql_resource: str,
         **kwargs: object,
     ) -> None:
-        if self.archive_root is None or self.sql_resource is None:
-            raise TypeError("Archive loader subclasses must define archive_root and sql_resource")
-        self.source_task_id = source_task_id
+        self.json_file = json_file
         self.processing_date = processing_date
-        self.json_filename = json_filename
         self.postgres_conn_id = postgres_conn_id
-        quote_sql_identifier(schema)
-        quote_sql_identifier(table)
-        self.schema = schema
-        self.table = table
+        self.sql_resource = sql_resource
         kwargs["do_xcom_push"] = False
         super().__init__(**kwargs)
 
@@ -98,23 +77,12 @@ class JsonArchiveLoadOperator(BaseOperator):
         raise NotImplementedError("Archive loader subclasses must implement prepare_parameters")
 
     def execute(self, context: Context) -> None:
-        output_dir = context["ti"].xcom_pull(
-            task_ids=self.source_task_id,
-            key=OUTPUT_DIR_XCOM_KEY,
-            include_prior_dates=False,
-        )
-        payload, raw_json = read_json_archive(
-            output_dir, self.json_filename, archive_root=self.archive_root
-        )
+        payload, raw_json = read_json_archive(self.json_file)
         parameters = self.prepare_parameters(payload, raw_json)
         try:
             sql = resources.files(self.sql_package).joinpath(self.sql_resource).read_text(encoding="utf-8")
         except (OSError, UnicodeError, ModuleNotFoundError):
             raise AirflowException(f"Cannot read packaged SQL resource: {self.sql_resource}") from None
-        sql = sql.format(
-            schema=quote_sql_identifier(self.schema),
-            table=quote_sql_identifier(self.table),
-        )
         PostgresHook(postgres_conn_id=self.postgres_conn_id, log_sql=False).run(
             sql=sql,
             parameters=parameters,
