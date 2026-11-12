@@ -42,6 +42,8 @@ kind cluster "garmin-ai-analytics"
   analytics stages. It currently runs token validation before either independent
   Java ingestion task. Independently, `ensure_daily_summary_staging` creates and
   verifies the full-response JSONB staging table in one transaction.
+  `load_daily_summary_staging` waits for both setup and daily-summary ingestion,
+  then validates and upserts that successful archive through `garmin_analytics_loader`.
 - The auth Pod runs in `garmin-auth`; its ServiceAccount may get and update only
   the named `garmin-access-token` Secret in `airflow-jobs`.
 - Airflow has a separate, namespace-scoped Pod-launcher Role in both job
@@ -57,9 +59,16 @@ The analytics PostgreSQL instance can be deployed separately. The daily DAG
 creates/verifies `staging.stg_garmin_daily_summary`: one row per user/date with
 the full parsed response in `payload jsonb`. Nested Body
 Battery events stay inside the payload. Raw archive bytes remain unchanged.
-Loading and typed SQL views for selected metrics remain separate follow-up steps.
-The future daily-summary loader must depend on both schema setup and daily-summary
-ingestion.
+The `GarminDailySummaryLoadOperator` in the standalone `garmin-airflow-operators`
+project inherits archive reading and database execution from `JsonArchiveLoadOperator`.
+It reads the ingestion task's current-run `output_dir` XCom, confines its
+resolved directory to the daily-summary archive root, and requires the empty
+`_SUCCESS` marker. The DAG configures the templated JSON filename; the subclass
+validates the profile/date key against the processing date and selects its
+packaged `sql/daily_summary_upsert.sql` before opening a transaction. Corrected responses replace the
+entire payload on the same key. With LocalExecutor, the scheduler reads the
+existing kind archive mount read-only and receives its host GID through Makefile.
+Sleep loading and typed SQL views for selected metrics remain follow-up steps.
 
 ## Java ingestion boundaries
 

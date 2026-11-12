@@ -47,6 +47,7 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: |
+            garmin-airflow-operators/pyproject.toml
             garmin-integration/garmin-auth/python/pyproject.toml
             garmin-integration/garmin-data-ingestion/python/pyproject.toml
       - name: Install Python packages and verification tools
@@ -55,10 +56,12 @@ jobs:
           python -m pip install --constraint "$constraints" \
             apache-airflow-providers-postgres \
             -e "garmin-integration/garmin-auth/python[airflow,dev]" \
-            -e "garmin-integration/garmin-data-ingestion/python[dev]"
+            -e "garmin-integration/garmin-data-ingestion/python[dev]" \
+            -e "garmin-airflow-operators[dev]"
       - name: Lint Python integration
         run: |
           ruff check airflow/dags airflow/tests \
+            garmin-airflow-operators \
             garmin-integration/garmin-auth/python \
             garmin-integration/garmin-data-ingestion/python
       - name: Validate Airflow DAG imports and registration
@@ -66,5 +69,6 @@ jobs:
       - name: Test Python operators and authentication
         run: |
           pytest -q \
+            garmin-airflow-operators/tests \
             garmin-integration/garmin-auth/python/tests \
             garmin-integration/garmin-data-ingestion/python/tests

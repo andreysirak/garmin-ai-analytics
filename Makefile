@@ -1,6 +1,7 @@
 CLUSTER := garmin-ai-analytics
 CONTEXT := kind-$(CLUSTER)
 GARMIN_RAW_DATA_GID := $(shell id -g)
+AIRFLOW_RAW_GROUP := --set 'scheduler.securityContexts.pod.supplementalGroups[0]=$(GARMIN_RAW_DATA_GID)'
 NAMESPACE := airflow
 JOBS_NAMESPACE := airflow-jobs
 AIRFLOW_CHART_VERSION := 1.22.0
@@ -93,7 +94,7 @@ infra-validate:
 		-n $(POSTGRESQL_NAMESPACE) -f $(POSTGRESQL_VALUES) > /dev/null
 	helm template airflow $(AIRFLOW_CHART) -n $(NAMESPACE) \
 		-f infrastructure/helm/airflow/values.yaml \
-		--set-string garminRawDataGid=$(GARMIN_RAW_DATA_GID) > /dev/null
+		--set-string garminRawDataGid=$(GARMIN_RAW_DATA_GID) $(AIRFLOW_RAW_GROUP) > /dev/null
 	@echo "manifests are valid"
 
 infra-up: prepare-garmin-raw-data kind-load-ingestion-java-images kind-load-airflow-image kind-load-auth-image
@@ -101,7 +102,7 @@ infra-up: prepare-garmin-raw-data kind-load-ingestion-java-images kind-load-airf
 	KUBE_CONTEXT="$(CONTEXT)" ./infrastructure/scripts/bootstrap.sh
 	$(HELM) upgrade --install airflow $(AIRFLOW_CHART) \
 		--namespace $(NAMESPACE) -f infrastructure/helm/airflow/values.yaml \
-		--set-string garminRawDataGid=$(GARMIN_RAW_DATA_GID) --wait --timeout 10m
+		--set-string garminRawDataGid=$(GARMIN_RAW_DATA_GID) $(AIRFLOW_RAW_GROUP) --wait --timeout 10m
 	$(MAKE) airflow-operator-rollout
 	KUBE_CONTEXT="$(CONTEXT)" python3 infrastructure/scripts/import_airflow_connections.py \
 		--if-present "$(AIRFLOW_CONNECTIONS_FILE)"

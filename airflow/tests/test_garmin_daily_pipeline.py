@@ -5,25 +5,12 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
-from airflow.dag_processing.dagbag import DagBag
 from airflow.exceptions import AirflowException
 from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
 from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 from garmin_auth.operator import GarminAuthOperator
 from garmin_data_ingestion import GarminIngestionOperator
 from garmin_data_ingestion.operator import OUTPUT_DIR_XCOM_KEY
-
-
-@pytest.fixture(scope="module")
-def parsed_dag():
-    dag_bag = DagBag(dag_folder=str(Path(__file__).parents[1] / "dags"))
-    assert not dag_bag.import_errors
-    return dag_bag.dags["garmin_daily_pipeline"]
-
-
-@pytest.fixture
-def dag(parsed_dag):
-    return deepcopy(parsed_dag)
 
 
 def render_and_run(
@@ -65,6 +52,7 @@ def test_authentication_gates_independent_tasks_and_retries(dag):
         "ingest_daily_summary",
         "ingest_sleep",
         "ensure_daily_summary_staging",
+        "load_daily_summary_staging",
     }
     assert isinstance(auth, GarminAuthOperator)
     assert all(isinstance(task, GarminIngestionOperator) for task in (summary, sleep))
@@ -80,7 +68,8 @@ def test_authentication_gates_independent_tasks_and_retries(dag):
         summary.upstream_task_ids == sleep.upstream_task_ids == {"ensure_garmin_token"}
     )
     assert auth.downstream_task_ids == {"ingest_daily_summary", "ingest_sleep"}
-    assert not summary.downstream_task_ids and not sleep.downstream_task_ids
+    assert summary.downstream_task_ids == {"load_daily_summary_staging"}
+    assert not sleep.downstream_task_ids
     for task in dag.tasks:
         assert task.retries == 2
         assert task.retry_delay.total_seconds() == 60
@@ -94,7 +83,8 @@ def test_staging_setup_is_an_independent_transactional_sql_task(dag):
     assert task.autocommit is False
     assert task.split_statements is False
     assert task.do_xcom_push is False
-    assert not task.upstream_task_ids and not task.downstream_task_ids
+    assert not task.upstream_task_ids
+    assert task.downstream_task_ids == {"load_daily_summary_staging"}
     task.render_template_fields({}, jinja_env=dag.get_template_env())
     assert "CREATE TABLE IF NOT EXISTS staging.stg_garmin_daily_summary" in task.sql
     assert "SET LOCAL ROLE garmin_owner" in task.sql

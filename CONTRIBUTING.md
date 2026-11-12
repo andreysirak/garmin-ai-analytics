@@ -230,22 +230,33 @@ constraints="https://raw.githubusercontent.com/apache/airflow/constraints-3.3.1/
 python -m pip install --constraint "$constraints" \
   apache-airflow-providers-postgres \
   -e "garmin-integration/garmin-auth/python[airflow,dev]" \
-  -e "garmin-integration/garmin-data-ingestion/python[dev]"
-ruff check airflow/dags airflow/tests \
+  -e "garmin-integration/garmin-data-ingestion/python[dev]" \
+  -e "garmin-airflow-operators[dev]"
+ruff check airflow/dags airflow/tests garmin-airflow-operators \
   garmin-integration/garmin-auth/python \
   garmin-integration/garmin-data-ingestion/python
-pytest -q airflow/tests \
+pytest -q airflow/tests garmin-airflow-operators/tests \
   garmin-integration/garmin-auth/python/tests \
   garmin-integration/garmin-data-ingestion/python/tests
 ```
 
-The shared ingestion operator is exported as
-`garmin_data_ingestion.GarminIngestionOperator`; `airflow/Dockerfile` copies this
-package alongside `garmin_auth`. Rebuild/load the Airflow image and run
+The shared ingestion and daily-summary load operators are exported as
+`garmin_data_ingestion.GarminIngestionOperator` and
+`garmin_airflow_operators.GarminDailySummaryLoadOperator`; `airflow/Dockerfile` copies
+both packages alongside `garmin_auth`. Rebuild/load the Airflow image and run
 `make airflow-operator-rollout` after operator changes. Both ingestion image tags
 continue to use the same shared JAR. The DAG constructs the attempt-directory
 template and passes it through the required `output_dir` parameter; `mount_path`
 controls only the stable PVC mount.
+
+The loading project is `garmin-airflow-operators/`, with a standard `src/` layout
+and packaged SQL resources. `GarminDailySummaryLoadOperator` inherits archive
+validation and transactional execution from `JsonArchiveLoadOperator`. Ingestion
+remains in its existing project. The shared archive reader can be unit-tested
+with temporary files without running a DAG or accessing PostgreSQL. The loader's unit tests mock XCom and
+PostgresHook; the DAG tests inspect wiring and rendered dates without executing
+tasks. See [issue #38 verification](docs/verification/0038-daily-summary-loader.md)
+for the unit-only commands.
 
 Python tests mock Kubernetes operations and use synthetic credentials and
 local HTTP fixtures. Ingestion tests cover explicit query dates, opaque query
