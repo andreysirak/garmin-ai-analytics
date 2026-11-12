@@ -467,9 +467,14 @@ strings in the payload without timezone conversion.
 `garmin_airflow_operators.daily_summary_load_operator` in the standalone
 `garmin-airflow-operators/` project. It inherits archive validation and database
 execution from `JsonArchiveLoadOperator`. The DAG supplies its source task ID,
-templated processing date and JSON filename, and PostgreSQL Connection ID. The
-subclass selects its archive root and packaged `sql/daily_summary_upsert.sql`;
-the DAG does not supply SQL or a destination table. The operator
+templated processing date and JSON filename, PostgreSQL Connection ID, and
+destination schema/table. `STAGING_SCHEMA` and `DAILY_SUMMARY_TABLE` are defined
+once in the DAG and passed to both setup and loading. A shared validator
+restricts names to the supported ASCII identifier subset (1–63 characters) and
+always double-quotes them, including metadata references in setup. The setup
+SQL reads its configured `task.params`, keeping run-level overrides from
+redirecting only one task. The subclass selects its archive root and packaged
+`sql/daily_summary_upsert.sql`; the DAG does not select the loader SQL resource. The operator
 reads the exact completed archive attempt from
 `ingest_daily_summary`'s `output_dir` XCom in the same DAG run. It requires an empty
 `_SUCCESS` marker and reads `<resolved-processing-date>.json` from that directory;

@@ -85,8 +85,8 @@ def test_staging_setup_is_an_independent_transactional_sql_task(dag):
     assert task.do_xcom_push is False
     assert not task.upstream_task_ids
     assert task.downstream_task_ids == {"load_daily_summary_staging"}
-    task.render_template_fields({}, jinja_env=dag.get_template_env())
-    assert "CREATE TABLE IF NOT EXISTS staging.stg_garmin_daily_summary" in task.sql
+    task.render_template_fields({"task": task}, jinja_env=dag.get_template_env())
+    assert 'CREATE TABLE IF NOT EXISTS "staging"."stg_garmin_daily_summary"' in task.sql
     assert "SET LOCAL ROLE garmin_owner" in task.sql
 
 

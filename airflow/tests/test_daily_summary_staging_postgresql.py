@@ -78,7 +78,7 @@ def staging(postgres):
     dagbag = DagBag(dag_folder=str(ROOT / "airflow/dags"))
     assert not dagbag.import_errors
     task = dagbag.dags["garmin_daily_pipeline"].get_task("ensure_daily_summary_staging")
-    task.render_template_fields({}, jinja_env=task.dag.get_template_env())
+    task.render_template_fields({"task": task}, jinja_env=task.dag.get_template_env())
 
     def execute():
         with patch.object(BaseHook, "get_connection", return_value=connection):
