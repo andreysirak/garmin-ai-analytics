@@ -2,23 +2,25 @@
 
 Set GARMIN_STAGING_TEST_DSN to its bootstrap-admin DSN. Never use a real database:
 these tests install application roles and create/drop synthetic staging tables.
-Only Airflow's supervisor connection lookup is replaced; SQL runs via the real
-DAG operator and PostgresHook using the restricted schema-manager login.
+Only Airflow's supervisor connection/XCom lookups are replaced; SQL runs via the
+real DAG operators and PostgresHook using the restricted schema-manager/loader logins.
 """
 
 import json
 import os
 import secrets
+from copy import deepcopy
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 from airflow.providers.postgres.hooks.postgres import USE_PSYCOPG3
 
 if USE_PSYCOPG3:
-    from psycopg.errors import RaiseException
+    from psycopg.errors import RaiseException, UntranslatableCharacter
 else:
-    from psycopg2.errors import RaiseException
+    from psycopg2.errors import RaiseException, UntranslatableCharacter
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("GARMIN_STAGING_TEST_DSN"),
@@ -76,7 +78,7 @@ def staging(postgres):
     dagbag = DagBag(dag_folder=str(ROOT / "airflow/dags"))
     assert not dagbag.import_errors
     task = dagbag.dags["garmin_daily_pipeline"].get_task("ensure_daily_summary_staging")
-    task.render_template_fields({}, jinja_env=task.dag.get_template_env())
+    task.render_template_fields({"task": task}, jinja_env=task.dag.get_template_env())
 
     def execute():
         with patch.object(BaseHook, "get_connection", return_value=connection):
@@ -92,23 +94,6 @@ def staging(postgres):
 
 
 PAYLOAD_CHECK = "stg_garmin_daily_summary_payload_object"
-
-
-@pytest.fixture
-def summary_payload():
-    return {
-        "userProfileId": 12,
-        "calendarDate": "2026-11-09",
-        "totalSteps": 8100,
-        "lastSyncTimestampGMT": "2026-11-09T17:18:29.941Z",
-        "wellnessStartTimeLocal": "2026-11-09T00:00:00.0",
-        "bodyBatteryDynamicFeedbackEvent": {
-            "eventTimestampGmt": "2026-11-09T15:33:19.567Z", "bodyBatteryLevel": "HIGH",
-        },
-        "endOfDayBodyBatteryDynamicFeedbackEvent": {"bodyBatteryLevel": "LOW"},
-        "bodyBatteryActivityEventList": [{"eventType": "ACTIVITY", "bodyBatteryImpact": -8}],
-        "unknownGarminField": {"nested": [1, None, "preserved"]},
-    }
 
 
 def table_snapshot(connection):
@@ -273,3 +258,129 @@ def test_view_cannot_masquerade_as_the_staging_table(staging):
         with admin.cursor() as cursor:
             cursor.execute(f"DROP VIEW {TABLE}")
         admin.commit()
+
+
+@pytest.fixture
+def loader(staging, dag):
+    """Real load operator -> Connection -> PostgresHook -> restricted login."""
+    from airflow.providers.common.sql.operators.sql import BaseHook
+    from airflow.sdk import Connection
+    from psycopg2 import sql
+
+    admin, ensure_staging = staging
+    ensure_staging()
+    password = secrets.token_urlsafe(32)
+    with admin.cursor() as cursor:
+        cursor.execute(sql.SQL("ALTER ROLE garmin_loader PASSWORD {}").format(sql.Literal(password)))
+    admin.commit()
+    settings = admin.get_dsn_parameters()
+    connection = Connection(
+        conn_id="garmin_analytics_loader", conn_type="postgres",
+        host=settings["host"], port=int(settings["port"]), schema="garmin_analytics",
+        login="garmin_loader", password=password,
+    )
+
+    def execute(directory):
+        task = deepcopy(dag.get_task("load_daily_summary_staging"))
+        context = {
+            "ti": SimpleNamespace(xcom_pull=lambda **_: str(directory / "2026-11-09.json"), try_number=99),
+            "dag_run": SimpleNamespace(conf={"date": "2026-11-09"}),
+            "params": {"date": None},
+        }
+        task.render_template_fields(context, jinja_env=dag.get_template_env())
+
+        def get_connection(conn_id):
+            assert conn_id == "garmin_analytics_loader"
+            return connection
+
+        with patch.object(BaseHook, "get_connection", side_effect=get_connection):
+            task.execute(context)
+
+    return admin, execute
+
+
+def write_loader_archive(tmp_path, payload, attempt=4):
+    directory = tmp_path / "daily-summary/2026-11-09" / str(attempt)
+    directory.mkdir(parents=True)
+    path = directory / "2026-11-09.json"
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    (directory / "_SUCCESS").touch()
+    return path
+
+
+def test_loader_inserts_replays_and_replaces_full_payload(loader, tmp_path, summary_payload):
+    admin, execute = loader
+    archive = write_loader_archive(tmp_path, summary_payload)
+    original = archive.read_bytes()
+
+    def rows():
+        with admin.cursor() as cursor:
+            cursor.execute(f"SELECT user_profile_id, calendar_date::text, payload FROM {TABLE}")
+            return cursor.fetchall()
+
+    execute(archive.parent)
+    assert rows() == [(12, "2026-11-09", summary_payload)]
+    execute(archive.parent)
+    assert rows() == [(12, "2026-11-09", summary_payload)]
+
+    corrected = {**summary_payload, "totalSteps": 9200, "newField": "Garmin's correction"}
+    corrected.pop("unknownGarminField")
+    corrected["bodyBatteryActivityEventList"] = [{"eventType": "REST", "bodyBatteryImpact": 5}]
+    correction = write_loader_archive(tmp_path, corrected, attempt=5)
+    corrected_bytes = correction.read_bytes()
+    execute(correction.parent)
+    assert rows() == [(12, "2026-11-09", corrected)]
+    assert archive.read_bytes() == original
+    assert correction.read_bytes() == corrected_bytes
+    assert (archive.parent / "_SUCCESS").read_bytes() == b""
+
+
+@pytest.mark.parametrize("bad_payload, error", [
+    (b'{"userProfileId":', "not valid JSON"),
+    (b'{"userProfileId":12,"calendarDate":"2026-11-08"}', "does not match"),
+])
+def test_loader_invalid_archive_cannot_write(loader, tmp_path, summary_payload, bad_payload, error):
+    from airflow.exceptions import AirflowException
+    from airflow.providers.postgres.hooks.postgres import PostgresHook
+
+    admin, execute = loader
+    archive = write_loader_archive(tmp_path, summary_payload)
+    execute(archive.parent)
+    before = table_snapshot(admin)
+    invalid = write_loader_archive(tmp_path, {}, attempt=5)
+    invalid.write_bytes(bad_payload)
+    with patch.object(PostgresHook, "get_conn") as connect, \
+         pytest.raises(AirflowException, match=error):
+        execute(invalid.parent)
+    connect.assert_not_called()
+    assert table_snapshot(admin) == before
+    assert invalid.read_bytes() == bad_payload
+
+
+def test_loader_preserves_json_numeric_precision(loader, tmp_path, summary_payload):
+    admin, execute = loader
+    archive = write_loader_archive(tmp_path, summary_payload)
+    precise = "0.12345678901234567890123456789"
+    contents = archive.read_text().rstrip()[:-1] + ', "precise": ' + precise + "}\n"
+    archive.write_text(contents)
+    execute(archive.parent)
+    with admin.cursor() as cursor:
+        cursor.execute(f"SELECT payload ->> 'precise' FROM {TABLE}")
+        assert cursor.fetchall() == [(precise,)]
+    assert archive.read_text() == contents
+
+
+def test_loader_database_rejection_preserves_committed_row_and_archives(loader, tmp_path, summary_payload):
+    admin, execute = loader
+    archive = write_loader_archive(tmp_path, summary_payload)
+    original = archive.read_bytes()
+    execute(archive.parent)
+    before = table_snapshot(admin)
+    # JSON permits NUL escapes, but PostgreSQL JSONB cannot store them.
+    rejected = write_loader_archive(tmp_path, {**summary_payload, "unsupported": "\x00"}, attempt=5)
+    rejected_bytes = rejected.read_bytes()
+    with pytest.raises(UntranslatableCharacter):
+        execute(rejected.parent)
+    assert table_snapshot(admin) == before
+    assert archive.read_bytes() == original
+    assert rejected.read_bytes() == rejected_bytes

@@ -84,6 +84,22 @@ apiServer:
     requests: {cpu: 100m, memory: 512Mi}
     limits: {memory: 1Gi}
 scheduler:
+  # LocalExecutor runs the Python loader here. The archive PVC belongs to
+  # airflow-jobs, so read the same existing kind host mount without a second PVC.
+  extraVolumes:
+    - name: garmin-raw-data
+      hostPath:
+        path: /mnt/garmin-raw-data
+        type: Directory
+  extraVolumeMounts:
+    - name: garmin-raw-data
+      mountPath: /data/raw/garmin
+      readOnly: true
+  securityContexts:
+    pod:
+      runAsUser: 50000
+      fsGroup: 0
+      # Makefile adds the host archive GID as a supplemental group.
   resources:
     requests: {cpu: 200m, memory: 512Mi}
     limits: {memory: 1Gi}

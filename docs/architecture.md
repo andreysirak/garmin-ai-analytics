@@ -42,6 +42,8 @@ kind cluster "garmin-ai-analytics"
   analytics stages. It currently runs token validation before either independent
   Java ingestion task. Independently, `ensure_daily_summary_staging` creates and
   verifies the full-response JSONB staging table in one transaction.
+  `load_daily_summary_staging` waits for both setup and daily-summary ingestion,
+  then validates and upserts that successful archive through `garmin_analytics_loader`.
 - The auth Pod runs in `garmin-auth`; its ServiceAccount may get and update only
   the named `garmin-access-token` Secret in `airflow-jobs`.
 - Airflow has a separate, namespace-scoped Pod-launcher Role in both job
@@ -57,9 +59,19 @@ The analytics PostgreSQL instance can be deployed separately. The daily DAG
 creates/verifies `staging.stg_garmin_daily_summary`: one row per user/date with
 the full parsed response in `payload jsonb`. Nested Body
 Battery events stay inside the payload. Raw archive bytes remain unchanged.
-Loading and typed SQL views for selected metrics remain separate follow-up steps.
-The future daily-summary loader must depend on both schema setup and daily-summary
-ingestion.
+The `GarminDailySummaryLoadOperator` in the standalone `garmin-airflow-operators`
+project inherits archive reading and database execution from `JsonArchiveLoadOperator`.
+The DAG passes `json_file=ingest_daily_summary.output_json_file`; Airflow resolves
+that named XCom reference to the successful ingestion file path. The loader opens
+that exact absolute file path and requires an empty
+`_SUCCESS` marker in its parent. The subclass
+validates the profile/date key against the processing date and selects its
+packaged `sql/daily_summary_upsert.sql` through the base constructor before
+opening a transaction. Both setup and UPSERT SQL name the fixed
+`staging.stg_garmin_daily_summary` table. Corrected responses replace the
+entire payload on the same key. With LocalExecutor, the scheduler reads the
+existing kind archive mount read-only and receives its host GID through Makefile.
+Sleep loading and typed SQL views for selected metrics remain follow-up steps.
 
 ## Java ingestion boundaries
 
@@ -174,15 +186,17 @@ settings, logging, startup timeout, and execution timeout are preserved.
 
 After successful completion, Python calls
 `ti.xcom_push(key="output_dir", value=self.output_dir)`. This string is the same
-final attempt directory supplied to Java. Java owns creation of `<date>.json` and
-`_SUCCESS` within that directory; Python does not construct or publish their paths.
+final attempt directory supplied to Java. Python also publishes the full path to
+`<date>.json` under `output_json_file` after success, exposing the reference as
+`self.output_json_file = self.output[OUTPUT_JSON_FILE_XCOM_KEY]`. Java owns creation
+of the JSON file and `_SUCCESS` within that directory.
 The provider may also publish its normal Pod name/namespace metadata. Java never
 writes an Airflow XCom return file, and `do_xcom_push=False` disables the provider's
-XCom sidecar. Future downstream tasks pull `output_dir` from the appropriate
-ingestion task, mount the same PVC root, and **require `_SUCCESS` before reading
-JSON**. An unmarked directory can contain partial or complete JSON; neither file
-existence nor the presence of metadata proves completion. No downstream reader or
-analytics is added here.
+XCom sidecar. Existing consumers can keep pulling `output_dir`. The daily-summary
+loader receives the file reference directly through its templated `json_file`
+field and performs no internal XCom lookup. All readers need access to the archive
+and **require an empty `_SUCCESS` in the file's parent before reading JSON**. An unmarked directory can contain partial or complete JSON; neither file
+existence nor the presence of metadata proves completion.
 
 `GarminApiException`, `InvalidResponseException`, and `IngestionExecutionException`
 distinguish HTTP/transport, JSON-syntax, and configuration/archive failures.

@@ -2,7 +2,7 @@
 
 Issue [#36](https://github.com/andreysirak/garmin-ai-analytics/issues/36) deploys
 `garmin_analytics` independently of the Airflow metadata database. Schema creation
-is implemented by #37 in the daily DAG; loading archived summaries belongs to #38.
+is implemented by #37 in the daily DAG; #38 loads archived daily summaries.
 
 ## Deploy and inspect
 
@@ -273,8 +273,8 @@ preserved with metadata backups.
 The manual, unscheduled `garmin_analytics_connection_check` DAG uses
 `PostgresHook(postgres_conn_id="garmin_analytics_loader")` and runs `SELECT 1`.
 DAG source contains only the connection ID, with no host, username, or password.
-It does not call Garmin or run migrations. Future daily loader tasks must use
-the same connection-ID pattern. The pinned Airflow image includes PostgresHook.
+It does not call Garmin or run migrations. The daily-summary loader uses the same
+connection-ID pattern. The pinned Airflow image includes PostgresHook.
 
 From the Mac, use the same loader password interactively:
 
@@ -463,21 +463,50 @@ inside `payload`; the loader must not project only a known subset of fields.
 Timestamp strings, whether offsetless or containing `Z`/another offset, stay
 strings in the payload without timezone conversion.
 
-Issue #38 will read a completed archive attempt (requiring `_SUCCESS`), obtain the
-profile/date key, and store that key and the complete object in one transaction.
+`load_daily_summary_staging` (#38) configures `GarminDailySummaryLoadOperator` from
+`garmin_airflow_operators.daily_summary_load_operator` in the standalone
+`garmin-airflow-operators/` project. It inherits archive validation and database
+execution from `JsonArchiveLoadOperator`. The DAG supplies
+`json_file=ingest_daily_summary.output_json_file`, the templated processing date,
+and PostgreSQL Connection ID. The daily-summary subclass passes
+`sql_resource="sql/daily_summary_upsert.sql"` explicitly to the base constructor;
+it does not define a resource class attribute. Setup and loading target the
+fixed `staging.stg_garmin_daily_summary` table in their SQL files. There are no
+schema/table constructor arguments, dynamic SQL identifiers, or identifier filters.
+After successful ingestion, the producer publishes the exact full JSON path under
+`OUTPUT_JSON_FILE_XCOM_KEY` (`output_json_file`) and retains the legacy directory
+XCom. Airflow resolves the named file reference before loader execution. The
+loader opens that path directly without an internal `xcom_pull`, filename
+construction, or latest-attempt search. `json_file` and `processing_date` are
+template fields; the latter verifies the payload date independently of its filename.
+The file path must be absolute and comes directly from ingestion; no archive
+root is configured in either loader class. The file's parent
+must contain an empty `_SUCCESS` marker, and JSON/marker symlinks must resolve
+within that parent.
+It validates an object with a positive integer `userProfileId` that fits bigint
+and a valid `calendarDate` in `YYYY-MM-DD` form matching the DAG's processing date.
+Missing files, invalid JSON/keys, and date mismatches fail before database access.
+The task stores that key and the complete object in one transaction using
+parameterized SQL with autocommit disabled through `garmin_analytics_loader`.
 Only the key and payload are stored in PostgreSQL; original response bytes stay
-in the raw archive. The intended upsert target remains
-`ON CONFLICT (user_profile_id, calendar_date)`. Loading a corrected response should
-replace the full payload while keeping earlier raw files available for replay.
-The load task must depend on **both** `ensure_daily_summary_staging` and
-`ingest_daily_summary`.
+in the raw archive. `ON CONFLICT (user_profile_id, calendar_date) DO UPDATE`
+replaces the full payload, including Garmin corrections, while keeping earlier
+raw files available for replay. The load task depends on **both**
+`ensure_daily_summary_staging` and `ingest_daily_summary` with `all_success`.
+
+The current LocalExecutor runs Python tasks in the scheduler. Its Helm values
+mount the existing kind node directory `/mnt/garmin-raw-data` read-only at
+`/data/raw/garmin`; Makefile passes the archive's host GID as a scheduler
+supplemental group. Apply the updated Helm values using `make infra-up` before
+running the loader on an existing deployment. Direct Helm users must also pass
+`--set 'scheduler.securityContexts.pod.supplementalGroups[0]=<archive-host-gid>'`.
+No new PVC, database schema, or credential change is required by the loader.
 
 Typed SQL views will later extract only metrics needed for analysis from the
 JSONB object. Timestamp interpretation and explicit GMT/local timezone rules
 belong to those typed projections, with tests independent of the session timezone.
 Nested events remain in the payload until an actual query needs another model.
-Loader implementation, typed views, and downstream row-quality tasks are separate
-steps and are not introduced by #37.
+Typed views, sleep loading, and downstream row-quality tasks remain separate steps.
 
 ### Exact versioned schema-contract verification
 
@@ -521,3 +550,5 @@ login. They install roles, execute the real DAG operator/PostgresHook as
 `garmin_schema_manager`, and remove their synthetic staging schema afterward.
 Never point them at a database containing real data. See the
 [verification results](verification/0037-daily-summary-staging.md).
+Loader-specific checks and deployment limits are recorded in
+[issue #38 verification](verification/0038-daily-summary-loader.md).

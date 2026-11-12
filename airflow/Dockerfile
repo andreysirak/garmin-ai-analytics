@@ -1,6 +1,9 @@
 FROM apache/airflow:3.3.1
 
 COPY --chown=airflow:root \
+    garmin-airflow-operators/src/garmin_airflow_operators \
+    /opt/airflow/garmin-python/garmin_airflow_operators
+COPY --chown=airflow:root \
     garmin-integration/garmin-data-ingestion/python/src/garmin_data_ingestion \
     /opt/airflow/garmin-python/garmin_data_ingestion
 COPY --chown=airflow:root \

@@ -4,6 +4,7 @@
 
 | Type | What changed | Breaking change | Upgrade steps | PR |
 | --- | --- | --- | --- | --- |
+| Added | Daily-summary Python loader uses successful ingestion XCom, validates archive keys/date, and transactionally upserts the full JSONB payload without changing raw files (#38) | Daily runs now require garmin_analytics_loader and scheduler archive access | Apply updated Airflow Helm values through make infra-up for the read-only archive mount and host GID; see docs/postgresql.md | |
 | Added | Transactional ensure_daily_summary_staging task in the daily DAG, versioned three-column full-response JSONB contract, payload-object and exact schema checks and separate schema Connection (#37) | New task requires garmin_analytics_schema; existing wide tables require a reviewed migration | Configure the schema Connection for new installations; migrate/backfill wide tables from original archives separately; see docs/postgresql.md | |
 | Changed | make infra-up imports config/connections.json after Airflow readiness; absent files preserve existing connections and invalid files fail import | Local connection file becomes authoritative on infra-up | Fill in the loader password; use AIRFLOW_CONNECTIONS_FILE to override the path | |
 | Fixed | Discover the native PostgreSQL client in Homebrew libpq when psql is not on PATH; use the same executable in preflight and Mac connection checks | No | Install libpq if absent; no PATH change required for Make checks | |

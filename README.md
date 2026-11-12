@@ -151,9 +151,13 @@ Sign in to Airflow as `admin` using the printed password, then trigger or unpaus
 
 `garmin_daily_pipeline` is the workflow for the full ingestion-to-analytics flow;
 currently its implemented stages authenticate and archive daily summary and sleep
-data, and independently create/verify the daily-summary JSONB staging schema.
-That table stores one complete response per user/date;
-loading and typed SQL views are separate follow-up steps. See the
+data, independently create/verify the daily-summary JSONB staging schema, and
+load the successful daily-summary archive after both setup and ingestion succeed.
+The loader uses `garmin_analytics_loader` to upsert the complete response per
+user/date, replacing the payload on reruns while preserving raw archive files.
+Loading operators live in the standalone [garmin-airflow-operators](garmin-airflow-operators/README.md)
+Python project; ingestion remains in `garmin-integration`. Typed SQL views remain
+a follow-up step. See the
 [staging contract and Connection setup](docs/postgresql.md#daily-summary-staging-contract-37).
 When upgrading from `garmin_daily_ingestion`, pause the old DAG before enabling
 the new one. Airflow
@@ -201,13 +205,18 @@ run configuration, then `params.date`, then the logical date (or run start date
 when no logical date is available). Each task has its own Airflow retries.
 
 After a successful Pod exit, Python publishes the output-directory path as a
-string under the task's `output_dir` XCom key. Future tasks can pull it with
+string under the task's existing `output_dir` XCom key. Current callers can pull it with
 `ti.xcom_pull(task_ids="ingest_sleep", key="output_dir")`. This is the same directory
 passed to Java through `--output-dir`; Java creates `<requested-date>.json` and
 `_SUCCESS` inside it. Downstream Pods need the same shared PVC mount and must
 require `_SUCCESS` in that directory before reading JSON.
 
-The handoff contains only the directory path. Java does not write an Airflow XCom
+Ingestion also publishes the full `<output-dir>/<requested-date>.json` path under
+`output_json_file`. The daily-summary DAG passes
+`json_file=ingest_daily_summary.output_json_file` to the loader, making the exact
+file handoff visible. `processing_date` validates the payload date; the loader
+opens the supplied path directly and requires an empty `_SUCCESS` in its parent.
+Only paths are published, never payloads. Java does not write an Airflow XCom
 return file, and no XCom sidecar is used.
 
 Responses are checked only for syntactically valid JSON, then saved as the original

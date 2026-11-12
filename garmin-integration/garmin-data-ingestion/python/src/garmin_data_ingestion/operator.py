@@ -15,6 +15,7 @@ from kubernetes.client import models as k8s
 DEFAULT_IMAGE = "garmin-daily-summary:local"
 DEFAULT_MOUNT_PATH = "/data/raw/garmin"
 OUTPUT_DIR_XCOM_KEY = "output_dir"
+OUTPUT_JSON_FILE_XCOM_KEY = "output_json_file"
 TOKEN_SECRET = "garmin-access-token"
 TOKEN_SECRET_KEY = "access-token"
 TOKEN_FILE_NAME = "token"
@@ -35,8 +36,9 @@ class GarminIngestionOperator(KubernetesPodOperator):
     ``date`` names the archive file only; include any request date in ``query_params``.
     The DAG supplies a distinct, templated ``output_dir`` for each attempt; the
     operator passes it unchanged to Java. The PVC stays mounted at ``mount_path``.
-    Synchronous execution publishes only the output directory after the Pod succeeds,
-    without an XCom sidecar. Downstream readers must require the empty ``_SUCCESS`` marker.
+    Synchronous execution publishes the output directory and full JSON file path
+    after the Pod succeeds, without an XCom sidecar. Downstream readers must
+    require the empty ``_SUCCESS`` marker.
     """
 
     template_fields = (
@@ -140,6 +142,7 @@ class GarminIngestionOperator(KubernetesPodOperator):
             execution_timeout=timedelta(minutes=10),
             **kwargs,
         )
+        self.output_json_file = self.output[OUTPUT_JSON_FILE_XCOM_KEY]
 
     def execute(self, context: Context) -> None:
         if not self.output_dir.startswith("/"):
@@ -161,3 +164,7 @@ class GarminIngestionOperator(KubernetesPodOperator):
 
         super().execute(context)
         context["ti"].xcom_push(key=OUTPUT_DIR_XCOM_KEY, value=self.output_dir)
+        context["ti"].xcom_push(
+            key=OUTPUT_JSON_FILE_XCOM_KEY,
+            value=str(PurePosixPath(self.output_dir) / f"{self.date}.json"),
+        )

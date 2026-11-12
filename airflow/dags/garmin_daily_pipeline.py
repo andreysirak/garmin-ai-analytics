@@ -1,4 +1,4 @@
-"""Daily Garmin ingestion and analytics staging schema setup."""
+"""Daily Garmin ingestion and full-response daily-summary staging."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 
 from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 from airflow.sdk import DAG, Param
+from garmin_airflow_operators import GarminDailySummaryLoadOperator
 from garmin_auth.operator import GarminAuthOperator
 from garmin_data_ingestion import GarminIngestionOperator
 
@@ -63,4 +64,11 @@ with DAG(
         query_params={"date": PROCESSING_DATE},
         image="garmin-sleep:local",
     )
+    load_daily_summary_staging = GarminDailySummaryLoadOperator(
+        task_id="load_daily_summary_staging",
+        json_file=ingest_daily_summary.output_json_file,
+        processing_date=PROCESSING_DATE,
+        postgres_conn_id="garmin_analytics_loader",
+    )
     ensure_garmin_token >> [ingest_daily_summary, ingest_sleep]
+    [ensure_daily_summary_staging, ingest_daily_summary] >> load_daily_summary_staging
