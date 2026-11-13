@@ -42,7 +42,8 @@ config:
     simple_auth_manager_users: "admin:admin"
     simple_auth_manager_passwords_file: /opt/airflow/simple-auth/passwords.json
   api:
-    expose_config: "False"
+    # Allow Admin > Configuration; Airflow 3.3.1 always masks sensitive values.
+    expose_config: "True"
 
 dags:
   persistence:
