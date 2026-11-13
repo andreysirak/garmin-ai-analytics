@@ -149,6 +149,10 @@ make airflow-ui
 
 Sign in to Airflow as `admin` using the printed password, then trigger or unpause `garmin_daily_pipeline`. Manual runs support an optional date in `YYYY-MM-DD` format.
 
+The existing `admin` user has the administrator role through SimpleAuthManager.
+Admin → Configuration is enabled with `[api] expose_config=True`; Airflow 3.3.1
+always masks sensitive configuration values.
+
 `garmin_daily_pipeline` is the workflow for the full ingestion-to-analytics flow;
 currently its implemented stages authenticate and archive daily summary and sleep
 data, independently create/verify the daily-summary JSONB staging schema, and
