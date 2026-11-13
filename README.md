@@ -200,6 +200,10 @@ make airflow-ui
 
 Sign in to Airflow as `admin` using the printed password, then trigger or unpause `garmin_daily_pipeline`. Manual runs support an optional date in `YYYY-MM-DD` format.
 
+The existing `admin` user has the administrator role through SimpleAuthManager.
+Admin → Configuration is enabled with `[api] expose_config=True`; Airflow 3.3.1
+always masks sensitive configuration values.
+
 To reset this DAG's Airflow metadata and run history, pause it and finish
 active tasks first, then run:
 
