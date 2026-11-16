@@ -2,8 +2,9 @@
 
 PostgreSQL persistence across kind recreation is configured under
 [database storage](database-storage.md): separate Mac-backed directories, static
-PV/PVC bindings, mount/permission checks before startup, and protected credential
-snapshots. Existing node-local installations require a one-time migration.
+PV/PVC bindings and mount/permission checks before startup. The single private
+setup file preserves credentials and the original Fernet key across rebuilds.
+Existing node-local installations require a one-time migration.
 
 **Environment:** This is a local development deployment running on the developer's Mac, not a production-grade or always-on service. See [Kubernetes execution decision](decisions/0001-kubernetes-execution.md) for why local kind was chosen over managed cloud services and what a GCP Cloud Composer migration would require.
 
@@ -237,14 +238,24 @@ node-level compromise, or a compromised trusted scheduler or auth image.
 
 ### Local credential bootstrap
 
+External secret-manager integration is intentionally deferred for simplicity in
+the current local environment. One protected file supplies setup/rebuild values;
+Kubernetes Secrets remain the runtime delivery mechanism, and Airflow encrypts
+connection passwords in metadata with Fernet. The developer manages file backups
+and credential rotation. See [the local workaround and future integration boundary](credentials.md#why-this-local-workaround-exists).
+
 Copy `config/credentials.example.json` to the ignored
-`config/credentials.local.json`, set its permissions to `0600`, and place the
-API key in the `garmin.api_key` field. `make infra-up` validates the JSON,
-checks the expected Kubernetes context, and streams the key to `kubectl` stdin
-to create `garmin-api-credentials` in `garmin-auth`. It does not write a
-temporary plaintext manifest or include the key in command arguments or
-normal output. If the file is absent, any existing Secret is preserved. If
-the Secret already exists, bootstrap does not rotate or overwrite it.
+`config/credentials.local.json` and set its permissions to `0600`. It contains
+`garmin.api_key`, the five configured PostgreSQL passwords, and Airflow's Fernet
+key. Each deployment validates its required fields and checks live Secrets before
+applying changes. Missing Secrets are created through stdin; mismatches fail
+with entry names only. Existing Secret values are never overwritten. Analytics
+deployment does not require a Garmin key. Role passwords and Airflow's managed
+passwords come from this same file without interactive setup. The checked-in
+`config/connections.example.json` defines both Garmin connections; optional local
+overrides are merged, passwords resolved in memory, and the validated payload sent
+through stdin directly to Airflow's model. No credential snapshot or JSON import
+file is generated. See [account mapping and adoption](credentials.md).
 
 The config file is local plaintext and remains sensitive despite its file
 permissions and Git ignore rule. Protect the workstation, backups, and editor

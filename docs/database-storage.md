@@ -12,8 +12,8 @@ There is no fallback to dynamically provisioned node-local database storage.
 The existing pinned charts/images are retained: Airflow chart 1.22.0 supplies
 PostgreSQL 16.1.0; analytics uses PostgreSQL 17.11. Reattachment is not a major
 version upgrade. Confirm the actual running versions before migrating an existing
-installation with local overrides. Database files, markers, private Secret
-snapshots, and backups stay outside version control and Docker build contexts.
+installation with local overrides. Database files, markers, the private setup
+file, and backups stay outside version control and Docker build contexts.
 
 ## First installation
 
@@ -63,25 +63,18 @@ pointing a populated database at an empty directory.
 
 ## Preserve credentials with data
 
-Bootstrap saves private snapshots in `data/postgresql/credentials/`, with mode
-0700 on the directory and 0600 on the JSON files. It saves the original database
-Secrets, Airflow metadata connection, Fernet key, API/JWT keys, and UI password.
-Secrets are restored through stdin before bootstrap can generate missing values;
-their values are never printed by these helpers. Analytics role passwords remain
-inside PostgreSQL and the ignored local Airflow connection configuration.
+Use the single mode-0600 `config/credentials.local.json` file described in
+[credential setup and existing-cluster adoption](credentials.md). It contains all
+five PostgreSQL passwords, the original Airflow Fernet key, and Garmin API key.
+The deployment validates required fields and existing Secrets before applying
+changes. It creates absent Secrets through stdin and never overwrites conflicting
+values. Analytics roles and managed Airflow connections reuse these same values.
+No separate Secret snapshot files are generated or restored.
 
-```bash
-make db-secrets-export    # Explicitly refresh both snapshots from the current cluster
-make db-secrets-restore   # Restore missing Secrets after both namespaces exist
-```
-
-Export requires both deployments' Secrets. It is available on the old cluster
-before the new mounts exist. Restore refuses to overwrite differing live Secrets.
-After intentionally rotating a Secret, verify it matches the database before
-explicitly exporting again. Retained database files without a local snapshot or
-their existing live Secrets cause bootstrap to stop instead of generating fresh
-credentials. Keep an additional protected copy of snapshots with your backups;
-losing the Fernet key makes previously encrypted Airflow values unreadable.
+Before rebuilding an existing cluster, populate this file with the credentials
+already in use and verify both `make analytics-credentials-check` and
+`make airflow-credentials-check`. Preserve it with the database backups. Losing
+its original Fernet key prevents decryption of existing Airflow values.
 
 ## One-time migration from node-local PVCs
 
@@ -92,7 +85,8 @@ and checking backups. This migration requires a maintenance window.
 1. Pause DAGs, let active ingestion/loading finish, and stop other writers.
    Record the running PostgreSQL majors/images, expected Airflow run history,
    analytics row counts, and date coverage locally without publishing private data.
-2. Run `make db-secrets-export`. Preserve `config/connections.json`, raw archives,
+2. Adopt the existing values in `config/credentials.local.json`, including the
+   original Fernet key. Preserve optional custom connections, raw archives,
    and other needed volumes (Airflow logs remain node-local).
 3. Use the manual dump commands in
    [the existing backup procedure](postgresql.md#existing-clusters-back-up-before-recreation)
@@ -105,20 +99,20 @@ and checking backups. This migration requires a maintenance window.
    pending; this change does not claim to implement them.
 4. Only after those backups are checked, explicitly delete the old cluster with
    `make cluster-delete`, prepare the new directories, and run `make cluster-create`.
-5. Recreate namespaces/resources and restore the original Secrets before starting
-   either database:
+5. Recreate namespaces/resources and create the original Secrets from the local
+   file before starting either database:
 
    ```bash
    kubectl --context kind-garmin-ai-analytics apply -k infrastructure/kubernetes/overlays/local
    kubectl --context kind-garmin-ai-analytics apply -k infrastructure/kubernetes/postgresql
-   make db-secrets-restore
+   KUBE_CONTEXT=kind-garmin-ai-analytics bash infrastructure/scripts/bootstrap.sh
    make postgresql-up
    ```
 
 6. Restore analytics as the trusted bootstrap admin, using the existing ownership
    contract (`garmin_owner`) and preserving/restoring application role passwords.
    Reapply `make postgresql-roles` and verify the loader/schema-manager credentials
-   against the unchanged local connection configuration.
+   against the unchanged single-file configuration.
 7. Start only the Airflow database while restoring metadata. The following
    temporary Helm invocation keeps Airflow components and schema migration stopped:
 
@@ -153,7 +147,8 @@ Their explicit rebuild path should use this sequence and must not automatically
 delete a cluster or initialize replacement storage when checks fail:
 
 1. Pause scheduling, finish active work, and save optional logical backups (#35).
-   Export current Secrets with `make db-secrets-export`.
+   Confirm that the private setup file contains all original credentials/Fernet
+   key and matches the live cluster before deletion.
 2. Stop database clients and cleanly stop both PostgreSQL StatefulSets. For the
    current single-node stack, after stopping Airflow clients:
 
@@ -165,11 +160,11 @@ delete a cluster or initialize replacement storage when checks fail:
    ```
 
 3. Manually run `make cluster-delete`, then `make cluster-create`. Keep both host
-   directories, their markers, and the credential snapshots unchanged. There is
+   directories, their markers, and `config/credentials.local.json` unchanged. There is
    no need to rerun preparation, and it is not a rebuild/reset command.
-4. Run `make postgresql-up`, then `make infra-up`. Bootstrap restores original
-   Secrets before the servers start. PostgreSQL reopens its existing data files;
-   no dumps are imported. Verify history, analytics counts and encrypted values
+4. Run `make postgresql-up`, then `make infra-up`. Bootstrap recreates missing
+   Secrets from that file before the servers start. PostgreSQL reopens its existing
+   data files; no dumps are imported. Verify history, analytics counts and encrypted values
    before unpausing DAGs.
 
 Host-backed persistence is not a backup: disk loss, manual deletion, SQL mistakes,
@@ -178,18 +173,21 @@ filesystem quotas. `Retain` preserves host files, but deleting/recreating a PVC
 within an existing cluster can leave its PV Released and require deliberate
 rebinding; never delete the directory to fix a binding.
 
-## Verification status
+## Verification
 
-Tests and infrastructure rendering have **not been run** for this change. No
-live cluster, database, VM configuration, credentials, or data were changed.
+See [recorded focused credential validation](verification/0058-credentials.md).
 
-When checks are authorized, run `python3 -m unittest discover -s infrastructure/tests -v`
-and `make infra-validate`. Then use an isolated disposable kind cluster, synthetic
-Secrets and rows, and separate host directories/ports; never bind a second server
-to production data directories. Confirm both databases retain row/history values
-after node deletion/recreation without importing dumps. Preserve the same Fernet
-key and check an encrypted Connection. Check negative cases: omit/swap a mount,
-remove a marker, supply the wrong identity/major, or revoke database write access.
-Preflight must stop deployment, or the database Pod must remain in init failure
-with its PostgreSQL container never started. Record actual results separately;
-these acceptance scenarios are not yet verified.
+Focused offline checks are `python3 -m unittest discover -s infrastructure/tests -v`
+and `make infra-validate`. They use synthetic configuration or manifest rendering;
+neither deploys to the live cluster. Credential file modes, per-target validation,
+Secret conflicts, safe stdin transport, role-password initialization/preservation,
+and generated/custom connection handling have focused tests.
+
+Full recreation acceptance remains separate: use an isolated disposable kind
+cluster, synthetic credentials and rows, and separate host directories/ports.
+Never bind a second server to the live directories. Check both database histories
+survive deletion/recreation without dump imports and that the original Fernet key
+still decrypts a Connection. Omit/swap a mount, remove a marker, provide the wrong
+identity/major, or revoke write access; preflight or the init container must fail
+before PostgreSQL starts. Record actual executed results rather than treating
+this checklist as completed verification.

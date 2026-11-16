@@ -5,8 +5,7 @@
     "host": "garmin-postgresql.garmin-analytics.svc.cluster.local",
     "port": 5432,
     "schema": "garmin_analytics",
-    "login": "garmin_schema_manager",
-    "password": "SET_GARMIN_SCHEMA_MANAGER_PASSWORD_MANUALLY"
+    "login": "garmin_schema_manager"
   },
   "garmin_analytics_loader": {
     "conn_type": "postgres",
@@ -14,7 +13,6 @@
     "host": "garmin-postgresql.garmin-analytics.svc.cluster.local",
     "port": 5432,
     "schema": "garmin_analytics",
-    "login": "garmin_loader",
-    "password": "SET_GARMIN_LOADER_PASSWORD_MANUALLY"
+    "login": "garmin_loader"
   }
 }

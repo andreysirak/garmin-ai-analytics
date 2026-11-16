@@ -4,12 +4,15 @@
 
 - Preserve Airflow metadata and Garmin analytics PostgreSQL files on separate
   host-backed kind mounts; check identities, majors, and UID write permissions
-  before server startup. Save/restore original database and Airflow Secrets in
-  protected ignored files. Document first-install migration and explicit rebuild
+  before server startup. Recreate missing database and Airflow Secrets from the
+  single private setup file. Document first-install migration and explicit rebuild
   coordination with #35/#55. Existing node-local PVCs require migration (#58).
 
 | Type | What changed | Breaking change | Upgrade steps | PR |
 | --- | --- | --- | --- | --- |
+| Docs | Explain the deliberate local credential-file workaround while external secrets-manager integration is deferred for simplicity, including runtime Secret delivery and future lookup replacement | No | None | |
+| Fixed | Keep both Garmin connection definitions and descriptions in connections.example.json without passwords; merge optional local overrides, resolve private passwords and register through stdin without generated password files | Managed password fields in connection definitions are rejected | Keep passwords only in credentials.local.json; see docs/credentials.md | |
+| Changed | Use credentials.local.json for all five PostgreSQL passwords, Garmin API key and original Airflow Fernet key; configure role passwords noninteractively, derive managed Airflow connections, reject credential conflicts and remove Secret snapshots | Existing files need the new fields with their current live values | Follow docs/credentials.md before deployment; normal setup is make postgresql-up then make infra-up | |
 | Added | Daily-summary Python loader uses successful ingestion XCom, validates archive keys/date, and transactionally upserts the full JSONB payload without changing raw files (#38) | Daily runs now require garmin_analytics_loader and scheduler archive access | Apply updated Airflow Helm values through make infra-up for the read-only archive mount and host GID; see docs/postgresql.md | |
 | Added | Transactional ensure_daily_summary_staging task in the daily DAG, versioned three-column full-response JSONB contract, payload-object and exact schema checks and separate schema Connection (#37) | New task requires garmin_analytics_schema; existing wide tables require a reviewed migration | Configure the schema Connection for new installations; migrate/backfill wide tables from original archives separately; see docs/postgresql.md | |
 | Changed | make infra-up imports config/connections.json after Airflow readiness; absent files preserve existing connections and invalid files fail import | Local connection file becomes authoritative on infra-up | Fill in the loader password; use AIRFLOW_CONNECTIONS_FILE to override the path | |

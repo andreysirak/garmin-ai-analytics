@@ -21,7 +21,6 @@ def load_script(name):
 
 
 preflight = load_script("check_postgresql_host_port")
-connections = load_script("import_airflow_connections")
 client = load_script("postgresql_client")
 
 
@@ -76,79 +75,6 @@ class PostgreSQLPreflightTest(unittest.TestCase):
         self.assertEqual(run.call_count, 1)
         self.assertEqual(run.call_args.args[0], ["docker", "inspect", "synthetic-control-plane"])
 
-
-class AirflowConnectionTemplateTest(unittest.TestCase):
-    def setUp(self):
-        self.example = json.loads((ROOT / "config/connections.example.json").read_text())
-
-    def test_example_requires_manual_password(self):
-        with self.assertRaisesRegex(ValueError, "password.*manually"):
-            connections.validate(self.example)
-
-    def test_loader_can_only_use_the_internal_service_and_dedicated_role(self):
-        self.example.pop("garmin_analytics_schema")
-        self.example["garmin_analytics_loader"]["password"] = "synthetic-only"
-        connections.validate(self.example)
-        for key, value in [("host", "127.0.0.1"), ("login", "garmin_analytics"), ("port", 30432)]:
-            changed = json.loads(json.dumps(self.example))
-            changed["garmin_analytics_loader"][key] = value
-            with self.subTest(key=key), self.assertRaises(ValueError):
-                connections.validate(changed)
-
-    def test_schema_setup_requires_a_separate_dedicated_login(self):
-        for connection in self.example.values():
-            connection["password"] = "synthetic-only"
-        connections.validate(self.example)
-        schema = self.example["garmin_analytics_schema"]
-        for key, value in [("host", "127.0.0.1"), ("login", "garmin_loader"),
-                           ("login", "garmin_analytics"), ("port", 30432)]:
-            changed = {"garmin_analytics_schema": {**schema, key: value}}
-            with self.subTest(key=key, value=value), self.assertRaises(ValueError):
-                connections.validate(changed)
-        connections.validate({"garmin_analytics_schema": schema})
-
-    def test_rejects_unknown_connections_and_empty_payload(self):
-        for contents in ({}, {"unknown": {}}, []):
-            with self.subTest(contents=contents), self.assertRaises(ValueError):
-                connections.validate(contents)
-
-    def test_automatic_import_skips_missing_file_without_touching_airflow(self):
-        with tempfile.TemporaryDirectory() as directory:
-            missing = str(Path(directory) / "absent.json")
-            with patch("sys.argv", ["import", "--if-present", missing]), \
-                 patch.object(connections.subprocess, "run") as run:
-                connections.main()
-        run.assert_not_called()
-
-    def test_manual_import_reports_missing_file(self):
-        with tempfile.TemporaryDirectory() as directory:
-            missing = str(Path(directory) / "absent.json")
-            with patch("sys.argv", ["import", missing]), \
-                 patch.object(connections.subprocess, "run") as run:
-                with self.assertRaisesRegex(SystemExit, "Connection file is missing"):
-                    connections.main()
-        run.assert_not_called()
-
-    def test_automatic_import_rejects_present_placeholder_without_touching_airflow(self):
-        with patch("sys.argv", ["import", "--if-present", str(ROOT / "config/connections.example.json")]), \
-             patch.object(connections.subprocess, "run") as run:
-            with self.assertRaisesRegex(SystemExit, "Invalid connection file"):
-                connections.main()
-        run.assert_not_called()
-
-    def test_automatic_import_streams_valid_file_to_airflow(self):
-        for connection in self.example.values():
-            connection["password"] = "synthetic-only"
-        contents = json.dumps(self.example)
-        with tempfile.TemporaryDirectory() as directory:
-            configured = Path(directory) / "connections.json"
-            configured.write_text(contents)
-            with patch("sys.argv", ["import", "--if-present", str(configured)]), \
-                 patch.object(connections.subprocess, "run") as run:
-                connections.main()
-        self.assertEqual(run.call_count, 1)
-        self.assertEqual(run.call_args.kwargs["input"], contents)
-        self.assertTrue(run.call_args.kwargs["check"])
 
 
 if __name__ == "__main__":

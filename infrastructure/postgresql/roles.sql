@@ -1,5 +1,6 @@
 -- Run as the bootstrap superuser in garmin_analytics, including after a restore.
--- Passwords are deliberately absent: set the loader password with psql \password.
+-- Passwords remain outside SQL source; configure_postgresql_roles.py supplies
+-- unset passwords from the private setup file through psql's encrypted \password.
 \set ON_ERROR_STOP on
 BEGIN;
 DO $$

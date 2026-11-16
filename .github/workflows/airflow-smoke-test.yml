@@ -29,7 +29,28 @@ jobs:
           make prepare-database-storage
           make cluster-create
       - name: Deploy infrastructure
-        run: make infra-up
+        run: |
+          # Disposable CI configuration only; never copy real credentials into the workflow.
+          python3 - <<'PY'
+          import base64, json, os
+          from pathlib import Path
+          path = Path("config/credentials.local.json")
+          credentials = json.loads(Path("config/credentials.example.json").read_text())
+          credentials["garmin"]["api_key"] = "synthetic-smoke-api-key"
+          credentials["airflow"]["database"] = {
+              "postgres_password": "synthetic-smoke-admin",
+              "password": "synthetic-smoke-metadata",
+          }
+          credentials["airflow"]["fernet_key"] = base64.urlsafe_b64encode(os.urandom(32)).decode()
+          credentials["postgresql"] = {
+              "garmin_analytics_password": "synthetic-smoke-bootstrap",
+              "garmin_schema_manager_password": "synthetic-smoke-schema",
+              "garmin_loader_password": "synthetic-smoke-loader",
+          }
+          with os.fdopen(os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600), "w") as stream:
+              json.dump(credentials, stream)
+          PY
+          make infra-up
       - name: Run DAG smoke test
         run: make test-infra
       - name: Show Kubernetes diagnostics

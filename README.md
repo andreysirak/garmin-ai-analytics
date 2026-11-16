@@ -92,56 +92,60 @@ The project currently **collects and archives** data; it does not yet compute he
 
 Install Docker (or Colima), kind, kubectl, Helm, Python 3.12, and OpenSSL. Analytics PostgreSQL also requires the local `psql` client (`brew install libpq` on macOS). Make checks find Homebrew libpq automatically, even when its `bin` directory is not on PATH. Java 25 and Maven are needed for direct Java development; Make targets can build Java code using Docker.
 
-### 1. Create the cluster
-
-```bash
-make prepare-database-storage  # First installation only; see migration guide for existing databases
-make cluster-create
-make infra-validate
-```
-
-Both PostgreSQL databases use separate host directories under `data/postgresql/`.
-Database mount identities and write permissions are checked before deployment.
-Existing node-local PVCs require a one-time backup/restore migration; do not delete
-the cluster until backups and credential snapshots are checked. See
-[database storage and explicit rebuild](docs/database-storage.md).
-
-### 2. Configure Garmin credentials
+### 1. Configure credentials once
 
 ```bash
 cp config/credentials.example.json config/credentials.local.json
 chmod 600 config/credentials.local.json
 ```
 
-Edit `config/credentials.local.json` and set your Garmin Personal API key. The file is ignored by Git. Existing Kubernetes credentials are not overwritten automatically.
+Fill in the five PostgreSQL passwords, original/new Airflow Fernet key, and
+`garmin.api_key` in this single private file. See [credential setup](docs/credentials.md)
+for the exact account mapping, fresh-key generation, and adopting an existing
+cluster's values without rotating them. Existing Secrets are never overwritten;
+conflicts name the entry without printing its value.
 
-### 3. Deploy Airflow and ingestion workloads
+An external secrets manager is intentionally deferred to keep the local setup
+simple. The private file is the current workaround for setup and rebuilds;
+Kubernetes Secrets still supply runtime credentials, and Airflow encrypts stored
+connection passwords with Fernet. See [the rationale and trade-offs](docs/credentials.md#why-this-local-workaround-exists).
+
+### 2. Prepare the cluster
 
 ```bash
-make infra-up
+make prepare-database-storage  # First installation only; migrate existing databases first
+make cluster-create
+make infra-validate
 ```
 
-This builds and loads the local images, applies Kubernetes resources, bootstraps credentials when available, and deploys Airflow.
-After Airflow is ready, it imports `config/connections.json` if present. An absent
-file is skipped; a present but invalid file makes deployment return an error.
+Both PostgreSQL databases use separate host directories under `data/postgresql/`.
+Mount identities and write permissions are checked before deployment. Existing
+node-local PVCs need a one-time backup/restore migration; keep the original
+credentials and Fernet key in the local file. See [database storage and rebuild](docs/database-storage.md).
 
-To deploy the separate analytics database (no Garmin credentials required):
+### 3. Deploy PostgreSQL and Airflow
 
 ```bash
 make postgresql-up
-make postgresql-loader-password
-# Copy config/connections.example.json to config/connections.json,
-# chmod 600 it, and manually fill in the loader password before importing.
-# If Airflow is not deployed yet, make infra-up will import the file automatically.
-make airflow-connections-import
-make postgresql-verify
+make infra-up
 ```
 
-See [Local analytics PostgreSQL](docs/postgresql.md) for connection details,
-credential handling, storage limits, and `make postgresql-rollback` scope.
-The Mac endpoint is `127.0.0.1:5432`; Airflow uses the internal Service through
-connection ID `garmin_analytics_loader`. Existing kind clusters without the host
-mapping fail safely and require manual backup/recreation as documented.
+`postgresql-up` requires only the three analytics passwords, not a Garmin API key.
+It noninteractively configures the bootstrap, schema-manager, and loader accounts,
+preserving existing passwords. `infra-up` uses the same file for Airflow's database
+accounts, Fernet key, Garmin API Secret, and the schema/loader connection passwords.
+No password prompts, `postgresql-loader-password`, or manually duplicated
+`config/connections.json` passwords are needed for normal setup or a kind rebuild.
+
+`config/connections.example.json` defines where and as whom Airflow connects;
+`config/credentials.local.json` supplies the passwords. Both Garmin PostgreSQL
+definitions are checked in without password fields and used by default. Optional
+`config/connections.json` (mode 0600) provides local field overrides and additional
+connections. Resolved definitions are validated and sent through stdin directly
+to Airflow, without generated password files. Existing entries are preserved.
+See [credential handling](docs/credentials.md)
+and [local analytics PostgreSQL](docs/postgresql.md) for details. The Mac endpoint
+is `127.0.0.1:5432`; Airflow uses the internal analytics Service.
 
 ### 4. Run the pipeline
 
@@ -293,6 +297,7 @@ Interested in Java, Python, Airflow, Kubernetes, or data engineering? Contributi
 - [Architecture and security](docs/architecture.md)
 - [Local analytics PostgreSQL deployment and rollback](docs/postgresql.md)
 - [Persistent database directories, migration, and cluster rebuild](docs/database-storage.md)
+- [Single-file credentials, account mapping, and existing-cluster adoption](docs/credentials.md)
 - [Kubernetes execution decision](docs/decisions/0001-kubernetes-execution.md)
 - [Java ingestion and Airflow integration decision](docs/decisions/0002-java-garmin-data-ingestion.md)
 - [Contributing, Story/Task workflow and PR review standards](CONTRIBUTING.md)

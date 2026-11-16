@@ -1,6 +1,5 @@
 """Exercise storage identity, mount, permission and credential failures without a cluster."""
 
-import base64
 import importlib.util
 import json
 import subprocess
@@ -22,7 +21,6 @@ def load_script(name):
 
 
 storage = load_script("local_database_storage")
-credentials = load_script("database_credentials")
 
 
 class DatabaseStorageTest(unittest.TestCase):
@@ -91,113 +89,6 @@ class DatabaseStorageTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "expected host storage"):
                 storage.check_node("synthetic")
 
-
-class DatabaseCredentialsTest(unittest.TestCase):
-    def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
-        root = patch.object(credentials, "STORAGE_ROOT", self.root)
-        root.start()
-        self.addCleanup(root.stop)
-        self.database = "garmin-analytics"
-        self.secret = {
-            "apiVersion": "v1", "kind": "Secret", "type": "Opaque",
-            "metadata": {"namespace": self.database, "name": "garmin-postgresql"},
-            "data": {"password": base64.b64encode(b"synthetic-only").decode()},
-        }
-
-    def save_snapshot(self):
-        with patch.object(credentials, "read_secret", return_value=self.secret):
-            credentials.save("kind-synthetic", self.database)
-
-    def test_snapshot_is_private_and_omits_cluster_specific_metadata(self):
-        self.save_snapshot()
-        snapshot = self.root / "credentials/garmin-analytics.json"
-        self.assertEqual(snapshot.stat().st_mode & 0o777, 0o600)
-        self.assertEqual(snapshot.parent.stat().st_mode & 0o777, 0o700)
-        self.assertEqual(json.loads(snapshot.read_text()), [self.secret])
-
-    def test_missing_secret_is_restored_over_stdin(self):
-        self.save_snapshot()
-        with patch.object(credentials, "read_secret", return_value=None), \
-             patch.object(credentials, "kubectl") as kubectl:
-            credentials.restore("kind-synthetic", self.database)
-        self.assertEqual(kubectl.call_args.args, ("kind-synthetic", "create", "-f", "-"))
-        self.assertEqual(json.loads(kubectl.call_args.kwargs["contents"]), self.secret)
-
-    def test_live_credentials_are_never_overwritten(self):
-        self.save_snapshot()
-        changed = {**self.secret, "data": {"password": base64.b64encode(b"other").decode()}}
-        with patch.object(credentials, "read_secret", return_value=changed), \
-             patch.object(credentials, "kubectl") as kubectl:
-            with self.assertRaisesRegex(ValueError, "differ"):
-                credentials.restore("kind-synthetic", self.database)
-        kubectl.assert_not_called()
-
-    def test_retained_data_cannot_get_fresh_credentials(self):
-        volume = self.root / self.database
-        volume.mkdir()
-        (volume / "pgdata").mkdir()
-        with patch.object(credentials, "read_secret", return_value=None):
-            with self.assertRaisesRegex(ValueError, "original credentials"):
-                credentials.restore("kind-synthetic", self.database)
-        self.assertFalse((self.root / "credentials").exists())
-
-    def test_failed_export_leaves_previous_snapshot_intact(self):
-        self.save_snapshot()
-        snapshot = self.root / "credentials/garmin-analytics.json"
-        previous = snapshot.read_bytes()
-        with patch.object(credentials, "read_secret", return_value=None):
-            with self.assertRaises(ValueError):
-                credentials.save("kind-synthetic", self.database)
-        self.assertEqual(snapshot.read_bytes(), previous)
-
-    def test_api_failure_is_not_treated_as_a_missing_secret(self):
-        self.save_snapshot()
-        with patch.object(credentials, "read_secret",
-                          side_effect=subprocess.CalledProcessError(1, "kubectl")), \
-             patch.object(credentials, "kubectl") as kubectl:
-            with self.assertRaises(subprocess.CalledProcessError):
-                credentials.restore("kind-synthetic", self.database)
-        kubectl.assert_not_called()
-
-    def test_unsafe_snapshot_is_rejected_before_api_writes(self):
-        self.save_snapshot()
-        snapshot = self.root / "credentials/garmin-analytics.json"
-        snapshot.chmod(0o644)
-        with patch.object(credentials, "kubectl") as kubectl:
-            with self.assertRaisesRegex(ValueError, "0600"):
-                credentials.restore("kind-synthetic", self.database)
-        kubectl.assert_not_called()
-
-    def test_unexpected_secret_and_invalid_base64_are_rejected(self):
-        for item in [
-            {**self.secret, "metadata": {"namespace": "other", "name": "garmin-postgresql"}},
-            {**self.secret, "data": {"password": "not-base64"}},
-        ]:
-            with self.subTest(item=item), self.assertRaises(ValueError):
-                credentials.validate([item], self.database)
-
-    def test_airflow_snapshot_requires_original_fernet_and_database_keys(self):
-        items = [
-            {"apiVersion": "v1", "kind": "Secret", "type": "Opaque",
-             "metadata": {"namespace": "airflow", "name": name},
-             "data": {key: base64.b64encode(f"synthetic-{name}-{key}".encode()).decode()
-                      for key in keys}}
-            for name, keys in credentials.SECRETS["airflow"].items()
-        ]
-        with patch.object(credentials, "read_secret", side_effect=items):
-            credentials.save("kind-synthetic", "airflow")
-        with patch.object(credentials, "read_secret", return_value=None), \
-             patch.object(credentials, "kubectl") as kubectl:
-            credentials.restore("kind-synthetic", "airflow")
-        restored = {item["metadata"]["name"]: item["data"] for item in (
-            json.loads(call.kwargs["contents"]) for call in kubectl.call_args_list
-        )}
-        originals = {item["metadata"]["name"]: item["data"] for item in items}
-        self.assertEqual(restored, originals)
-        self.assertEqual(restored["airflow-fernet-key"], originals["airflow-fernet-key"])
 
 
 if __name__ == "__main__":
