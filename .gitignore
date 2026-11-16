@@ -25,3 +25,5 @@ airflow/logs/*
 # Raw and generated data
 data/*
 !data/.gitkeep
+# Optional logical dumps tracked by issue #35.
+backups/postgres/

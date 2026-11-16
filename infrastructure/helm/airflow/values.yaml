@@ -9,6 +9,7 @@ executor: LocalExecutor
 allowPodLaunching: false
 useStandardNaming: true
 
+# Bootstrap supplies an empty key for fresh local setups; preserve existing encryption keys.
 fernetKeySecretName: airflow-fernet-key
 apiSecretKeySecretName: airflow-api-secret-key
 jwtSecretName: airflow-jwt-secret
@@ -21,6 +22,8 @@ data:
 
 postgresql:
   enabled: true
+  # Chart 13.2.24 retains PostgreSQL 16; do not change majors during reattachment.
+  storageIdentity: ""
   auth:
     enablePostgresUser: true
     existingSecret: airflow-postgresql
@@ -30,12 +33,51 @@ postgresql:
     persistence:
       enabled: true
       size: 2Gi
+      existingClaim: airflow-postgresql-data
+    podSecurityContext:
+      runAsUser: 1001  # Make overrides this and the container UID with the Mac owner.
+      supplementalGroups: []  # Make supplies the host directory's group.
+    initContainers:
+      - name: verify-database-storage
+        image: busybox:1.37
+        securityContext:
+          runAsNonRoot: true
+          # Inherit the pod UID supplied by Make, matching the PostgreSQL container.
+          runAsGroup: 1001
+          allowPrivilegeEscalation: false
+        env:
+          - name: EXPECTED_STORAGE_ID
+            value: '{{ required "postgresql.storageIdentity must be supplied by Make" .Values.storageIdentity }}'
+        command:
+          - sh
+          - -ec
+          - |
+            test "$(cat /storage/.volume-id)" = "$EXPECTED_STORAGE_ID"
+            if [ -d /storage/data ]; then
+              test "$(stat -c %u /storage/data)" = "$(id -u)" || {
+                echo "PostgreSQL data directory owner must match its process UID" >&2
+                exit 1
+              }
+              entries=$(ls -A /storage/data)
+              if [ -n "$entries" ]; then
+                test "$(cat /storage/data/PG_VERSION)" = 16
+              fi
+              probe=$(mktemp /storage/data/.write-check.XXXXXX)
+              rm "$probe"
+            fi
+            probe=$(mktemp /storage/.write-check.XXXXXX)
+            rm "$probe"
+        volumeMounts:
+          - name: data
+            mountPath: /storage
     resources:
       requests: {cpu: 100m, memory: 256Mi}
       limits: {memory: 512Mi}
 
 config:
   core:
+    # LocalExecutor workers share the scheduler Pod's memory budget.
+    parallelism: "4"
     load_examples: "False"
     dags_are_paused_at_creation: "True"
     auth_manager: airflow.api_fastapi.auth.managers.simple.simple_auth_manager.SimpleAuthManager
@@ -102,7 +144,7 @@ scheduler:
       # Makefile adds the host archive GID as a supplemental group.
   resources:
     requests: {cpu: 200m, memory: 512Mi}
-    limits: {memory: 1Gi}
+    limits: {memory: 2Gi}
 dagProcessor:
   resources:
     requests: {cpu: 100m, memory: 384Mi}

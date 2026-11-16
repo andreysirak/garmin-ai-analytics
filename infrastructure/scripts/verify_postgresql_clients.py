@@ -30,8 +30,8 @@ def main() -> None:
         text=True, capture_output=True,
     )
     if result.returncode:
-        raise RuntimeError("Airflow loader connection failed; set the loader password, import "
-                           "connections.local.json, and ensure PostgresHook is installed")
+        raise RuntimeError("Airflow loader connection failed; check credentials.local.json, run "
+                           "postgresql-up and infra-up, and ensure PostgresHook is installed")
     print("PASS: Airflow garmin_analytics_loader connects through the internal Service", flush=True)
 
 

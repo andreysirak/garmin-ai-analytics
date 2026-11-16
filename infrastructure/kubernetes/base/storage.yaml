@@ -25,6 +25,34 @@ spec:
     requests:
       storage: 1Gi
 ---
+# Airflow metadata lives on its own Mac-backed kind mount, outside Helm.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: airflow-postgresql-data
+spec:
+  capacity:
+    storage: 2Gi
+  accessModes: ["ReadWriteOnce"]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: airflow-postgresql-data
+  hostPath:
+    path: /mnt/postgresql-airflow
+    type: Directory
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: airflow-postgresql-data
+  namespace: airflow
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: airflow-postgresql-data
+  volumeName: airflow-postgresql-data
+  resources:
+    requests:
+      storage: 2Gi
+---
 # Airflow task logs (shared by scheduler and API server).
 apiVersion: v1
 kind: PersistentVolumeClaim

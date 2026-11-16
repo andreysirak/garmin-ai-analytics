@@ -1,304 +1,138 @@
 # Local analytics PostgreSQL
 
-Issue [#36](https://github.com/andreysirak/garmin-ai-analytics/issues/36) deploys
-`garmin_analytics` independently of the Airflow metadata database. Schema creation
-is implemented by #37 in the daily DAG; #38 loads archived daily summaries.
+`garmin_analytics` runs independently of Airflow metadata. The daily DAG creates
+its staging schema (#37) and loads successful raw archives (#38). Both databases
+use separate host-backed volumes that survive kind node recreation (#58).
 
-## Deploy and inspect
+## Setup and account configuration
 
-From the repository root, with the local kind cluster running:
+Start with the existing template:
 
 ```bash
-make cluster-create       # Only needed if the cluster does not already exist
-make postgresql-up
-make postgresql-status
+cp config/credentials.example.json config/credentials.local.json
+chmod 600 config/credentials.local.json
 ```
 
-`postgresql-up` applies the namespace and PVC, bootstraps the password Secret, and
-installs/upgrades the pinned Bitnami PostgreSQL chart. It does not build Garmin images, deploy
-Airflow, or require Garmin credentials. Repeating the command preserves the
-existing password and data.
+Fill in the local values once, using **existing** passwords and the original
+Fernet key for an existing encrypted cluster. For a fresh local setup, leave
+`"fernet_key": ""`; no key generation is required and Airflow stores connection
+passwords unencrypted in metadata. With storage/kind prepared, deploy with:
 
-Before any Kubernetes writes it checks the kind node's Docker port mapping and
-the local `psql` executable. After deployment it applies the version-controlled
-roles/grants as the bootstrap admin and checks password-authenticated access at
-`127.0.0.1:5432`. Install the Mac client with `brew install libpq`. Preflight and
-connection checks find it through `brew --prefix libpq` when `psql` is not on
-`PATH`. For manual `psql` commands, add `$(brew --prefix libpq)/bin` to `PATH` or
-use the full executable path.
+```bash
+make postgresql-up
+make infra-up
+```
+
+`postgresql-up` reads only the three analytics passwords and works without a
+Garmin API key. It validates configuration/live Secrets before Kubernetes changes,
+deploys the pinned chart, authenticates existing application logins before role
+changes, applies `roles.sql`, and initializes only unset passwords noninteractively.
+`infra-up` uses the same file for Airflow's PostgreSQL credentials/Fernet key and
+passwords for the two managed Garmin connection definitions in
+`config/connections.example.json`. No normal-setup password prompts or manually
+copied `config/connections.json` passwords remain. See the
+[complete credential mapping and adoption instructions](credentials.md).
+
+| Account | Purpose | Local password entry |
+| --- | --- | --- |
+| `garmin_analytics` | Bootstrap superuser; trusted setup/backup/restore | `postgresql.garmin_analytics_password` |
+| `garmin_owner` | NOLOGIN owner; holds schemas and application objects | None |
+| `garmin_schema_manager` | Dedicated schema setup login; can SET ROLE to owner | `postgresql.garmin_schema_manager_password` |
+| `garmin_loader` | Staging SELECT/INSERT/UPDATE/DELETE and sequence access | `postgresql.garmin_loader_password` |
+
+Airflow's separate PostgreSQL instance has its own `postgres` administrator and
+`airflow` metadata login; both passwords are included in the same template.
+Analytics uses `POSTGRES_USER=garmin_analytics`, with
+`auth.enablePostgresUser: false`, so no additional analytics `postgres` password
+is configured. Existing passwords are never automatically reset to fit the file.
+Secret conflicts identify the local entry without printing values; API errors stop
+setup instead of being treated as missing Secrets.
+
+Roles/grants remain in `infrastructure/postgresql/roles.sql`. `make postgresql-roles`
+reapplies them and checks/initializes application passwords from the local file.
+Existing password-bearing roles must authenticate through the Service before any
+role/grant changes. Native `psql` handles client-side password encryption from
+stdin with no TTY and captured output. Plaintext passwords are not interpolated
+into SQL source, command arguments, or server statements.
+
+The loader is not an owner/admin and cannot create/drop application objects.
+The schema login must use `SET LOCAL ROLE garmin_owner` inside its transaction.
+PUBLIC database/schema privileges are revoked; new staging objects inherit loader
+grants only when created as `garmin_owner`. The daily DAG uses separate
+`garmin_analytics_schema` and `garmin_analytics_loader` definitions from the
+checked-in example, resolved with these exact passwords. The old `garmin_analytics_migrations` Connection is not
+removed automatically; retain it until any older consumers have been reviewed.
+
+## Deployment and connections
 
 | Resource | Value |
 | --- | --- |
 | Namespace | `garmin-analytics` |
 | Helm release / StatefulSet / Service | `garmin-postgresql` |
-| Helm chart | `oci://registry-1.docker.io/bitnamicharts/postgresql`, version `18.12.18` |
-| Database / bootstrap user | `garmin_analytics` |
-| Cluster endpoint | `garmin-postgresql.garmin-analytics.svc.cluster.local:5432` |
-| Mac endpoint | `127.0.0.1:5432` → kind node port `30432` → PostgreSQL port `5432` |
-| Password | Secret `garmin-postgresql`, key `password` |
-| PersistentVolumeClaim | `garmin-postgresql-data`, 5 GiB, ReadWriteOnce |
-| PostgreSQL data directory | `/var/lib/postgresql/data/pgdata` on the PVC |
+| Chart | `oci://registry-1.docker.io/bitnamicharts/postgresql`, version `18.12.18` |
+| Image | Docker Official Image `postgres:17.11-bookworm` |
+| Database / bootstrap login | `garmin_analytics` |
+| Internal endpoint | `garmin-postgresql.garmin-analytics.svc.cluster.local:5432` |
+| Mac endpoint | `127.0.0.1:5432`, kind NodePort `30432` |
+| Bootstrap Secret | `garmin-postgresql`, key `password` |
+| PVC / static PV | `garmin-postgresql-data`, 5 GiB, ReadWriteOnce, Retain |
+| Host data | `data/postgresql/garmin-analytics/pgdata` |
 
-The upstream chart manages a single-replica StatefulSet, Services, ServiceAccount,
-NetworkPolicy, and PodDisruptionBudget. StatefulSet updates replace its one Pod
-before starting a server against the same data directory. The headless Service
-uses ClusterIP; `garmin-postgresql` is a NodePort Service on port
-30432, published on the Mac only through a loopback-bound kind host mapping.
-Airflow continues using `airflow-postgresql` in namespace `airflow`;
-neither its database nor its release is changed by these targets.
+The chart values adapt the official image to UID/GID 999, its data directory,
+`POSTGRES_DB`, a writable root filesystem, and readiness without Bitnami's
+initialization marker. The fixed PostgreSQL 17 image/major is unchanged.
+`global.security.allowInsecureImages=true` permits this non-Bitnami image; it does
+not disable TLS certificate verification. Bitnami-specific replication, metrics,
+backup/password-update jobs, and volume permission containers remain disabled.
+Storage guard init containers verify marker, major, and write access first.
 
-### New kind cluster: complete setup order
+The external PVC and password Secret are outside the Helm release. Rollback or
+uninstall never deletes their host files. Static capacities are requests rather
+than enforced filesystem quotas. See [migration and rebuild](database-storage.md)
+before deploying this configuration over older node-local PVCs.
 
-1. Run `make cluster-create`. This creates the node's loopback port mapping;
-   PostgreSQL itself is not running yet. An existing cluster is left unchanged.
-2. Run `make postgresql-up`. It generates the bootstrap password if missing,
-   deploys PostgreSQL, applies roles/grants, and verifies Mac access on port 5432.
-3. Run `make postgresql-loader-password` and `make postgresql-schema-manager-password`
-   to choose separate passwords for `garmin_loader` and `garmin_schema_manager`.
-4. Create `config/connections.json` from `config/connections.example.json` if it
-   does not already exist, set permissions to `0600`, and manually enter the same
-   passwords. Keep the internal Service host, port 5432, database
-   `garmin_analytics`, and dedicated logins from the template.
-5. Run `make infra-up` to build/load workload images, deploy Airflow, wait for
-   scheduler/DAG processor readiness, and import `config/connections.json` if it
-   exists. Configure Garmin credentials separately for Garmin ingestion.
-6. Run `make postgresql-verify` to check permissions, both clients, and persistence.
-
-`config/connections.json` and `config/connections.local.json` are both excluded
-from Git and Docker build contexts. If the connection file was newly added to
-staging before the ignore rule was added, remove it from staging before entering
-a password:
+Preflight also checks the fixed loopback port mapping and native `psql` client
+before Kubernetes writes. Install `libpq` on macOS (`brew install libpq`); Make
+finds unlinked Homebrew installations automatically. The loopback mapping is
+created with kind and cannot be added to an existing node in place.
 
 ```bash
-git restore --staged -- config/connections.json
-git status --short -- config/connections.json
-git check-ignore -v config/connections.json
+make postgresql-status
+make airflow-connections-import  # Re-derive managed connections and import optional custom entries
 ```
 
-For a newly added file, restore removes it from the index without deleting or
-changing its local contents. The status command should then print nothing and
-check-ignore should identify the ignore rule. A file already committed in HEAD
-requires a separate untracking change; adding an ignore rule alone is not enough.
+The override file `config/connections.json` is optional, mode 0600, and remains
+ignored. It can override nonsecret fields or add unrelated connections. Both
+Garmin definitions default to `config/connections.example.json`, with their
+passwords supplied only by `credentials.local.json`. Inline managed passwords
+are rejected. Import uses Airflow's connection model directly, without generated
+password files, and preserves existing unrelated connections. Existing managed
+passwords must match the local file. Encrypted installations must retain the
+original Fernet key to decrypt them; fresh local installations use an empty setting.
+Use `AIRFLOW_CONNECTIONS_FILE` to select a different custom file; use
+`CREDENTIALS_FILE` to select a different private setup file.
 
-### Chart and image configuration
-
-Only values are maintained in `infrastructure/helm/postgresql/values.yaml`;
-there are no custom chart templates or vendored charts. The chart version is
-pinned in the Makefile, and its bundled common dependency comes with the OCI
-artifact. Rendering and deployment use the same chart version and values file.
-
-The image is explicitly pinned to Docker Official Image
-`docker.io/library/postgres:17.11-bookworm`. Using the Bitnami chart does not
-require using its default container image. Keeping PostgreSQL 17 preserves the
-existing database format and avoids a major-version migration or reliance on
-archived `bitnamilegacy` images. The chart's own application-version metadata
-does not determine the deployed PostgreSQL version when this override is set.
-
-The values adapt the chart to this image: UID/GID 999, the existing data-directory
-path, `POSTGRES_DB`, a writable root filesystem, and readiness without Bitnami's
-`.initialized` marker. Startup and liveness use the chart's `pg_isready` probes.
-`global.security.allowInsecureImages=true` bypasses the chart's Bitnami-image
-allowlist so the official image can be used; TLS certificate verification is
-not disabled. Replication, metrics, backup jobs, password-update jobs, and volume
-permission init containers are not configured for this image. Enabling these
-Bitnami-specific features requires a separate compatibility review.
-
-The upstream chart's NOTES assume Bitnami container scripts and can report
-authentication disabled when an external Secret is configured. Use the SQL
-command below; `make postgresql-verify` explicitly checks that the Service
-rejects passwordless connections before testing authenticated queries.
-
-For an interactive local SQL session without printing the password:
-
-```bash
-kubectl --context kind-garmin-ai-analytics -n garmin-analytics \
-  exec -it statefulset/garmin-postgresql -- sh -ec \
-  'export PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")"; exec psql -X -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
-```
-
-## Credentials and storage lifecycle
-
-`infrastructure/scripts/bootstrap.sh --postgresql-only` follows the existing
-bootstrap workflow: generate a random password once and preserve an existing
-Kubernetes Secret. It streams the password through stdin without placing it in
-command arguments, rendered Helm values, plaintext manifests, or normal output.
-API lookup/creation failures stop deployment. This mode touches only the analytics
-Secret and requires its namespace to exist; regular Airflow/Garmin bootstrap is
-unchanged.
-
-PostgreSQL reads the password from a read-only Secret mount. The configured user
-`garmin_analytics` is the image's bootstrap superuser for setup and restore. It is
-not an Airflow loader credential. The image's
-database/user/password settings initialize **empty storage only**. Editing or
-deleting the Secret does not rotate the password inside an existing database;
-preserve it with the PVC and coordinate any rotation using SQL. Restore the
-original Secret if it is lost. No credentials are committed to the repository.
-
-To display the existing bootstrap admin password, just like `make airflow-password`:
-
-```bash
-make postgresql-password
-```
-
-The admin password is generated once by bootstrap during the first
-`make postgresql-up` that reaches Secret creation. It already exists for a
-previously installed database. This target only reads the existing Secret: it
-does not generate a password, change it, deploy resources, or require Mac port
-mapping. Use it for the bootstrap login `garmin_analytics`, not `garmin_loader`.
-
-### Roles, ownership, and daily writes
-
-`infrastructure/postgresql/roles.sql` is version-controlled and rerunnable. It
-contains no passwords. `make postgresql-up` runs it automatically; to reapply it
-after a restore, use `make postgresql-roles`.
-
-| Role | Purpose and privileges |
-| --- | --- |
-| `garmin_analytics` | Bootstrap superuser; trusted setup, backups, and restore only |
-| `garmin_owner` | NOLOGIN owner of the database and application schemas/objects |
-| `garmin_loader` | LOGIN with CONNECT, staging schema USAGE, table SELECT/INSERT/UPDATE/DELETE, and sequence USAGE/SELECT |
-| `garmin_schema_manager` | LOGIN with CONNECT and explicit SET ROLE permission for `garmin_owner`; schema setup only |
-
-The loader is not a member of `garmin_owner`, cannot create schemas/tables or drop
-owner tables, and has no administrative privileges. PUBLIC database privileges
-and public-schema access are revoked. Future staging objects inherit loader
-grants only when created **as `garmin_owner`**. During trusted setup use
-`SET ROLE garmin_owner` before DDL and `RESET ROLE` afterward. Application table
-definitions live in `airflow/dags/sql/ensure_daily_summary_staging.sql`; bootstrap
-creates only the staging schema and grants.
-
-Set the loader password separately, without putting it in SQL files or shell
-arguments:
-
-```bash
-make postgresql-loader-password
-```
-
-This runs interactive psql `\password garmin_loader` as the bootstrap admin.
-Choose and confirm the password, then put that same password into the local
-Airflow connection file below. Reapplying roles does not reset passwords.
-Unlike the bootstrap password, the loader password is not generated or saved in
-the bootstrap Secret. You choose it with this interactive command; PostgreSQL
-stores a verifier rather than a retrievable plaintext password. If you forget it,
-set a new one and update/reimport the local connection file. `garmin_owner` is
-NOLOGIN and has no password.
-
-The daily DAG's `ensure_daily_summary_staging` SQL operator uses only Connection
-ID `garmin_analytics_schema` (login `garmin_schema_manager`). Its transaction runs
-`SET LOCAL ROLE garmin_owner`, so the table has the correct owner and inherits
-loader DML grants. The schema-manager login does not inherit ownership automatically
-and has no superuser, role-management, or database-creation privileges. Never
-reuse the loader or bootstrap-admin connection for this task.
-
-For an existing installation, run `make postgresql-roles`, then set the new
-password interactively:
-
-```bash
-make postgresql-schema-manager-password
-```
-
-Add the `garmin_analytics_schema` entry from the example to the ignored local
-connection file, fill in that password manually, and reimport it. Do not replace
-an existing loader password. Existing loader-only files remain importable, but
-schema setup requires the schema Connection to be configured separately.
-
-### Upgrade an existing schema Connection
-
-If schema setup was already configured, manually rename the JSON entry key
-`garmin_analytics_migrations` to `garmin_analytics_schema` in the Git-ignored
-`config/connections.json`. Keep its existing password and connection settings,
-including login `garmin_schema_manager`, and leave `garmin_analytics_loader`
-unchanged. This naming-only upgrade requires no password reset or database-role
-changes; keep using `postgresql-schema-manager-password` for password changes.
-
-Then rerun:
-
-```bash
-make airflow-connections-import
-```
-
-The import creates/updates `garmin_analytics_schema` in Airflow. It does not delete
-the previously named Connection; that unused entry can be removed manually after
-checking any other consumers. Local credential files and deployed Connections
-must be updated by the owner, separately from the source change.
-
-### Airflow connection and Mac access
-
-```bash
-cp config/connections.example.json config/connections.json
-chmod 600 config/connections.json
-```
-
-Edit `config/connections.json` manually and replace
-`SET_GARMIN_LOADER_PASSWORD_MANUALLY` and `SET_GARMIN_SCHEMA_MANAGER_PASSWORD_MANUALLY`
-with the corresponding passwords you chose. The local file
-is excluded from Git and Docker build contexts. Keep these template settings:
-
-- Connection ID: `garmin_analytics_loader`
-- Type: `postgres`; host: `garmin-postgresql.garmin-analytics.svc.cluster.local`
-- Port: `5432`; schema/database: `garmin_analytics`; login: `garmin_loader`
-- Schema-setup Connection: `garmin_analytics_schema`, same Service/port/database,
-  login `garmin_schema_manager`
-
-`make infra-up` automatically imports this file after Airflow is ready. If the
-file is absent, it reports a skip and preserves existing Connections. If the file
-exists but is invalid or still contains the password placeholder, import fails
-and `infra-up` returns an error. A valid file overwrites the named Connection, so
-local configuration is authoritative on subsequent deployments.
-
-To reload changes without redeploying Airflow:
-
-```bash
-make airflow-connections-import
-```
-
-For an alternate file such as `config/connections.local.json`, override the path
-for either deployment or manual import:
-
-```bash
-make infra-up AIRFLOW_CONNECTIONS_FILE=config/connections.local.json
-make airflow-connections-import AIRFLOW_CONNECTIONS_FILE=config/connections.local.json
-```
-
-The importer accepts either known Connection independently or both together. It
-rejects placeholders, unknown Connection IDs, an incorrect login (including the
-bootstrap admin), or a Mac endpoint.
-It streams the local JSON into a permission-restricted temporary file inside the
-scheduler, invokes `airflow connections import --overwrite`, and removes the
-temporary file. PostgreSQL deployment does not generate or rotate loader
-passwords; Airflow deployment imports the password you configured. Airflow
-protects stored passwords using its configured Fernet key, which must be
-preserved with metadata backups.
-
-The manual, unscheduled `garmin_analytics_connection_check` DAG uses
-`PostgresHook(postgres_conn_id="garmin_analytics_loader")` and runs `SELECT 1`.
-DAG source contains only the connection ID, with no host, username, or password.
-It does not call Garmin or run migrations. The daily-summary loader uses the same
-connection-ID pattern. The pinned Airflow image includes PostgresHook.
-
-From the Mac, use the same loader password interactively:
+The manual, unscheduled `garmin_analytics_connection_check` DAG uses PostgresHook
+and Connection ID `garmin_analytics_loader` for `SELECT 1`; no passwords are stored
+in DAG source. For a deliberately interactive Mac SQL session:
 
 ```bash
 psql -h 127.0.0.1 -p 5432 -U garmin_loader -d garmin_analytics -W
 ```
 
-No `kubectl port-forward` is needed. Airflow always uses the internal Service;
-`127.0.0.1` inside an Airflow Pod would point back to that Pod.
-
-The PVC is applied separately with Kustomize and is not a Helm release resource.
-On kind it uses the default `standard` StorageClass, which stores data outside the
-PostgreSQL container, on the kind node. Pod replacement, release upgrades,
-rollback, and Helm uninstall leave the claim intact. `make infra-down` only
-uninstalls Airflow and leaves this database running.
-
-This is node-local development storage, not a backup. **Deleting the PVC or its
-namespace, deleting the kind cluster (`make cluster-delete`), or losing the kind
-node can destroy this database.** The default StorageClass has a `Delete` reclaim
-policy. Unlike the raw JSON archive, this volume is not mounted from the Mac's
-project directory. The 5 GiB claim is a storage request, not an enforced filesystem
-quota on kind's local-path provisioner.
+Interactive `postgresql-loader-password` and `postgresql-schema-manager-password`
+commands remain **explicit rotation tools**, not setup steps. Coordinate any
+rotation with the local file and live Connections; deployment will never rotate
+an existing password automatically. `make postgresql-password` is an explicit
+password-display tool, not invoked by deployment or normal validation.
 
 ### Existing clusters: back up before recreation
+
+For the database-mount migration and subsequent reattachment, follow
+[database storage](database-storage.md). The manual dumps below remain useful
+for the optional backup/restore work tracked in #35; save the protected credential
+file (`config/credentials.local.json`) with its original Fernet key as well. Do not
+automatically invoke the old dump-restore sequence on an already migrated database.
 
 kind/Docker cannot add host-port bindings to an existing node container.
 `make postgresql-up` fails **before applying resources** when the mapping is
@@ -321,10 +155,6 @@ kubectl --context kind-garmin-ai-analytics -n airflow get secret airflow-postgre
   kubectl --context kind-garmin-ai-analytics -n airflow exec -i airflow-postgresql-0 -- \
   sh -ec 'export PGPASSWORD="$(cat)"; exec pg_dump -Fc -h 127.0.0.1 -U airflow -d airflow' \
   > "$backup_dir/airflow.dump"
-for namespace in airflow garmin-analytics garmin-auth airflow-jobs; do
-  kubectl --context kind-garmin-ai-analytics -n "$namespace" get secrets -o yaml \
-    > "$backup_dir/$namespace-secrets.yaml"
-done
 pg_restore --list "$backup_dir/garmin_analytics.dump" > /dev/null
 pg_restore --list "$backup_dir/airflow.dump" > /dev/null
 ```
@@ -336,14 +166,14 @@ exit codes and test restore; a nonempty file alone does not prove a usable backu
 
 **Only after checking all required backups**, manually recreate with the updated
 `infrastructure/kind/cluster.yaml` (`make cluster-delete`, then
-`make cluster-create`). Recreate namespaces and restore the saved Secrets before
-starting PostgreSQL/Airflow, so existing encrypted connections and bootstrap
+`make cluster-create`). Recreate namespaces and create missing Secrets from the
+private setup file before starting PostgreSQL/Airflow, so encrypted connections and bootstrap
 passwords remain valid. Restore database contents as the bootstrap admin, not as
 `garmin_loader`. For analytics objects restore with ownership assigned to
 `garmin_owner` (for example `pg_restore --no-owner --role=garmin_owner` after role
-setup), reapply `make postgresql-roles`, and set the loader password separately.
+setup), reapply `make postgresql-roles`, and retain the configured role passwords.
 Restore Airflow metadata before resuming its DAGs. Run `make postgresql-up`,
-import the loader connection if needed, and verify clients after recovery.
+run `make infra-up` to derive both application connections, and verify clients after recovery.
 
 ## Roll back a deployment
 
@@ -369,8 +199,7 @@ not a database-version migration mechanism.
 
 ```bash
 make postgresql-up
-make postgresql-loader-password
-make airflow-connections-import
+make infra-up
 make postgresql-verify
 ```
 
@@ -535,9 +364,9 @@ any required schema change separately before rerunning the task, or use a fresh
 database. Original archived responses remain available for replay.
 
 The Connection-name upgrade instructions above still apply independently: keep
-`garmin_schema_manager` and `postgresql-schema-manager-password`, and leave the
-loader Connection separate. This refactor does not modify local credential files
-or deployed Airflow Connections.
+`garmin_schema_manager` and the separate loader login. Their connection settings
+are now derived from `credentials.local.json`; adopt existing passwords and keep
+the original Fernet key when encryption is enabled. See [credential setup](credentials.md).
 
 ### Verification
 

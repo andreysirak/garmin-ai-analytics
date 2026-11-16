@@ -3,26 +3,14 @@
 
 from __future__ import annotations
 
-import json
-import os
 import sys
 from pathlib import Path
-from typing import Any
+
+from local_credentials import load_private_json, value
 
 
 def load_api_key(path: Path) -> str:
-    if path.is_symlink():
-        raise ValueError("credentials file must not be a symbolic link")
-
-    os.chmod(path, 0o600)
-    with path.open(encoding="utf-8") as credentials_file:
-        credentials: Any = json.load(credentials_file)
-
-    garmin = credentials.get("garmin") if isinstance(credentials, dict) else None
-    api_key = garmin.get("api_key") if isinstance(garmin, dict) else None
-    if not isinstance(api_key, str) or not api_key or api_key.strip() != api_key:
-        raise ValueError("garmin.api_key must be a non-empty string without surrounding whitespace")
-    return api_key
+    return value(load_private_json(path), "garmin.api_key")
 
 
 def main() -> int:
@@ -37,7 +25,7 @@ def main() -> int:
     try:
         credentials_path = Path(sys.argv[2] if validate_only else sys.argv[1])
         api_key = load_api_key(credentials_path)
-    except (OSError, ValueError, json.JSONDecodeError) as error:
+    except (OSError, ValueError) as error:
         print(f"Invalid Garmin credentials configuration: {error}", file=sys.stderr)
         return 1
 

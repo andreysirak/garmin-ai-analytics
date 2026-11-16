@@ -2,8 +2,22 @@
 
 ## Unreleased
 
+- Preserve Airflow metadata and Garmin analytics PostgreSQL files on separate
+  host-backed kind mounts; check identities, majors, and UID write permissions
+  before server startup. Recreate missing database and Airflow Secrets from the
+  single private setup file. Document first-install migration and explicit rebuild
+  coordination with #35/#55. Existing node-local PVCs require migration (#58).
+
 | Type | What changed | Breaking change | Upgrade steps | PR |
 | --- | --- | --- | --- | --- |
+| Added | make airflow-dag-reset resets a DAG's Airflow metadata/history through the API container while preserving its source code; defaults to garmin_daily_pipeline with optional DAG_ID override | No | Finish active tasks before reset; Airflow keeps its confirmation prompt and running-task check; DAG code is rediscovered automatically | |
+| Fixed | Bound the local LocalExecutor pool to four workers and give the scheduler a 2 GiB memory limit after observed startup OOM kills | Task concurrency is limited to four per scheduler | Apply the Airflow values with make infra-up; no metadata reset is needed | |
+| Fixed | Run both local PostgreSQL instances as the host UID and check actual directory ownership before startup, preventing Colima SSHFS wrong-ownership failures | Existing data must belong to the deploying host UID | Reapply with make stack-up; no kind recreation or automatic ownership rewrite | |
+| Changed | Default fresh local Airflow setup to an explicitly empty Fernet key, removing key generation; retain support and conflict protection for existing encrypted installations | New local metadata stores connection passwords and Variables unencrypted | Leave fernet_key empty for fresh setup; keep the original key for encrypted metadata; see docs/credentials.md | |
+| Added | Compose existing startup targets with make stack-up and reapply/restart the existing stack with make stack-restart; check kind creation settings and retained storage before changes (#55) | No; individual targets and manual startup remain supported | Configure credentials.local.json first; creation-time changes require the documented explicit rebuild | |
+| Docs | Explain the deliberate local credential-file workaround while external secrets-manager integration is deferred for simplicity, including runtime Secret delivery and future lookup replacement | No | None | |
+| Fixed | Keep both Garmin connection definitions and descriptions in connections.example.json without passwords; merge optional local overrides, resolve private passwords and register through stdin without generated password files | Managed password fields in connection definitions are rejected | Keep passwords only in credentials.local.json; see docs/credentials.md | |
+| Changed | Use credentials.local.json for all five PostgreSQL passwords, Garmin API key and original Airflow Fernet key; configure role passwords noninteractively, derive managed Airflow connections, reject credential conflicts and remove Secret snapshots | Existing files need the new fields with their current live values | Follow docs/credentials.md before deployment; normal setup is make postgresql-up then make infra-up | |
 | Added | Daily-summary Python loader uses successful ingestion XCom, validates archive keys/date, and transactionally upserts the full JSONB payload without changing raw files (#38) | Daily runs now require garmin_analytics_loader and scheduler archive access | Apply updated Airflow Helm values through make infra-up for the read-only archive mount and host GID; see docs/postgresql.md | |
 | Added | Transactional ensure_daily_summary_staging task in the daily DAG, versioned three-column full-response JSONB contract, payload-object and exact schema checks and separate schema Connection (#37) | New task requires garmin_analytics_schema; existing wide tables require a reviewed migration | Configure the schema Connection for new installations; migrate/backfill wide tables from original archives separately; see docs/postgresql.md | |
 | Changed | make infra-up imports config/connections.json after Airflow readiness; absent files preserve existing connections and invalid files fail import | Local connection file becomes authoritative on infra-up | Fill in the loader password; use AIRFLOW_CONNECTIONS_FILE to override the path | |

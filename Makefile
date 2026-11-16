@@ -1,5 +1,7 @@
 CLUSTER := garmin-ai-analytics
 CONTEXT := kind-$(CLUSTER)
+KIND_CONFIG := infrastructure/kind/cluster.yaml
+KIND_CONFIGURATION_CHECK := python3 infrastructure/scripts/check_kind_configuration.py
 GARMIN_RAW_DATA_GID := $(shell id -g)
 AIRFLOW_RAW_GROUP := --set 'scheduler.securityContexts.pod.supplementalGroups[0]=$(GARMIN_RAW_DATA_GID)'
 NAMESPACE := airflow
@@ -16,9 +18,20 @@ POSTGRESQL_CHART_VERSION := 18.12.18
 POSTGRESQL_VALUES := infrastructure/helm/postgresql/values.yaml
 POSTGRESQL_REVISION ?= 0
 AIRFLOW_CONNECTIONS_FILE ?= config/connections.json
+CREDENTIALS_FILE ?= config/credentials.local.json
 SCHEDULER_EXEC := $(KUBECTL) -n $(NAMESPACE) exec airflow-scheduler-0 -c scheduler --
 JAVA_MAVEN_IMAGE := maven:3.9-eclipse-temurin-25
 AIRFLOW_URL := http://localhost:8080
+DAG_ID ?= garmin_daily_pipeline
+DATABASE_STORAGE := python3 infrastructure/scripts/local_database_storage.py
+DATABASE_CREDENTIALS := python3 infrastructure/scripts/database_credentials.py
+DATABASE_STORAGE_UID := $(shell id -u)
+DATABASE_STORAGE_GID := $(shell id -g)
+# Colima SSHFS presents database files as the Mac owner, so PostgreSQL must use that UID.
+POSTGRESQL_STORAGE_USER := --set primary.podSecurityContext.runAsUser=$(DATABASE_STORAGE_UID) \
+                          --set primary.containerSecurityContext.runAsUser=$(DATABASE_STORAGE_UID)
+AIRFLOW_POSTGRESQL_STORAGE_USER := --set postgresql.primary.podSecurityContext.runAsUser=$(DATABASE_STORAGE_UID) \
+                                  --set postgresql.primary.containerSecurityContext.runAsUser=$(DATABASE_STORAGE_UID)
 
 .PHONY: help prepare-garmin-raw-data cluster-create cluster-status cluster-delete infra-validate infra-up airflow-operator-rollout infra-down \
         infra-status airflow-ui airflow-password airflow-logs test-infra java-verify \
@@ -29,28 +42,34 @@ AIRFLOW_URL := http://localhost:8080
         airflow-image kind-load-airflow-image auth-image kind-load-auth-image \
         auth-policy-verify postgresql-up postgresql-rollback postgresql-status postgresql-verify \
         postgresql-preflight postgresql-roles postgresql-password postgresql-loader-password \
-        postgresql-schema-manager-password airflow-connections-import
+        postgresql-schema-manager-password airflow-connections-import airflow-dag-reset \
+        prepare-database-storage database-storage-check analytics-credentials-check airflow-credentials-check \
+        stack-up stack-restart stack-config-check
 
 help:
 	@echo "Cluster and infrastructure:"
+	@echo "  make stack-up               - Run the existing full startup sequence in order"
+	@echo "  make stack-restart          - Reapply configuration and restart workloads in the existing cluster"
 	@echo "  make prepare-garmin-raw-data - Prepare archive directory permissions"
+	@echo "  make prepare-database-storage - Explicitly prepare new host database directories"
+	@echo "  make database-storage-check - Verify host/Colima/kind mounts and database UID access"
 	@echo "  make cluster-create         - Create the kind cluster"
 	@echo "  make cluster-status         - Show cluster and node status"
-	@echo "  make cluster-delete         - Delete the cluster and its in-cluster data"
+	@echo "  make cluster-delete         - Delete the cluster; prepared host data survives (see rebuild guide)"
 	@echo "  make infra-validate         - Render Kustomize and Helm manifests"
-	@echo "  make infra-up               - Deploy Airflow and import the local connection file if present"
+	@echo "  make infra-up               - Deploy Airflow using credentials.local.json and derived connections"
 	@echo "  make infra-down             - Uninstall Airflow (keeps volumes, Secrets and cluster)"
 	@echo "  make infra-status           - Show Helm release and Pods"
 	@echo "PostgreSQL (separate from Airflow metadata):"
-	@echo "  make postgresql-up          - Deploy garmin_analytics, preserving its PVC and Secret"
+	@echo "  make postgresql-up          - Deploy analytics and configure role passwords from credentials.local.json"
 	@echo "  make postgresql-rollback    - Restore previous release (or POSTGRESQL_REVISION=N), keeping data"
 	@echo "  make postgresql-status      - Show PostgreSQL release, Pods and PVC"
 	@echo "  make postgresql-verify      - Check a synthetic row across Pod replacement and rollback"
 	@echo "  make postgresql-roles       - Apply version-controlled ownership and staging grants as admin"
 	@echo "  make postgresql-password    - Print the analytics PostgreSQL bootstrap admin password"
-	@echo "  make postgresql-loader-password - Set garmin_loader password interactively (not stored in SQL)"
-	@echo "  make postgresql-schema-manager-password - Set garmin_schema_manager password interactively (not stored in SQL)"
-	@echo "  make airflow-connections-import - Import configured connections.json into Airflow"
+	@echo "  make postgresql-loader-password - Explicit interactive rotation only; not normal setup"
+	@echo "  make postgresql-schema-manager-password - Explicit interactive rotation only; not normal setup"
+	@echo "  make airflow-connections-import - Resolve checked-in definitions, local overrides and private passwords"
 	@echo "Java:"
 	@echo "  make java-verify            - Run Java 25 Maven clean verify"
 	@echo "  make java-package-ingestion - Package the unified ingestion JAR and common module"
@@ -68,17 +87,59 @@ help:
 	@echo "  make airflow-ui             - Open the Airflow UI"
 	@echo "  make airflow-password       - Print the local admin password"
 	@echo "  make airflow-logs           - Tail scheduler logs"
+	@echo "  make airflow-dag-reset      - Reset DAG metadata/history; preserve code (DAG_ID=garmin_daily_pipeline)"
 	@echo "  make test-infra             - Run the KubernetesPodOperator smoke DAG"
 	@echo "  make airflow-image          - Build the Airflow image with Garmin operator packages"
 	@echo "  make kind-load-airflow-image - Load the local Airflow image into kind"
+
+stack-config-check:
+	$(DATABASE_CREDENTIALS) validate --scope analytics --file "$(CREDENTIALS_FILE)"
+	AIRFLOW_CONNECTIONS_FILE="$(AIRFLOW_CONNECTIONS_FILE)" \
+		$(DATABASE_CREDENTIALS) validate --scope airflow --file "$(CREDENTIALS_FILE)"
+
+# Recursive recipes preserve dependency order even when the caller uses make -j.
+stack-up: stack-config-check
+	$(KIND_CONFIGURATION_CHECK) --cluster "$(CLUSTER)" --context "$(CONTEXT)" --config "$(KIND_CONFIG)" --allow-missing
+	$(MAKE) prepare-database-storage
+	$(MAKE) cluster-create
+	$(MAKE) infra-validate
+	$(MAKE) postgresql-up
+	$(MAKE) infra-up
+
+stack-restart: stack-config-check
+	$(KIND_CONFIGURATION_CHECK) --cluster "$(CLUSTER)" --context "$(CONTEXT)" --config "$(KIND_CONFIG)"
+	$(MAKE) stack-up
+	$(KUBECTL) -n $(POSTGRESQL_NAMESPACE) rollout restart statefulset/$(POSTGRESQL_RELEASE)
+	$(KUBECTL) -n $(POSTGRESQL_NAMESPACE) rollout status statefulset/$(POSTGRESQL_RELEASE) --timeout=5m
+	$(KUBECTL) -n $(NAMESPACE) rollout restart statefulset/airflow-postgresql
+	$(KUBECTL) -n $(NAMESPACE) rollout status statefulset/airflow-postgresql --timeout=5m
+	$(KUBECTL) -n $(NAMESPACE) rollout restart deployment/airflow-api-server
+	$(KUBECTL) -n $(NAMESPACE) rollout status deployment/airflow-api-server --timeout=10m
+	$(KUBECTL) -n $(NAMESPACE) rollout status statefulset/airflow-scheduler --timeout=10m
+	$(KUBECTL) -n $(NAMESPACE) rollout status deployment/airflow-dag-processor --timeout=10m
 
 prepare-garmin-raw-data:
 	@mkdir -p data/raw/garmin
 	@find data/raw/garmin -type d -exec chgrp $(GARMIN_RAW_DATA_GID) {} + -exec chmod 2770 {} +
 
+prepare-database-storage:
+	$(DATABASE_STORAGE) prepare
+
+database-storage-check:
+	$(DATABASE_STORAGE) check --cluster "$(CLUSTER)" --context "$(CONTEXT)"
+
+analytics-credentials-check:
+	KUBE_CONTEXT="$(CONTEXT)" $(DATABASE_CREDENTIALS) check --scope analytics --file "$(CREDENTIALS_FILE)"
+
+airflow-credentials-check:
+	KUBE_CONTEXT="$(CONTEXT)" AIRFLOW_CONNECTIONS_FILE="$(AIRFLOW_CONNECTIONS_FILE)" \
+		$(DATABASE_CREDENTIALS) check --scope airflow --file "$(CREDENTIALS_FILE)"
+
 cluster-create: prepare-garmin-raw-data
+	$(DATABASE_STORAGE) check-host
 	@kind get clusters | grep -qx $(CLUSTER) && echo "cluster $(CLUSTER) already exists" || \
-		kind create cluster --config infrastructure/kind/cluster.yaml
+		kind create cluster --name "$(CLUSTER)" --config "$(KIND_CONFIG)"
+	$(DATABASE_STORAGE) check --cluster "$(CLUSTER)" --context "$(CONTEXT)"
 
 cluster-status:
 	@kind get clusters | grep -qx $(CLUSTER) || { echo "cluster $(CLUSTER) not found"; exit 1; }
@@ -91,21 +152,31 @@ infra-validate:
 	kubectl kustomize infrastructure/kubernetes/overlays/local > /dev/null
 	kubectl kustomize infrastructure/kubernetes/postgresql > /dev/null
 	helm template $(POSTGRESQL_RELEASE) $(POSTGRESQL_CHART) --version $(POSTGRESQL_CHART_VERSION) \
-		-n $(POSTGRESQL_NAMESPACE) -f $(POSTGRESQL_VALUES) > /dev/null
+		-n $(POSTGRESQL_NAMESPACE) -f $(POSTGRESQL_VALUES) \
+		$(POSTGRESQL_STORAGE_USER) \
+		--set-string storageIdentity=render-only > /dev/null
 	helm template airflow $(AIRFLOW_CHART) -n $(NAMESPACE) \
 		-f infrastructure/helm/airflow/values.yaml \
-		--set-string garminRawDataGid=$(GARMIN_RAW_DATA_GID) $(AIRFLOW_RAW_GROUP) > /dev/null
+		--set-string garminRawDataGid=$(GARMIN_RAW_DATA_GID) $(AIRFLOW_RAW_GROUP) \
+		$(AIRFLOW_POSTGRESQL_STORAGE_USER) \
+		--set-string postgresql.storageIdentity=render-only > /dev/null
 	@echo "manifests are valid"
 
-infra-up: prepare-garmin-raw-data kind-load-ingestion-java-images kind-load-airflow-image kind-load-auth-image
+infra-up: airflow-credentials-check database-storage-check
+	# Keep image loading and permission changes behind validation, including with make -j.
+	$(MAKE) prepare-garmin-raw-data kind-load-ingestion-java-images kind-load-airflow-image kind-load-auth-image
 	$(KUBECTL) apply -k infrastructure/kubernetes/overlays/local
-	KUBE_CONTEXT="$(CONTEXT)" ./infrastructure/scripts/bootstrap.sh
+	KUBE_CONTEXT="$(CONTEXT)" CREDENTIALS_FILE="$(CREDENTIALS_FILE)" \
+		AIRFLOW_CONNECTIONS_FILE="$(AIRFLOW_CONNECTIONS_FILE)" bash infrastructure/scripts/bootstrap.sh
 	$(HELM) upgrade --install airflow $(AIRFLOW_CHART) \
 		--namespace $(NAMESPACE) -f infrastructure/helm/airflow/values.yaml \
-		--set-string garminRawDataGid=$(GARMIN_RAW_DATA_GID) $(AIRFLOW_RAW_GROUP) --wait --timeout 10m
+		--set-string garminRawDataGid=$(GARMIN_RAW_DATA_GID) $(AIRFLOW_RAW_GROUP) \
+		$(AIRFLOW_POSTGRESQL_STORAGE_USER) \
+		--set 'postgresql.primary.podSecurityContext.supplementalGroups[0]=$(DATABASE_STORAGE_GID)' \
+		--set-string postgresql.storageIdentity="$$($(DATABASE_STORAGE) identity --database airflow)" \
+		--wait --timeout 10m
 	$(MAKE) airflow-operator-rollout
-	KUBE_CONTEXT="$(CONTEXT)" python3 infrastructure/scripts/import_airflow_connections.py \
-		--if-present "$(AIRFLOW_CONNECTIONS_FILE)"
+	$(MAKE) airflow-connections-import
 
 airflow-operator-rollout:
 	$(KUBECTL) -n $(NAMESPACE) rollout restart statefulset/airflow-scheduler deployment/airflow-dag-processor
@@ -121,23 +192,25 @@ infra-status:
 	$(KUBECTL) get pods -n $(JOBS_NAMESPACE)
 
 # PVC and Secret are deliberately managed outside the Helm release.
-postgresql-preflight:
+postgresql-preflight: analytics-credentials-check database-storage-check
 	python3 infrastructure/scripts/check_postgresql_host_port.py --cluster "$(CLUSTER)" --context "$(CONTEXT)"
 
 postgresql-up: postgresql-preflight
 	$(KUBECTL) apply -k infrastructure/kubernetes/postgresql
-	KUBE_CONTEXT="$(CONTEXT)" ./infrastructure/scripts/bootstrap.sh --postgresql-only
+	KUBE_CONTEXT="$(CONTEXT)" CREDENTIALS_FILE="$(CREDENTIALS_FILE)" \
+		bash infrastructure/scripts/bootstrap.sh --postgresql-only
 	$(HELM) upgrade --install $(POSTGRESQL_RELEASE) $(POSTGRESQL_CHART) \
 		--version $(POSTGRESQL_CHART_VERSION) -f $(POSTGRESQL_VALUES) \
+		$(POSTGRESQL_STORAGE_USER) \
+		--set 'primary.podSecurityContext.supplementalGroups[0]=$(DATABASE_STORAGE_GID)' \
+		--set-string storageIdentity="$$($(DATABASE_STORAGE) identity --database garmin-analytics)" \
 		--namespace $(POSTGRESQL_NAMESPACE) --wait --timeout 5m
 	$(MAKE) postgresql-roles
 	KUBE_CONTEXT="$(CONTEXT)" python3 infrastructure/scripts/verify_postgresql_host.py
 
 postgresql-roles:
-	$(KUBECTL) -n $(POSTGRESQL_NAMESPACE) exec -i statefulset/$(POSTGRESQL_RELEASE) -c postgresql -- \
-		sh -ec 'export PGPASSWORD="$$(cat "$$POSTGRES_PASSWORD_FILE")"; \
-		exec psql -X -h 127.0.0.1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -v ON_ERROR_STOP=1' \
-		< infrastructure/postgresql/roles.sql
+	KUBE_CONTEXT="$(CONTEXT)" python3 infrastructure/scripts/configure_postgresql_roles.py \
+		--file "$(CREDENTIALS_FILE)"
 
 # Read-only, independent of the host-port preflight; never generates/rotates credentials.
 postgresql-password:
@@ -155,7 +228,8 @@ postgresql-schema-manager-password:
 		exec psql -X -h 127.0.0.1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "\password garmin_schema_manager"'
 
 airflow-connections-import:
-	KUBE_CONTEXT="$(CONTEXT)" python3 infrastructure/scripts/import_airflow_connections.py "$(AIRFLOW_CONNECTIONS_FILE)"
+	KUBE_CONTEXT="$(CONTEXT)" python3 infrastructure/scripts/import_airflow_connections.py "$(AIRFLOW_CONNECTIONS_FILE)" \
+		--credentials-file "$(CREDENTIALS_FILE)"
 
 postgresql-rollback:
 	$(HELM) rollback $(POSTGRESQL_RELEASE) $(POSTGRESQL_REVISION) \
@@ -185,6 +259,10 @@ airflow-password:
 
 airflow-logs:
 	$(KUBECTL) -n $(NAMESPACE) logs -f --tail=200 airflow-scheduler-0 -c scheduler
+
+airflow-dag-reset:
+	$(KUBECTL) -n $(NAMESPACE) exec -it deployment/airflow-api-server -c api-server -- \
+		airflow dags delete "$(DAG_ID)"
 
 test-infra:
 	@echo "Waiting for kubernetes_hello DAG discovery..."
