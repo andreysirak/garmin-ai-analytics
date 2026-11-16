@@ -32,7 +32,7 @@ class LocalCredentialsTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "airflow.database.postgres_password"):
             config.load(self.path, "airflow")
 
-    def test_airflow_requires_original_fernet_key_and_managed_connection_passwords(self):
+    def test_airflow_requires_managed_connection_passwords(self):
         config.load(self.path, "airflow")
         for key in ("garmin_schema_manager_password", "garmin_loader_password"):
             changed = synthetic_credentials()
@@ -65,7 +65,8 @@ class LocalCredentialsTest(unittest.TestCase):
         self.assertNotIn("private-secret-value", str(failure.exception))
 
     def test_fernet_validation_and_single_line_passwords(self):
-        for key in ("not-a-key", base64.urlsafe_b64encode(b"short").decode()):
+        for key in ("test", "not-a-key", " ", None, False, 123,
+                    base64.urlsafe_b64encode(b"short").decode()):
             self.credentials["airflow"]["fernet_key"] = key
             with self.subTest(key=key), self.assertRaisesRegex(ValueError, "airflow.fernet_key"):
                 config.value(self.credentials, "airflow.fernet_key")
@@ -73,6 +74,30 @@ class LocalCredentialsTest(unittest.TestCase):
         with self.assertRaises(ValueError) as failure:
             config.value(self.credentials, "postgresql.garmin_loader_password")
         self.assertNotIn("private-value", str(failure.exception))
+
+    def test_airflow_accepts_the_empty_local_fernet_default(self):
+        template = json.loads((ROOT / "config/credentials.example.json").read_text())
+        self.assertEqual(template["airflow"]["fernet_key"], "")
+        self.credentials["airflow"]["fernet_key"] = template["airflow"]["fernet_key"]
+        private_json(self.path, self.credentials)
+        loaded = config.load(self.path, "airflow")
+        self.assertEqual(config.value(loaded, "airflow.fernet_key"), "")
+
+    def test_empty_fernet_setting_is_explicit_and_other_secrets_remain_required(self):
+        del self.credentials["airflow"]["fernet_key"]
+        with self.assertRaisesRegex(ValueError, "airflow.fernet_key"):
+            config.value(self.credentials, "airflow.fernet_key")
+        for entry in config.AIRFLOW_FIELDS + [config.ANALYTICS_PASSWORD]:
+            if entry == "airflow.fernet_key":
+                continue
+            credentials = synthetic_credentials()
+            parent, key = entry.rsplit(".", 1)
+            target = credentials
+            for part in parent.split("."):
+                target = target[part]
+            target[key] = ""
+            with self.subTest(entry=entry), self.assertRaises(ValueError):
+                config.value(credentials, entry)
 
 
 class SecretConfigurationTest(unittest.TestCase):
@@ -106,6 +131,41 @@ class SecretConfigurationTest(unittest.TestCase):
             first = database.checked_secrets("kind-before", self.credentials, "airflow")
             rebuilt = database.checked_secrets("kind-after", self.credentials, "airflow")
         self.assertEqual(first, rebuilt)
+
+    def test_empty_fernet_secret_is_created_over_stdin_and_reused(self):
+        self.credentials["airflow"]["fernet_key"] = ""
+        existing = {}
+
+        def read_secret(context, namespace, name):
+            return existing.get((namespace, name))
+
+        def create(context, *arguments, contents):
+            self.assertEqual(arguments, ("create", "-f", "-"))
+            manifest = json.loads(contents)
+            metadata = manifest["metadata"]
+            existing[metadata["namespace"], metadata["name"]] = {
+                "data": {key: base64.b64encode(setting.encode()).decode()
+                         for key, setting in manifest["stringData"].items()}}
+
+        with patch.object(database, "read_secret", side_effect=read_secret), \
+             patch.object(database, "kubectl", side_effect=create) as kubectl:
+            database.apply("kind-synthetic", self.credentials, "airflow")
+            self.assertEqual(existing["airflow", "airflow-fernet-key"]["data"], {"fernet-key": ""})
+            kubectl.reset_mock()
+            database.apply("kind-synthetic", self.credentials, "airflow")
+            kubectl.assert_not_called()
+
+    def test_empty_local_key_never_overwrites_an_existing_encryption_key(self):
+        original = self.credentials["airflow"]["fernet_key"]
+        self.credentials["airflow"]["fernet_key"] = ""
+        encrypted = {"data": {"fernet-key": base64.b64encode(original.encode()).decode()}}
+        with patch.object(database, "read_secret", side_effect=[None, None, encrypted]), \
+             patch.object(database, "kubectl") as kubectl:
+            with self.assertRaisesRegex(ValueError, "airflow.fernet_key.*conflicts") as failure:
+                database.apply("kind-synthetic", self.credentials, "airflow")
+        self.assertNotIn(original, str(failure.exception))
+        self.assertEqual(encrypted["data"]["fernet-key"], base64.b64encode(original.encode()).decode())
+        kubectl.assert_not_called()
 
     def test_matching_existing_secrets_are_preserved(self):
         def existing(context, namespace, name):

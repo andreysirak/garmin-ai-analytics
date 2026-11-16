@@ -35,10 +35,12 @@ def load_private_json(path: Path) -> dict:
 
 
 def value(credentials: dict, entry: str) -> str:
-    """Return an exact value, reporting only the field name on invalid input."""
+    """Return an exact value; an empty Fernet key explicitly disables local encryption."""
     result = credentials
     for key in entry.split("."):
         result = result.get(key) if isinstance(result, dict) else None
+    if entry == "airflow.fernet_key" and result == "":
+        return ""
     if (not isinstance(result, str) or not result.strip()
             or result.startswith(("SET_", "YOUR_", "CHANGE_ME"))
             or any(character in result for character in "\x00\r\n")):

@@ -99,16 +99,22 @@ cp config/credentials.example.json config/credentials.local.json
 chmod 600 config/credentials.local.json
 ```
 
-Fill in the five PostgreSQL passwords, original/new Airflow Fernet key, and
-`garmin.api_key` in this single private file. See [credential setup](docs/credentials.md)
-for the exact account mapping, fresh-key generation, and adopting an existing
-cluster's values without rotating them. Existing Secrets are never overwritten;
-conflicts name the entry without printing its value.
+Fill in the five PostgreSQL passwords and `garmin.api_key` in this single private
+file. See [credential setup](docs/credentials.md)
+for the exact account mapping and adopting an existing cluster's values without
+rotating them. Existing Secrets are never overwritten; conflicts name the entry
+without printing its value.
+
+For a fresh local installation, leave `"fernet_key": ""` as supplied: no key
+generation is needed. Airflow then stores connection passwords and Variables
+unencrypted in its metadata database. An existing encrypted installation must
+keep its original key; deployment rejects an empty value that conflicts with its
+live Secret. See [local Fernet behavior](docs/credentials.md#fresh-installation).
 
 An external secrets manager is intentionally deferred to keep the local setup
 simple. The private file is the current workaround for setup and rebuilds;
-Kubernetes Secrets still supply runtime credentials, and Airflow encrypts stored
-connection passwords with Fernet. See [the rationale and trade-offs](docs/credentials.md#why-this-local-workaround-exists).
+Kubernetes Secrets still supply runtime credentials. See
+[the rationale and trade-offs](docs/credentials.md#why-this-local-workaround-exists).
 
 ### 2. Prepare the cluster
 
@@ -119,9 +125,11 @@ make infra-validate
 ```
 
 Both PostgreSQL databases use separate host directories under `data/postgresql/`.
-Mount identities and write permissions are checked before deployment. Existing
+Make runs the databases as the host UID and checks mount identities, directory
+ownership, and write permissions before deployment. Existing
 node-local PVCs need a one-time backup/restore migration; keep the original
-credentials and Fernet key in the local file. See [database storage and rebuild](docs/database-storage.md).
+credentials and any existing Fernet key in the local file. See
+[database storage and rebuild](docs/database-storage.md).
 
 ### 3. Deploy PostgreSQL and Airflow
 
@@ -133,7 +141,7 @@ make infra-up
 `postgresql-up` requires only the three analytics passwords, not a Garmin API key.
 It noninteractively configures the bootstrap, schema-manager, and loader accounts,
 preserving existing passwords. `infra-up` uses the same file for Airflow's database
-accounts, Fernet key, Garmin API Secret, and the schema/loader connection passwords.
+accounts, Fernet setting, Garmin API Secret, and the schema/loader connection passwords.
 No password prompts, `postgresql-loader-password`, or manually duplicated
 `config/connections.json` passwords are needed for normal setup or a kind rebuild.
 
@@ -147,7 +155,43 @@ See [credential handling](docs/credentials.md)
 and [local analytics PostgreSQL](docs/postgresql.md) for details. The Mac endpoint
 is `127.0.0.1:5432`; Airflow uses the internal analytics Service.
 
+#### One-command alternative
+
+After configuring `credentials.local.json` in step 1 and starting Docker/Colima,
+you can replace steps 2 and 3 with:
+
+```bash
+make stack-up
+```
+
+This runs the existing storage preparation, cluster creation/reuse, manifest
+validation, PostgreSQL deployment, and Airflow deployment targets in order,
+including their readiness checks. It supports a fresh installation and repeat
+runs. All individual targets above remain available.
+
+To reapply configuration and restart an existing stack:
+
+```bash
+make stack-restart
+```
+
+It reuses `stack-up`, restarts both databases and the Airflow services, and waits
+for their rollouts. Finish active work first because database connections are
+briefly interrupted. Neither command triggers DAGs or deletes the cluster,
+database files, raw archives, or existing credentials.
+
+Both commands first check local configuration and existing kind node settings.
+Changes to the node image, topology, bind mounts, or host ports require an
+explicit rebuild and stop before deployment or restart. Older node-local
+installations require the documented migration first. Follow the
+[storage migration and rebuild guide](docs/database-storage.md#startup-and-restart-55)
+when a preflight fails; the wrappers never recreate a cluster automatically.
+
 ### 4. Run the pipeline
+
+The local scheduler uses four LocalExecutor workers and a 2 GiB memory limit.
+If it enters `CrashLoopBackOff` with reason `OOMKilled`, apply the checked-in
+Airflow settings with `make infra-up` before running commands in its container.
 
 After upgrading the Python operator package, rebuild and load the Airflow image
 and restart the scheduler/DAG processor (`make kind-load-airflow-image airflow-operator-rollout`).
@@ -159,6 +203,19 @@ make airflow-ui
 ```
 
 Sign in to Airflow as `admin` using the printed password, then trigger or unpause `garmin_daily_pipeline`. Manual runs support an optional date in `YYYY-MM-DD` format.
+
+To reset this DAG's Airflow metadata and run history, pause it and finish
+active tasks first, then run:
+
+```bash
+make airflow-dag-reset
+```
+
+The target runs the CLI in the API container and keeps Airflow's confirmation
+prompt. Select another DAG with `make airflow-dag-reset DAG_ID=other_dag`.
+Airflow rejects deletion while task instances are marked running; this target
+does not change their states. The Python DAG file remains and will be discovered
+again. Connections, Variables, raw archives, and analytics data are preserved.
 
 `garmin_daily_pipeline` is the workflow for the full ingestion-to-analytics flow;
 currently its implemented stages authenticate and archive daily summary and sleep

@@ -12,8 +12,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 STORAGE_ROOT = Path(os.environ.get("GARMIN_DATABASE_STORAGE_ROOT", ROOT / "data/postgresql"))
 DATABASES = {
-    "airflow": {"node_path": "/mnt/postgresql-airflow", "uid": 1001},
-    "garmin-analytics": {"node_path": "/mnt/postgresql-garmin-analytics", "uid": 999},
+    "airflow": {"node_path": "/mnt/postgresql-airflow", "data_directory": "data"},
+    "garmin-analytics": {"node_path": "/mnt/postgresql-garmin-analytics", "data_directory": "pgdata"},
 }
 MARKER = ".volume-id"
 PROBE_IMAGE = "busybox:1.37"
@@ -49,17 +49,32 @@ def run(command: list[str]) -> str:
 
 
 def check_host(directory: Path, database: str, group: int) -> None:
-    """Check the daemon sees the same marker and can write as the database UID."""
+    """Check marker identity, write access, and PostgreSQL ownership as the host UID."""
     identity = volume_identity(directory, database)
-    uid = DATABASES[database]["uid"]
+    uid = os.getuid()
     actual = run([
         "docker", "run", "--rm", "--user", f"{uid}:{uid}", "--group-add", str(group),
         "--mount", f"type=bind,source={directory.resolve()},target=/storage",
         PROBE_IMAGE, "sh", "-ec",
-        'cat /storage/.volume-id; probe=$(mktemp /storage/.write-check.XXXXXX); rm "$probe"',
-    ])
-    if actual != identity:
+        '''probe=$(mktemp -d /storage/.write-check.XXXXXX)
+trap 'rm -f "$probe/write"; rmdir "$probe"' EXIT
+touch "$probe/write"
+cat /storage/.volume-id
+stat -c %u "$probe"
+if [ -e "/storage/$1" ]; then
+    test -d "/storage/$1"
+    stat -c %u "/storage/$1"
+else
+    echo absent
+fi''', "sh", DATABASES[database]["data_directory"],
+    ]).splitlines()
+    if not actual or actual[0] != identity:
         raise ValueError(f"{database}: Colima/Docker sees a different storage directory")
+    if len(actual) != 3:
+        raise ValueError(f"{database}: cannot verify PostgreSQL directory ownership")
+    if actual[1] != str(uid) or actual[2] not in ("absent", str(uid)):
+        raise ValueError(f"{database}: PostgreSQL data must be owned by the host UID {uid}; "
+                         "check Colima ownership mapping; existing files were not changed")
 
 
 def check_node_mount(node: dict, directory: Path, database: str) -> None:
@@ -101,6 +116,8 @@ def main() -> None:
                 parser.error("identity requires --database")
             print(volume_identity(STORAGE_ROOT / args.database, args.database))
             return
+        if os.getuid() == 0:
+            raise ValueError("Run local database storage setup as a non-root host user")
         for database in DATABASES:
             directory = STORAGE_ROOT / database
             if args.action == "prepare":
@@ -113,7 +130,7 @@ def main() -> None:
     except (OSError, IndexError, subprocess.CalledProcessError):
         sys.exit(
             "Database storage check failed; PostgreSQL must not start. Check prepared directories, "
-            "Colima writable mounts, database UID permissions, and kind extraMounts. "
+            "Colima writable mounts, database UID ownership/permissions, and kind extraMounts. "
             "Existing data/cluster were not replaced. See docs/database-storage.md."
         )
     print("Database storage identities and write permissions verified")

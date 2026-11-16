@@ -67,6 +67,24 @@ class DatabaseStorageTest(unittest.TestCase):
             with self.assertRaises(subprocess.CalledProcessError):
                 storage.check_host(self.directory, "airflow", 20)
 
+    def test_host_uid_supports_new_and_existing_database_directories(self):
+        identity = storage.volume_identity(self.directory, "airflow")
+        for owner in ("absent", "501"):
+            with self.subTest(owner=owner), patch.object(storage.os, "getuid", return_value=501), \
+                 patch.object(storage, "run", return_value=f"{identity}\n501\n{owner}") as run:
+                storage.check_host(self.directory, "airflow", 20)
+            command = run.call_args.args[0]
+            self.assertEqual(command[command.index("--user") + 1], "501:501")
+
+    def test_rejects_mapped_or_existing_ownership_before_database_startup(self):
+        identity = storage.volume_identity(self.directory, "airflow")
+        for created_owner, existing_owner in (("999", "absent"), ("501", "1001")):
+            with self.subTest(created_owner=created_owner, existing_owner=existing_owner), \
+                 patch.object(storage.os, "getuid", return_value=501), \
+                 patch.object(storage, "run", return_value=f"{identity}\n{created_owner}\n{existing_owner}"):
+                with self.assertRaisesRegex(ValueError, "owned by the host UID 501"):
+                    storage.check_host(self.directory, "airflow", 20)
+
     def test_rejects_missing_read_only_and_wrong_source_node_mounts(self):
         mount = {"Type": "bind", "RW": True, "Source": str(self.directory),
                  "Destination": "/mnt/postgresql-airflow"}

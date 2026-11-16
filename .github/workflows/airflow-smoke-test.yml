@@ -32,7 +32,7 @@ jobs:
         run: |
           # Disposable CI configuration only; never copy real credentials into the workflow.
           python3 - <<'PY'
-          import base64, json, os
+          import json, os
           from pathlib import Path
           path = Path("config/credentials.local.json")
           credentials = json.loads(Path("config/credentials.example.json").read_text())
@@ -41,7 +41,6 @@ jobs:
               "postgres_password": "synthetic-smoke-admin",
               "password": "synthetic-smoke-metadata",
           }
-          credentials["airflow"]["fernet_key"] = base64.urlsafe_b64encode(os.urandom(32)).decode()
           credentials["postgresql"] = {
               "garmin_analytics_password": "synthetic-smoke-bootstrap",
               "garmin_schema_manager_password": "synthetic-smoke-schema",

@@ -66,3 +66,28 @@ example. The resolved payload and Fernet key were passed through stdin.
 Full-stack Airflow deployment and kind deletion/recreation were not performed.
 Those remain deployment acceptance checks after review. This record does not
 claim that the live cluster has migrated to the new setup.
+
+## Follow-up: empty Fernet setting for fresh local setup
+
+The template now supplies `"fernet_key": ""`; manual key generation is no longer
+part of fresh local setup. The smoke-test workflow uses this same default. Existing
+encrypted installations still require their original key, and conflicting live
+Secrets are never overwritten.
+
+Focused validation on 2026-11-16:
+
+- All **66** infrastructure tests passed. Added coverage accepts the empty setting,
+  rejects missing/invalid settings, keeps other secrets mandatory, streams an empty
+  Secret value through stdin, reuses it on subsequent setup, and rejects an empty
+  local value that conflicts with an existing nonempty encryption key.
+- The Make startup test now exercises the empty template default.
+- A disposable Airflow **3.3.1** container with no network, host mounts, or published
+  ports used temporary SQLite metadata and synthetic credentials. The actual
+  connection importer registered both Garmin connections with their intended
+  logins and plaintext stored passwords; repeat import preserved them. A Variable
+  was also stored unencrypted. An existing encrypted fixture failed import after
+  removing its key, and raw SQL inspection confirmed its ciphertext was unchanged.
+- The temporary containers were removed. Live cluster deployment/restart was not
+  performed. The local placeholder Fernet value was replaced only if it was
+  `test` or the old template placeholder; no credential values were logged.
+- Shell syntax and whitespace checks passed.

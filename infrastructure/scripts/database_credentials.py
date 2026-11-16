@@ -116,7 +116,7 @@ def create_runtime_secrets(context: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["check", "apply"])
+    parser.add_argument("action", choices=["validate", "check", "apply"])
     parser.add_argument("--scope", choices=["analytics", "airflow"], required=True)
     parser.add_argument("--file", type=Path, default=os.environ.get("CREDENTIALS_FILE", DEFAULT_FILE))
     parser.add_argument("--context", default=os.environ.get("KUBE_CONTEXT", "kind-garmin-ai-analytics"))
@@ -129,11 +129,11 @@ def main() -> None:
                                                                       "config/connections.json")))
         if args.action == "check":
             checked_secrets(args.context, credentials, args.scope)
-        else:
+        elif args.action == "apply":
             apply(args.context, credentials, args.scope)
     except ValueError as exception:
         sys.exit(str(exception))
-    print("Credential configuration verified" if args.action == "check" else "Credentials configured")
+    print("Credentials configured" if args.action == "apply" else "Credential configuration verified")
 
 
 if __name__ == "__main__":

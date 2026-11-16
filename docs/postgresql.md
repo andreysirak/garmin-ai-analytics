@@ -14,7 +14,9 @@ chmod 600 config/credentials.local.json
 ```
 
 Fill in the local values once, using **existing** passwords and the original
-Fernet key for an existing cluster. With storage/kind prepared, deploy with:
+Fernet key for an existing encrypted cluster. For a fresh local setup, leave
+`"fernet_key": ""`; no key generation is required and Airflow stores connection
+passwords unencrypted in metadata. With storage/kind prepared, deploy with:
 
 ```bash
 make postgresql-up
@@ -105,7 +107,8 @@ Garmin definitions default to `config/connections.example.json`, with their
 passwords supplied only by `credentials.local.json`. Inline managed passwords
 are rejected. Import uses Airflow's connection model directly, without generated
 password files, and preserves existing unrelated connections. Existing managed
-passwords must match the local file and decrypt using the original Fernet key.
+passwords must match the local file. Encrypted installations must retain the
+original Fernet key to decrypt them; fresh local installations use an empty setting.
 Use `AIRFLOW_CONNECTIONS_FILE` to select a different custom file; use
 `CREDENTIALS_FILE` to select a different private setup file.
 
@@ -362,8 +365,8 @@ database. Original archived responses remain available for replay.
 
 The Connection-name upgrade instructions above still apply independently: keep
 `garmin_schema_manager` and the separate loader login. Their connection settings
-are now derived from `credentials.local.json`; adopt existing passwords and the
-original Fernet key before deployment. See [credential setup](credentials.md).
+are now derived from `credentials.local.json`; adopt existing passwords and keep
+the original Fernet key when encryption is enabled. See [credential setup](credentials.md).
 
 ### Verification
 

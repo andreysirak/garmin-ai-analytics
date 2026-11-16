@@ -2,9 +2,18 @@
 
 PostgreSQL persistence across kind recreation is configured under
 [database storage](database-storage.md): separate Mac-backed directories, static
-PV/PVC bindings and mount/permission checks before startup. The single private
-setup file preserves credentials and the original Fernet key across rebuilds.
+PV/PVC bindings and mount/ownership/permission checks before startup. Local
+PostgreSQL processes use the host UID supplied by Make so PostgreSQL's strict
+directory-owner check also works with Colima SSHFS. The single private
+setup file preserves credentials and the Fernet setting across rebuilds (empty
+for fresh local installations, original key for existing encrypted metadata).
 Existing node-local installations require a one-time migration.
+
+`make stack-up` composes the existing startup targets; `make stack-restart`
+reapplies them and restarts workloads in place. Both check creation-time kind
+settings before deployment and require an explicit, backed-up rebuild when they
+differ. The [manual Quick start](../README.md#quick-start) remains supported;
+see [startup/restart and rebuild behavior](database-storage.md#startup-and-restart-55).
 
 **Environment:** This is a local development deployment running on the developer's Mac, not a production-grade or always-on service. See [Kubernetes execution decision](decisions/0001-kubernetes-execution.md) for why local kind was chosen over managed cloud services and what a GCP Cloud Composer migration would require.
 
@@ -33,6 +42,9 @@ kind cluster "garmin-ai-analytics"
 
 - Kustomize (`infrastructure/kubernetes`): namespaces, ServiceAccount, RBAC, volumes.
 - Helm (`infrastructure/helm/airflow`): Airflow chart 1.22.0, Airflow 3.3.1, bundled PostgreSQL subchart.
+- LocalExecutor runs up to four task workers in the scheduler Pod, which has a
+  2 GiB memory limit. The bounded pool preserves parallel ingestion while avoiding
+  the default 32-worker startup exhausting the local scheduler's memory budget.
 - Separate Bitnami PostgreSQL chart 18.12.18, configured through
   `infrastructure/helm/postgresql/values.yaml` with the official PostgreSQL 17 image;
   its PVC and Secret are managed outside Helm to preserve them across rollback.
@@ -240,15 +252,18 @@ node-level compromise, or a compromised trusted scheduler or auth image.
 
 External secret-manager integration is intentionally deferred for simplicity in
 the current local environment. One protected file supplies setup/rebuild values;
-Kubernetes Secrets remain the runtime delivery mechanism, and Airflow encrypts
-connection passwords in metadata with Fernet. The developer manages file backups
+Kubernetes Secrets remain the runtime delivery mechanism. Fresh local installations
+use an explicitly empty Fernet key, storing connection passwords and Variables
+unencrypted in metadata to avoid a key-generation step. Existing encrypted
+installations retain their original key. The developer manages file backups
 and credential rotation. See [the local workaround and future integration boundary](credentials.md#why-this-local-workaround-exists).
 
 Copy `config/credentials.example.json` to the ignored
 `config/credentials.local.json` and set its permissions to `0600`. It contains
 `garmin.api_key`, the five configured PostgreSQL passwords, and Airflow's Fernet
-key. Each deployment validates its required fields and checks live Secrets before
-applying changes. Missing Secrets are created through stdin; mismatches fail
+setting (empty for fresh local setup). Each deployment validates its required
+fields and checks live Secrets before applying changes. Missing Secrets are
+created through stdin; mismatches fail
 with entry names only. Existing Secret values are never overwritten. Analytics
 deployment does not require a Garmin key. Role passwords and Airflow's managed
 passwords come from this same file without interactive setup. The checked-in
