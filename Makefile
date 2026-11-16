@@ -19,6 +19,9 @@ AIRFLOW_CONNECTIONS_FILE ?= config/connections.json
 SCHEDULER_EXEC := $(KUBECTL) -n $(NAMESPACE) exec airflow-scheduler-0 -c scheduler --
 JAVA_MAVEN_IMAGE := maven:3.9-eclipse-temurin-25
 AIRFLOW_URL := http://localhost:8080
+DATABASE_STORAGE := python3 infrastructure/scripts/local_database_storage.py
+DATABASE_CREDENTIALS := python3 infrastructure/scripts/database_credentials.py
+DATABASE_STORAGE_GID := $(shell id -g)
 
 .PHONY: help prepare-garmin-raw-data cluster-create cluster-status cluster-delete infra-validate infra-up airflow-operator-rollout infra-down \
         infra-status airflow-ui airflow-password airflow-logs test-infra java-verify \
@@ -29,14 +32,19 @@ AIRFLOW_URL := http://localhost:8080
         airflow-image kind-load-airflow-image auth-image kind-load-auth-image \
         auth-policy-verify postgresql-up postgresql-rollback postgresql-status postgresql-verify \
         postgresql-preflight postgresql-roles postgresql-password postgresql-loader-password \
-        postgresql-schema-manager-password airflow-connections-import
+        postgresql-schema-manager-password airflow-connections-import \
+        prepare-database-storage database-storage-check db-secrets-export db-secrets-restore
 
 help:
 	@echo "Cluster and infrastructure:"
 	@echo "  make prepare-garmin-raw-data - Prepare archive directory permissions"
+	@echo "  make prepare-database-storage - Explicitly prepare new host database directories"
+	@echo "  make database-storage-check - Verify host/Colima/kind mounts and database UID access"
+	@echo "  make db-secrets-export      - Save current database/Airflow Secrets privately before rebuilding"
+	@echo "  make db-secrets-restore     - Restore saved Secrets into existing namespaces before deployment"
 	@echo "  make cluster-create         - Create the kind cluster"
 	@echo "  make cluster-status         - Show cluster and node status"
-	@echo "  make cluster-delete         - Delete the cluster and its in-cluster data"
+	@echo "  make cluster-delete         - Delete the cluster; prepared host data survives (see rebuild guide)"
 	@echo "  make infra-validate         - Render Kustomize and Helm manifests"
 	@echo "  make infra-up               - Deploy Airflow and import the local connection file if present"
 	@echo "  make infra-down             - Uninstall Airflow (keeps volumes, Secrets and cluster)"
@@ -76,9 +84,23 @@ prepare-garmin-raw-data:
 	@mkdir -p data/raw/garmin
 	@find data/raw/garmin -type d -exec chgrp $(GARMIN_RAW_DATA_GID) {} + -exec chmod 2770 {} +
 
+prepare-database-storage:
+	$(DATABASE_STORAGE) prepare
+
+database-storage-check:
+	$(DATABASE_STORAGE) check --cluster "$(CLUSTER)" --context "$(CONTEXT)"
+
+db-secrets-export:
+	KUBE_CONTEXT="$(CONTEXT)" $(DATABASE_CREDENTIALS) save
+
+db-secrets-restore:
+	KUBE_CONTEXT="$(CONTEXT)" $(DATABASE_CREDENTIALS) restore
+
 cluster-create: prepare-garmin-raw-data
+	$(DATABASE_STORAGE) check-host
 	@kind get clusters | grep -qx $(CLUSTER) && echo "cluster $(CLUSTER) already exists" || \
-		kind create cluster --config infrastructure/kind/cluster.yaml
+		kind create cluster --name "$(CLUSTER)" --config infrastructure/kind/cluster.yaml
+	$(DATABASE_STORAGE) check --cluster "$(CLUSTER)" --context "$(CONTEXT)"
 
 cluster-status:
 	@kind get clusters | grep -qx $(CLUSTER) || { echo "cluster $(CLUSTER) not found"; exit 1; }
@@ -91,18 +113,23 @@ infra-validate:
 	kubectl kustomize infrastructure/kubernetes/overlays/local > /dev/null
 	kubectl kustomize infrastructure/kubernetes/postgresql > /dev/null
 	helm template $(POSTGRESQL_RELEASE) $(POSTGRESQL_CHART) --version $(POSTGRESQL_CHART_VERSION) \
-		-n $(POSTGRESQL_NAMESPACE) -f $(POSTGRESQL_VALUES) > /dev/null
+		-n $(POSTGRESQL_NAMESPACE) -f $(POSTGRESQL_VALUES) \
+		--set-string storageIdentity=render-only > /dev/null
 	helm template airflow $(AIRFLOW_CHART) -n $(NAMESPACE) \
 		-f infrastructure/helm/airflow/values.yaml \
-		--set-string garminRawDataGid=$(GARMIN_RAW_DATA_GID) $(AIRFLOW_RAW_GROUP) > /dev/null
+		--set-string garminRawDataGid=$(GARMIN_RAW_DATA_GID) $(AIRFLOW_RAW_GROUP) \
+		--set-string postgresql.storageIdentity=render-only > /dev/null
 	@echo "manifests are valid"
 
-infra-up: prepare-garmin-raw-data kind-load-ingestion-java-images kind-load-airflow-image kind-load-auth-image
+infra-up: database-storage-check prepare-garmin-raw-data kind-load-ingestion-java-images kind-load-airflow-image kind-load-auth-image
 	$(KUBECTL) apply -k infrastructure/kubernetes/overlays/local
 	KUBE_CONTEXT="$(CONTEXT)" ./infrastructure/scripts/bootstrap.sh
 	$(HELM) upgrade --install airflow $(AIRFLOW_CHART) \
 		--namespace $(NAMESPACE) -f infrastructure/helm/airflow/values.yaml \
-		--set-string garminRawDataGid=$(GARMIN_RAW_DATA_GID) $(AIRFLOW_RAW_GROUP) --wait --timeout 10m
+		--set-string garminRawDataGid=$(GARMIN_RAW_DATA_GID) $(AIRFLOW_RAW_GROUP) \
+		--set 'postgresql.primary.podSecurityContext.supplementalGroups[0]=$(DATABASE_STORAGE_GID)' \
+		--set-string postgresql.storageIdentity="$$($(DATABASE_STORAGE) identity --database airflow)" \
+		--wait --timeout 10m
 	$(MAKE) airflow-operator-rollout
 	KUBE_CONTEXT="$(CONTEXT)" python3 infrastructure/scripts/import_airflow_connections.py \
 		--if-present "$(AIRFLOW_CONNECTIONS_FILE)"
@@ -121,7 +148,7 @@ infra-status:
 	$(KUBECTL) get pods -n $(JOBS_NAMESPACE)
 
 # PVC and Secret are deliberately managed outside the Helm release.
-postgresql-preflight:
+postgresql-preflight: database-storage-check
 	python3 infrastructure/scripts/check_postgresql_host_port.py --cluster "$(CLUSTER)" --context "$(CONTEXT)"
 
 postgresql-up: postgresql-preflight
@@ -129,6 +156,8 @@ postgresql-up: postgresql-preflight
 	KUBE_CONTEXT="$(CONTEXT)" ./infrastructure/scripts/bootstrap.sh --postgresql-only
 	$(HELM) upgrade --install $(POSTGRESQL_RELEASE) $(POSTGRESQL_CHART) \
 		--version $(POSTGRESQL_CHART_VERSION) -f $(POSTGRESQL_VALUES) \
+		--set 'primary.podSecurityContext.supplementalGroups[0]=$(DATABASE_STORAGE_GID)' \
+		--set-string storageIdentity="$$($(DATABASE_STORAGE) identity --database garmin-analytics)" \
 		--namespace $(POSTGRESQL_NAMESPACE) --wait --timeout 5m
 	$(MAKE) postgresql-roles
 	KUBE_CONTEXT="$(CONTEXT)" python3 infrastructure/scripts/verify_postgresql_host.py

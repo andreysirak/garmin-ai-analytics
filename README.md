@@ -95,9 +95,16 @@ Install Docker (or Colima), kind, kubectl, Helm, Python 3.12, and OpenSSL. Analy
 ### 1. Create the cluster
 
 ```bash
+make prepare-database-storage  # First installation only; see migration guide for existing databases
 make cluster-create
 make infra-validate
 ```
+
+Both PostgreSQL databases use separate host directories under `data/postgresql/`.
+Database mount identities and write permissions are checked before deployment.
+Existing node-local PVCs require a one-time backup/restore migration; do not delete
+the cluster until backups and credential snapshots are checked. See
+[database storage and explicit rebuild](docs/database-storage.md).
 
 ### 2. Configure Garmin credentials
 
@@ -285,6 +292,7 @@ Interested in Java, Python, Airflow, Kubernetes, or data engineering? Contributi
 
 - [Architecture and security](docs/architecture.md)
 - [Local analytics PostgreSQL deployment and rollback](docs/postgresql.md)
+- [Persistent database directories, migration, and cluster rebuild](docs/database-storage.md)
 - [Kubernetes execution decision](docs/decisions/0001-kubernetes-execution.md)
 - [Java ingestion and Airflow integration decision](docs/decisions/0002-java-garmin-data-ingestion.md)
 - [Contributing, Story/Task workflow and PR review standards](CONTRIBUTING.md)

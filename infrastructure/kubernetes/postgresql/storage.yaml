@@ -1,5 +1,19 @@
 # Managed outside Helm so deployment rollback/uninstall cannot remove the claim.
-# Uses the local kind cluster's default StorageClass (node-local storage).
+# The backing directory is mounted from the Mac, not kind's node-local provisioner.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: garmin-postgresql-data
+spec:
+  capacity:
+    storage: 5Gi
+  accessModes: ["ReadWriteOnce"]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: garmin-postgresql-data
+  hostPath:
+    path: /mnt/postgresql-garmin-analytics
+    type: Directory
+---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -7,6 +21,8 @@ metadata:
   namespace: garmin-analytics
 spec:
   accessModes: ["ReadWriteOnce"]
+  storageClassName: garmin-postgresql-data
+  volumeName: garmin-postgresql-data
   resources:
     requests:
       storage: 5Gi

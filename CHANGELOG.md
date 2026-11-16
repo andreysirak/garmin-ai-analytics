@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Preserve Airflow metadata and Garmin analytics PostgreSQL files on separate
+  host-backed kind mounts; check identities, majors, and UID write permissions
+  before server startup. Save/restore original database and Airflow Secrets in
+  protected ignored files. Document first-install migration and explicit rebuild
+  coordination with #35/#55. Existing node-local PVCs require migration (#58).
+
 | Type | What changed | Breaking change | Upgrade steps | PR |
 | --- | --- | --- | --- | --- |
 | Added | Daily-summary Python loader uses successful ingestion XCom, validates archive keys/date, and transactionally upserts the full JSONB payload without changing raw files (#38) | Daily runs now require garmin_analytics_loader and scheduler archive access | Apply updated Airflow Helm values through make infra-up for the read-only archive mount and host GID; see docs/postgresql.md | |

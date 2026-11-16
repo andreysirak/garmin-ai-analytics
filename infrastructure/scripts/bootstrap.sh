@@ -43,7 +43,9 @@ bootstrap_postgresql() {
 
 case "${1:-}" in
   --postgresql-only)
+    python3 "${SCRIPT_DIR}/database_credentials.py" restore --database garmin-analytics
     bootstrap_postgresql
+    python3 "${SCRIPT_DIR}/database_credentials.py" save --database garmin-analytics
     exit 0
     ;;
   "") ;;
@@ -94,6 +96,8 @@ bootstrap_garmin_credentials() {
   echo "secret/garmin-api-credentials created"
 }
 
+python3 "${SCRIPT_DIR}/database_credentials.py" restore --database airflow
+
 DB_PASSWORD=$(random_secret)
 ADMIN_PASSWORD=$(random_secret)
 
@@ -117,6 +121,8 @@ create_if_missing "$NAMESPACE" airflow-jwt-secret \
   --from-literal=jwt-secret="$(random_secret)"
 create_if_missing "$NAMESPACE" airflow-simple-auth \
   --from-literal=passwords.json="{\"admin\": \"${ADMIN_PASSWORD}\"}"
+
+python3 "${SCRIPT_DIR}/database_credentials.py" save --database airflow
 
 bootstrap_garmin_credentials
 create_if_missing "$JOBS_NAMESPACE" garmin-access-token \

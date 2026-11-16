@@ -24,6 +24,8 @@ auth:
   usePasswordFiles: true
 
 postgresqlDataDir: /var/lib/postgresql/data/pgdata
+# Supplied from the Mac marker by Make, never inferred from a container directory.
+storageIdentity: ""
 primary:
   service:
     type: NodePort
@@ -39,6 +41,36 @@ primary:
   # Bitnami's .initialized marker. Other Bitnami-specific image features stay off.
   podSecurityContext:
     fsGroup: 999
+    supplementalGroups: []  # Make supplies the host directory's group.
+  initContainers:
+    - name: verify-database-storage
+      image: busybox:1.37
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        allowPrivilegeEscalation: false
+      env:
+        - name: EXPECTED_STORAGE_ID
+          value: '{{ required "storageIdentity must be supplied by Make" .Values.storageIdentity }}'
+      command:
+        - sh
+        - -ec
+        - |
+          test "$(cat /storage/.volume-id)" = "$EXPECTED_STORAGE_ID"
+          if [ -d /storage/pgdata ]; then
+            entries=$(ls -A /storage/pgdata)
+            if [ -n "$entries" ]; then
+              test "$(cat /storage/pgdata/PG_VERSION)" = 17
+            fi
+            probe=$(mktemp /storage/pgdata/.write-check.XXXXXX)
+            rm "$probe"
+          fi
+          probe=$(mktemp /storage/.write-check.XXXXXX)
+          rm "$probe"
+      volumeMounts:
+        - name: data
+          mountPath: /storage
   containerSecurityContext:
     runAsUser: 999
     runAsGroup: 999

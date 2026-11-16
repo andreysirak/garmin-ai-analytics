@@ -14,7 +14,8 @@ make postgresql-up
 make postgresql-status
 ```
 
-`postgresql-up` applies the namespace and PVC, bootstraps the password Secret, and
+`postgresql-up` verifies host/Colima/kind database mounts, applies the namespace and PVC,
+restores or bootstraps the password Secret, and
 installs/upgrades the pinned Bitnami PostgreSQL chart. It does not build Garmin images, deploy
 Airflow, or require Garmin credentials. Repeating the command preserves the
 existing password and data.
@@ -286,19 +287,26 @@ No `kubectl port-forward` is needed. Airflow always uses the internal Service;
 `127.0.0.1` inside an Airflow Pod would point back to that Pod.
 
 The PVC is applied separately with Kustomize and is not a Helm release resource.
-On kind it uses the default `standard` StorageClass, which stores data outside the
-PostgreSQL container, on the kind node. Pod replacement, release upgrades,
-rollback, and Helm uninstall leave the claim intact. `make infra-down` only
-uninstalls Airflow and leaves this database running.
+It binds to the static `garmin-postgresql-data` PV with a `Retain` reclaim policy,
+backed by `data/postgresql/garmin-analytics` on the Mac through Colima and kind.
+Airflow metadata has a separate host directory and PVC. Pod replacement, release
+upgrades, rollback, Helm uninstall, and kind node deletion leave these host files
+intact. `make infra-down` only uninstalls Airflow and leaves analytics running.
 
-This is node-local development storage, not a backup. **Deleting the PVC or its
-namespace, deleting the kind cluster (`make cluster-delete`), or losing the kind
-node can destroy this database.** The default StorageClass has a `Delete` reclaim
-policy. Unlike the raw JSON archive, this volume is not mounted from the Mac's
-project directory. The 5 GiB claim is a storage request, not an enforced filesystem
-quota on kind's local-path provisioner.
+Existing node-local installations must migrate once before this layout can be
+used. Storage identities, UID write checks, original Secret snapshots, and
+PostgreSQL major checks protect reattachment. Follow the
+[database migration and rebuild procedure](database-storage.md) before changing
+an existing cluster. Host storage is not a backup, and static PV sizes do not
+enforce a filesystem quota. Losing/deleting host directories still destroys data.
 
 ### Existing clusters: back up before recreation
+
+For the database-mount migration and subsequent reattachment, follow
+[database storage](database-storage.md). The manual dumps below remain useful
+for the optional backup/restore work tracked in #35; save the protected credential
+snapshots with `make db-secrets-export` as well. Do not automatically invoke the
+old dump-restore sequence on an already migrated database.
 
 kind/Docker cannot add host-port bindings to an existing node container.
 `make postgresql-up` fails **before applying resources** when the mapping is

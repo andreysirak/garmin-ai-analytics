@@ -7,3 +7,4 @@ config/connections.json
 **/target
 airflow/logs
 data
+backups

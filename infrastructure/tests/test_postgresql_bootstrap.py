@@ -1,7 +1,9 @@
 """Exercise credential preservation and fail-closed bootstrap without a cluster."""
 
 import os
+import shlex
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -31,6 +33,19 @@ case "$*" in
 esac
 ''')
         kubectl.chmod(0o700)
+        # Credential snapshot behavior is tested independently with synthetic Secrets.
+        # Here record the bootstrap ordering without touching repository-local state.
+        python = self.directory / "python3"
+        python.write_text(f'''#!/usr/bin/env bash
+set -eu
+if [[ "$1" == */database_credentials.py ]]; then
+  printf 'credentials %s\\n' "$*" >> "$CALLS"
+  if [[ "$SCENARIO" == restore-error && "$2" == restore ]]; then exit 1; fi
+  exit 0
+fi
+exec {shlex.quote(sys.executable)} "$@"
+''')
+        python.chmod(0o700)
 
     def bootstrap(self, scenario):
         environment = {
@@ -46,7 +61,8 @@ esac
             env=environment, capture_output=True, text=True,
         )
         calls = (self.directory / "calls").read_text()
-        self.assertIn("--context synthetic-context -n garmin-analytics", calls)
+        if scenario != "restore-error":
+            self.assertIn("--context synthetic-context -n garmin-analytics", calls)
         self.assertNotIn("airflow", calls)
         return result, calls
 
@@ -55,6 +71,8 @@ esac
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("create secret", calls)
         self.assertFalse((self.directory / "password").exists())
+        self.assertIn("restore --database garmin-analytics", calls.splitlines()[0])
+        self.assertIn("save --database garmin-analytics", calls.splitlines()[-1])
 
     def test_missing_secret_is_generated_without_exposing_password(self):
         result, calls = self.bootstrap("missing")
@@ -73,6 +91,12 @@ esac
         result, _ = self.bootstrap("create-error")
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("created", result.stdout)
+
+    def test_credential_restore_failure_stops_before_secret_creation(self):
+        result, calls = self.bootstrap("restore-error")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("create secret", calls)
+        self.assertNotIn("save --database", calls)
 
 
 if __name__ == "__main__":

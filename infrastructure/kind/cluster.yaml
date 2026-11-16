@@ -11,6 +11,11 @@ nodes:
         readOnly: true
       - hostPath: ./data/raw/garmin
         containerPath: /mnt/garmin-raw-data
+      # Prepared explicitly; separate live database files survive node deletion.
+      - hostPath: ./data/postgresql/airflow
+        containerPath: /mnt/postgresql-airflow
+      - hostPath: ./data/postgresql/garmin-analytics
+        containerPath: /mnt/postgresql-garmin-analytics
     extraPortMappings:
       # Airflow API server / UI (NodePort 30080) -> http://localhost:8080
       - containerPort: 30080

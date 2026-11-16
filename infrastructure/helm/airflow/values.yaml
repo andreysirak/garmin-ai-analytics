@@ -21,6 +21,8 @@ data:
 
 postgresql:
   enabled: true
+  # Chart 13.2.24 retains PostgreSQL 16; do not change majors during reattachment.
+  storageIdentity: ""
   auth:
     enablePostgresUser: true
     existingSecret: airflow-postgresql
@@ -30,6 +32,38 @@ postgresql:
     persistence:
       enabled: true
       size: 2Gi
+      existingClaim: airflow-postgresql-data
+    podSecurityContext:
+      supplementalGroups: []  # Make supplies the host directory's group.
+    initContainers:
+      - name: verify-database-storage
+        image: busybox:1.37
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1001
+          runAsGroup: 1001
+          allowPrivilegeEscalation: false
+        env:
+          - name: EXPECTED_STORAGE_ID
+            value: '{{ required "postgresql.storageIdentity must be supplied by Make" .Values.storageIdentity }}'
+        command:
+          - sh
+          - -ec
+          - |
+            test "$(cat /storage/.volume-id)" = "$EXPECTED_STORAGE_ID"
+            if [ -d /storage/data ]; then
+              entries=$(ls -A /storage/data)
+              if [ -n "$entries" ]; then
+                test "$(cat /storage/data/PG_VERSION)" = 16
+              fi
+              probe=$(mktemp /storage/data/.write-check.XXXXXX)
+              rm "$probe"
+            fi
+            probe=$(mktemp /storage/.write-check.XXXXXX)
+            rm "$probe"
+        volumeMounts:
+          - name: data
+            mountPath: /storage
     resources:
       requests: {cpu: 100m, memory: 256Mi}
       limits: {memory: 512Mi}

@@ -25,7 +25,9 @@ jobs:
           echo "aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d  kind-linux-amd64" | sha256sum --check
           sudo install -m 0755 kind-linux-amd64 /usr/local/bin/kind
       - name: Create cluster
-        run: make cluster-create
+        run: |
+          make prepare-database-storage
+          make cluster-create
       - name: Deploy infrastructure
         run: make infra-up
       - name: Run DAG smoke test
