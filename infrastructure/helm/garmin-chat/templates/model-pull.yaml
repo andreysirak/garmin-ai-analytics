@@ -1,0 +1,44 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  # New Job per upgrade; avoid immutable Job updates. Cached models skip download.
+  name: {{ include "garmin-chat.name" . }}-model-pull-{{ .Release.Revision }}
+  labels:
+    {{- include "garmin-chat.labels" . | nindent 4 }}
+    app.kubernetes.io/component: model-pull
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: {{ .Values.ollama.initialization.activeDeadlineSeconds }}
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: model-pull
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+      containers:
+        - name: model-pull
+          image: {{ .Values.ollama.image | quote }}
+          imagePullPolicy: {{ .Values.ollama.imagePullPolicy }}
+          env:
+            - {name: HOME, value: /tmp}
+            - name: OLLAMA_HOST
+              value: {{ printf "http://%s-ollama:11434" (include "garmin-chat.name" .) | quote }}
+            - name: OLLAMA_MODEL
+              value: {{ .Values.ollama.model | quote }}
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              {{- .Files.Get "files/pull-model.sh" | nindent 14 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          resources:
+            {{- toYaml .Values.ollama.initialization.resources | nindent 12 }}

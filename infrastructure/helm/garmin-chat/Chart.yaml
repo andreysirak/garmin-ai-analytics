@@ -1,0 +1,6 @@
+apiVersion: v2
+name: garmin-chat
+description: Local Garmin chat with React, Spring AI and CPU Ollama in kind
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

@@ -5,6 +5,9 @@ config/connections.local.json
 config/connections.json
 .idea
 **/target
+**/node_modules
+**/dist
+garmin-chat/values.local.yaml
 airflow/logs
 data
 backups

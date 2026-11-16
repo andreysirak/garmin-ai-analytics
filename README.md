@@ -84,6 +84,14 @@ The project currently **collects and archives** data; it does not yet compute he
 
 ## Quick start
 
+For the Spring Boot + Spring AI + Ollama + React text demo in the existing kind
+cluster, see [Garmin chat](garmin-chat/README.md). `make chat-up` builds and loads
+the app images, deploys the chat Helm chart, initializes its model cache, and
+forwards the frontend to http://127.0.0.1:5173 in the same terminal.
+The demo resolves dates from natural questions, loads complete JSON summaries
+for a server-selected profile through a read-only account, and checks context
+capacity before asking the model for an answer.
+
 ### Prerequisites
 
 Install Docker (or Colima), kind, kubectl, Helm, Python 3.12, and OpenSSL. Analytics PostgreSQL also requires the local `psql` client (`brew install libpq` on macOS). Make checks find Homebrew libpq automatically, even when its `bin` directory is not on PATH. Java 25 and Maven are needed for direct Java development; Make targets can build Java code using Docker.

@@ -1,0 +1,11 @@
+# Optional deployment overrides. Dates come from the question; the server profile is in the Secret.
+# Defaults live in infrastructure/helm/garmin-chat/values.yaml.
+ollama:
+  contextLength: 32768
+  # model: qwen2.5:1.5b-instruct-q4_K_M
+  # resources:
+  #   requests: {cpu: 250m, memory: 1536Mi}
+  #   limits: {cpu: "2", memory: 3Gi}
+chat:
+  timezone: Europe/Oslo
+  responseTokens: 1024
