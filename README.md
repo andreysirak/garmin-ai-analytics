@@ -106,9 +106,9 @@ Java ingestion Pods together, the initial recommendation is:
 | Host | 8 or more logical CPUs and 16 GiB or more RAM, leaving room for the OS and IDE |
 | Container VM | 4 CPUs and 8 GiB RAM, initially retaining existing workload requests/limits |
 
-These are starting recommendations, not a verified minimum or throughput
-guarantee. Larger models, longer prompts and historical backfills need separate
-measurement. Four CPUs do not increase the available memory.
+The 4-CPU/8-GiB VM passed the bounded local check below; the host recommendation
+is not a verified minimum. Larger models, longer prompts and historical backfills
+need separate measurement. Four CPUs do not increase the available memory.
 
 #### Colima and Docker configuration
 
@@ -118,6 +118,7 @@ For an existing profile, arrange a maintenance window, finish active tasks and
 before the supported stop/start resize:
 
 ```bash
+docker --context colima stop --timeout 120 garmin-ai-analytics-control-plane
 colima stop --profile default
 colima start --profile default --cpu 4 --memory 8
 docker --context colima start garmin-ai-analytics-control-plane  # Existing kind node
@@ -127,14 +128,18 @@ This reuses the same VM and kind container. Preserve the existing profile, disk,
 runtime and mounts; do not delete/recreate the cluster for this CPU change.
 Plan approximately 5–10 minutes of downtime, possibly longer during recovery.
 Every container in that Colima profile is affected, including services outside
-kind; restore previously running containers and reconnect port-forwards afterward.
+kind; gracefully stop those containers before stopping the VM, then restore
+previously running containers and reconnect port-forwards afterward (`make chat-ui`
+for Chat). The verified resize recovered in about 6 minutes 18 seconds.
 See [Colima's resize instructions](https://github.com/abiosoft/colima/blob/v0.8.1/README.md#customizing-the-vm)
 and [persistent storage](docs/database-storage.md).
 
 With Docker Desktop instead, configure equivalent CPU/RAM in its
 [VM resource settings](https://docs.docker.com/desktop/settings-and-maintenance/settings/#resources).
 kind runs inside the container VM: host CPU count alone does not determine
-Kubernetes capacity. Verify what Docker and the node actually see after resizing:
+Kubernetes capacity. Other Docker containers also share that VM's resources.
+Saved configuration alone does not prove a running VM was resized. Verify what
+Docker and the node actually see after the stop/start:
 
 ```bash
 docker info --format 'CPUs={{.NCPU}} RAM(bytes)={{.MemTotal}}'
@@ -168,26 +173,37 @@ Server; its absence does not prevent inspecting allocation or scheduling events.
 
 #### Verified local configuration (2026-11-17)
 
-The following were inspected live, before the proposed resize:
+The following were verified after resizing the existing profile and cluster:
 
 | Item | Observed value |
 | --- | --- |
 | Host | 10 logical CPUs, 16 GiB RAM |
-| Colima / Docker | Colima 0.8.1, default profile, Docker runtime, 2 CPUs, 8 GiB VM RAM, 100 GiB disk |
-| kind | One ARM64 node, Kubernetes v1.33.7; allocatable CPU 2000m, memory 8113864Ki (about 7.74 GiB) |
-| Scheduled requests | CPU 1925m; memory 4162Mi; remaining CPU 75m |
+| Colima / Docker | Colima 0.8.1, default profile, Docker runtime, 4 CPUs, 8 GiB VM RAM, 100 GiB disk |
+| kind | Same ARM64 node, Kubernetes v1.33.7; allocatable CPU 4000m, memory 8113432Ki (about 7.74 GiB) |
+| Baseline requests | CPU 1925m (48%); memory 4162Mi; CPU headroom 2075m before ingestion |
 | Java ingestion specification, each Pod | Requests: 100m CPU / 256Mi RAM; limits: 1000m CPU / 512Mi RAM |
+| Inference workload | Cached `qwen2.5:1.5b-instruct-q4_K_M`, CPU inference, context 32768, one concurrent synthetic request capped at 512 generated tokens |
+| Sampled node usage during the check | Peak CPU 3409.8m; peak memory working set 4941.5Mi (about 4.83 GiB); sampled every approximately 3 seconds |
 
-The inspected daily run had successful authentication/schema setup and failed
-Daily Summary and Sleep ingestion tasks. The CPU budget explains the reported
-scheduling failure: 75m cannot fit either 100m Pod. No failure events remained
-when inspected. Explicit memory limits totalled 9222Mi, above node memory;
-simultaneous peak memory consumption still needs verification.
+Before the resize, 1925m of requests left only 75m on a 2000m node, preventing
+either 100m ingestion Pod from fitting. After the resize, both Java containers
+were observed running together during Ollama inference. The retried daily run
+completed authentication, Daily Summary, Sleep and staging successfully, with no
+`FailedScheduling` events for its Java Pods. Both ingestion tasks completed in
+about 10.6 seconds; the synthetic inference completed with 512 generated tokens.
 
-The 4-CPU resize and ingestion/Ollama overlap test are **not yet verified**.
-If the node advertises 4000m with unchanged requests, calculated CPU headroom
-would be 2075m at baseline and 1875m with both Java Pods. These are projections,
-not measured test results. No workload tests were run during this inspection.
+Before stopping Colima, full PostgreSQL 16.1/17.11 backups were restored into
+isolated test containers, including roles, ownership and grants. All 71 Airflow
+tables and the analytics table matched source-snapshot row counts and content
+digests. Recovery preserved existing Docker containers, node/PVC identities,
+backfilled rows, Ollama model files and all workload resource settings. Daily
+scheduling was restored and backend/database/model health reported `UP`.
+
+With both Java Pods, unchanged CPU requests total 2125m, leaving 1875m of
+scheduling headroom. This was one daily run with bounded synthetic inference,
+not a historical-backfill or long-prompt stress test. Explicit memory limits
+still total 9222Mi, above node memory; limits can overcommit memory. The sampled
+peak is evidence for this check, not a guarantee for larger workloads.
 
 ### 1. Configure credentials once
 
