@@ -40,7 +40,7 @@ CHAT_BACKEND_IMAGE := garmin-chat-backend:local
 CHAT_PORT ?= 5173
 
 .PHONY: help prepare-garmin-raw-data cluster-create cluster-status cluster-delete infra-validate infra-up airflow-operator-rollout infra-down \
-        infra-status airflow-ui airflow-password airflow-logs test-infra java-verify \
+        infra-status infra-resources airflow-ui airflow-password airflow-logs test-infra java-verify \
         java-package-ingestion java-package-summary java-package-sleep \
         docker-build docker-build-summary docker-build-sleep \
         kind-load-images kind-load-ingestion-java-images \
@@ -65,7 +65,8 @@ help:
 	@echo "  make infra-validate         - Render Kustomize and Helm manifests"
 	@echo "  make infra-up               - Deploy Airflow using credentials.local.json and derived connections"
 	@echo "  make infra-down             - Uninstall Airflow (keeps volumes, Secrets and cluster)"
-	@echo "  make infra-status           - Show Helm release and Pods"
+	@echo "  make infra-status           - Show namespaces, Helm releases and Pods across the cluster"
+	@echo "  make infra-resources        - Show capacity, Pod requests/limits and available live usage"
 	@echo "PostgreSQL (separate from Airflow metadata):"
 	@echo "  make postgresql-up          - Deploy analytics and configure role passwords from credentials.local.json"
 	@echo "  make postgresql-rollback    - Restore previous release (or POSTGRESQL_REVISION=N), keeping data"
@@ -198,9 +199,19 @@ infra-down:
 	$(HELM) uninstall airflow --namespace $(NAMESPACE)
 
 infra-status:
-	$(HELM) list -n $(NAMESPACE)
-	$(KUBECTL) get pods -n $(NAMESPACE)
-	$(KUBECTL) get pods -n $(JOBS_NAMESPACE)
+	$(KUBECTL) get namespaces
+	$(HELM) list --all-namespaces
+	$(KUBECTL) get pods --all-namespaces
+
+infra-resources:
+	$(KUBECTL) get nodes -o 'custom-columns=NAME:.metadata.name,CPU_CAPACITY:.status.capacity.cpu,CPU_ALLOCATABLE:.status.allocatable.cpu,MEMORY_CAPACITY:.status.capacity.memory,MEMORY_ALLOCATABLE:.status.allocatable.memory'
+	@node_resources=$$($(KUBECTL) describe nodes) || exit $$?; \
+		printf '%s\n' "$$node_resources" | sed -n '/^Name:/p; /^Non-terminated Pods:/,/^Events:/p'
+	@if $(KUBECTL) top nodes; then \
+		$(KUBECTL) top pods --all-namespaces --sort-by=memory; \
+	else \
+		echo "Live usage unavailable; kubectl top needs a working Metrics Server."; \
+	fi
 
 # PVC and Secret are deliberately managed outside the Helm release.
 postgresql-preflight: analytics-credentials-check database-storage-check

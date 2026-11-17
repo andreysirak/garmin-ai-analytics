@@ -191,6 +191,20 @@ installations require the documented migration first. Follow the
 [storage migration and rebuild guide](docs/database-storage.md#startup-and-restart-55)
 when a preflight fails; the wrappers never recreate a cluster automatically.
 
+Inspect the running cluster:
+
+```bash
+make infra-status     # Namespaces, Helm releases and Pods across all namespaces
+make infra-resources  # Node capacity, Pod requests/limits, allocation totals and actual usage
+```
+
+`infra-resources` uses `kubectl top nodes` and
+`kubectl top pods --all-namespaces --sort-by=memory` for actual CPU/memory usage.
+This requires a working Metrics Server. If metrics are unavailable, it prints
+an explanation; the capacity, requests/limits and allocation report still works.
+Requests and limits are configured values; usage shows measured consumption.
+Both targets use the existing kind context.
+
 ### 4. Run the pipeline
 
 The local scheduler uses four LocalExecutor workers and a 2 GiB memory limit.

@@ -10,6 +10,8 @@
 
 | Type | What changed | Breaking change | Upgrade steps | PR |
 | --- | --- | --- | --- | --- |
+| Added | make infra-resources shows node capacity, per-Pod requests/limits and allocation totals, plus live node/Pod usage through kubectl top when Metrics Server is available | No | Run make infra-resources; live usage requires Metrics Server | |
+| Changed | make infra-status lists all namespaces, Helm releases and Pods across the existing cluster, including Garmin analytics and chat | No | Run make infra-status | |
 | Fixed | Allow time for both sequential Ollama calls through the frontend proxy, make the per-call timeout configurable, and explain model timeouts after full-week CPU inference caused a 504 | No | Rebuild/redeploy with make chat-up; tune chat.modelTimeoutSeconds for slower CPUs | |
 | Fixed | Date extraction keeps reference-date metadata out of the user question, emits the period type before dependent fields, and includes multilingual period examples after a Russian week question incorrectly requested clarification | No | Rebuild/redeploy with make chat-up; date-only checks passed on the configured small Ollama model | |
 | Added | Garmin chat resolves structured dates with Ollama and an injected Clock/timezone, queries complete JSON for the server profile and selected period, clarifies missing dates and blocks oversized answer prompts; make chat-up deploys the stack and forwards the UI (#41) | Existing chat Secret needs a profile-id key | Review the profile Secret key, context budget and timezone before deployment; see garmin-chat/README.md | |
