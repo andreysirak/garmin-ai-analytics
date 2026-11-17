@@ -36,7 +36,7 @@ spring:
   http:
     client:
       connect-timeout: 5s
-      read-timeout: 180s
+      read-timeout: ${OLLAMA_REQUEST_TIMEOUT:300s}
 
 garmin:
   chat:

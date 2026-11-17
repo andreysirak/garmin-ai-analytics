@@ -38,6 +38,7 @@ Local backend development supplies that environment variable directly.
 | --- | --- |
 | `chat.timezone` | `Europe/Oslo`; IANA timezone for relative dates |
 | `chat.responseTokens` | 1024; answer token limit and reserved context space |
+| `chat.modelTimeoutSeconds` | 300 per Ollama call; proxy allows both calls plus 30 seconds |
 | `ollama.contextLength` | 8192; used by both Spring AI and Ollama |
 | `ollama.model` | `qwen2.5:1.5b-instruct-q4_K_M` |
 | `ollama.resources` | CPU request 250m / limit 2; memory request 1536Mi / limit 3Gi |
@@ -49,6 +50,15 @@ on pinned [Ollama 0.40.16](https://github.com/ollama/ollama/releases/tag/v0.40.1
 Inference uses CPU, one loaded model, one concurrent inference and one queued
 request. Requests/limits/model are configurable. Keep the configured context
 within the selected model's supported window and available memory.
+
+A full week of JSON can take several minutes on CPU. The non-streaming request
+includes date extraction followed by an answer call; the frontend waits for
+both. Set `chat.modelTimeoutSeconds` higher on a slower machine. Helm adjusts
+the proxy timeout to twice that value plus 30 seconds, so the backend can return
+a useful timeout error before Nginx closes the request. Direct backend runs use
+`OLLAMA_REQUEST_TIMEOUT` (a duration such as `300s`). A timeout returns HTTP 503
+with a retry hint and asks for a shorter period; it does not reduce the JSON.
+The browser stays on “Preparing your answer…” while waiting.
 
 Optional deployment overrides:
 
@@ -269,6 +279,10 @@ no chat memory. Blank HTTP messages remain HTTP 400.
    configured timezone. The seven-day period must end yesterday; last week
    must be the previous Monday–Sunday. Check actual measurements against JSON,
    including missing values and zeros; a small model can make arithmetic errors.
+   Also retry “как я спал последнюю неделю ?”. Allow several minutes for the
+   full-week CPU request. Expect an answer for the seven completed days or an
+   explanatory backend error, rather than the old generic proxy 504. On a
+   slower machine, raise `chat.modelTimeoutSeconds` and rerun `make chat-up`.
 4. Ask “How did I sleep?” or use ambiguous dates. Expect a request for a clear
    period, with no database query and no answer call. Retry with the complete
    question and explicit dates. A valid period with no rows should give a direct

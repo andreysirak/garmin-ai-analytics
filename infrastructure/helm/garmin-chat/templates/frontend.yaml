@@ -30,6 +30,8 @@ spec:
           env:
             - name: BACKEND_HOST
               value: {{ printf "%s-backend" (include "garmin-chat.name" .) | quote }}
+            - name: API_PROXY_TIMEOUT_SECONDS
+              value: {{ add (mul 2 .Values.chat.modelTimeoutSeconds) 30 | quote }}
           readinessProbe:
             httpGet: {path: /healthz, port: http}
           livenessProbe:

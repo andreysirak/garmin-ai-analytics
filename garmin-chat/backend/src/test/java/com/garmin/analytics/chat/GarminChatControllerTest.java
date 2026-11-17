@@ -8,11 +8,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.SerializationFeature;
 import java.io.IOException;
+import java.net.SocketTimeoutException;
+import java.net.http.HttpTimeoutException;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatModel;
@@ -24,6 +28,7 @@ import org.springframework.http.converter.json.Jackson2ObjectMapperBuilder;
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.client.ResourceAccessException;
 
 class GarminChatControllerTest {
 
@@ -106,6 +111,28 @@ class GarminChatControllerTest {
         .andExpect(jsonPath("$.detail").value(
             "The chat model is initializing or unavailable. Please retry shortly. "
             + "Check the model-pull Job and Ollama status if this persists."));
+  }
+
+  @ParameterizedTest
+  @MethodSource("timeouts")
+  void explainsModelTimeoutsWithoutLeakingTransportDetails(IOException timeout) throws Exception {
+    var mvc = mvc((profile, from, to) -> List.of(
+        new DailySummary(123L, start, "{\"totalSteps\":100}")), prompt -> {
+      throw new ResourceAccessException("private model URL and request details", timeout);
+    });
+
+    mvc.perform(post("/api/chat").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"message\":\"How did I sleep last week?\"}"))
+        .andExpect(status().isServiceUnavailable())
+        .andExpect(header().string("Retry-After", "10"))
+        .andExpect(jsonPath("$.detail").value(
+            "The local model took too long to respond. Please choose a shorter period "
+            + "or retry when the model is less busy."));
+  }
+
+  private static Stream<IOException> timeouts() {
+    return Stream.of(new HttpTimeoutException("private transport details"),
+        new SocketTimeoutException("private transport details"));
   }
 
   @Test

@@ -2,10 +2,12 @@ package com.garmin.analytics.chat;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.time.Duration;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.boot.autoconfigure.http.client.HttpClientProperties;
 import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
@@ -26,6 +28,17 @@ class ChatConfigurationTest {
       assertThat(context).hasSingleBean(DailySummaryRepository.class);
       assertThat(context).hasSingleBean(QuestionDateResolver.class);
       assertThat(context).hasSingleBean(PromptBudget.class);
+      assertThat(context.getBean(HttpClientProperties.class).getReadTimeout())
+          .isEqualTo(Duration.ofSeconds(300));
+    });
+  }
+
+  @Test
+  void bindsTheConfiguredModelTimeoutToTheHttpClient() {
+    runner.withPropertyValues("OLLAMA_REQUEST_TIMEOUT=420s").run(context -> {
+      assertThat(context).hasNotFailed();
+      assertThat(context.getBean(HttpClientProperties.class).getReadTimeout())
+          .isEqualTo(Duration.ofSeconds(420));
     });
   }
 

@@ -15,3 +15,4 @@ data:
   OLLAMA_BASE_URL: {{ printf "http://%s-ollama:11434" (include "garmin-chat.name" .) | quote }}
   OLLAMA_MODEL: {{ .Values.ollama.model | quote }}
   OLLAMA_CONTEXT_LENGTH: {{ .Values.ollama.contextLength | quote }}
+  OLLAMA_REQUEST_TIMEOUT: {{ printf "%ds" (int .Values.chat.modelTimeoutSeconds) | quote }}

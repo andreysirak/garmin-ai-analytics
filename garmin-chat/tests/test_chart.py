@@ -121,3 +121,20 @@ class ChartTest(unittest.TestCase):
                                   ({}, ["--set", "ollama.image=ollama/ollama:latest"])]:
             with self.subTest(kwargs=kwargs, overrides=overrides):
                 self.assertNotEqual(render(*overrides, **kwargs).returncode, 0)
+
+    def test_proxy_allows_both_model_calls_for_default_and_overridden_timeouts(self):
+        for overrides in ([], ["--set", "chat.modelTimeoutSeconds=420"]):
+            with self.subTest(overrides=overrides):
+                result = render(*overrides)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                resources = [item for item in yaml.safe_load_all(result.stdout) if item]
+                config = next(item["data"] for item in resources if item["kind"] == "ConfigMap")
+                frontend = next(item for item in resources if item["kind"] == "Deployment"
+                                and item["metadata"]["name"] == "garmin-chat-frontend")
+                env = environment(frontend["spec"]["template"]["spec"]["containers"][0])
+                per_call = int(config["OLLAMA_REQUEST_TIMEOUT"].removesuffix("s"))
+                proxy = int(env["API_PROXY_TIMEOUT_SECONDS"]["value"])
+                self.assertGreater(proxy, 2 * per_call + 15)  # Includes the database/health checks.
+                template = (ROOT / "garmin-chat/frontend/nginx.conf.template").read_text()
+                self.assertIn("proxy_read_timeout ${API_PROXY_TIMEOUT_SECONDS}s;", template)
+        self.assertNotEqual(render("--set", "chat.modelTimeoutSeconds=0").returncode, 0)

@@ -11,6 +11,8 @@ database:
 chat:
   timezone: Europe/Oslo
   responseTokens: 1024
+  # Per model call. The frontend allows two calls plus 30 seconds of overhead.
+  modelTimeoutSeconds: 300
 
 frontend:
   image: garmin-chat-frontend:local
