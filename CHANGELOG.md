@@ -10,6 +10,8 @@
 
 | Type | What changed | Breaking change | Upgrade steps | PR |
 | --- | --- | --- | --- | --- |
+| Changed | Interpret Garmin questions as validated metric queries, calculate PostgreSQL aggregates and coverage, and explain compact evidence without raw summaries; preserve recorded zeros, convert sleep seconds to hours and retain the chat API | Supports four scalar metrics; query range defaults to at most 31 days | Review the local implementation before deployment; configure chat.maxQueryDays or GARMIN_CHAT_MAX_QUERY_DAYS if needed; read-only SQL checks are documented in garmin-chat/README.md | |
+| Changed | Organize Garmin chat Java classes and matching tests by controller, service, repository, model, AI and configuration responsibilities | No | None; behavior and application entry point are unchanged | |
 | Added | make infra-resources shows node capacity, per-Pod requests/limits and allocation totals, plus live node/Pod usage through kubectl top when Metrics Server is available | No | Run make infra-resources; live usage requires Metrics Server | |
 | Changed | make infra-status lists all namespaces, Helm releases and Pods across the existing cluster, including Garmin analytics and chat | No | Run make infra-status | |
 | Fixed | Allow time for both sequential Ollama calls through the frontend proxy, make the per-call timeout configurable, and explain model timeouts after full-week CPU inference caused a 504 | No | Rebuild/redeploy with make chat-up; tune chat.modelTimeoutSeconds for slower CPUs | |

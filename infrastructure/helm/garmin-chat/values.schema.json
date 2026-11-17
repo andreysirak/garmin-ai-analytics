@@ -7,6 +7,7 @@
       "properties": {
         "timezone": {"type": "string", "minLength": 1},
         "responseTokens": {"type": "integer", "minimum": 1},
+        "maxQueryDays": {"type": "integer", "minimum": 1},
         "modelTimeoutSeconds": {"type": "integer", "minimum": 1}
       }
     },

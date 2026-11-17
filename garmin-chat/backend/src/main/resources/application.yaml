@@ -44,6 +44,7 @@ garmin:
     timezone: ${GARMIN_CHAT_TIMEZONE:Europe/Oslo}
     context-tokens: ${spring.ai.ollama.chat.options.num-ctx}
     response-tokens: ${GARMIN_CHAT_RESPONSE_TOKENS:1024}
+    max-query-days: ${GARMIN_CHAT_MAX_QUERY_DAYS:31}
 
 management:
   endpoints:

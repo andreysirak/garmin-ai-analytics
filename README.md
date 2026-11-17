@@ -80,7 +80,8 @@ See [Architecture](docs/architecture.md) for component details, storage, and sec
 - Java, Python, and infrastructure validation in GitHub Actions.
 - Optional, separate local PostgreSQL database with persistent storage and deployment rollback.
 
-The project currently **collects and archives** data; it does not yet compute health analytics or generate AI advice.
+The platform collects and archives data. The local chat demo can aggregate four
+recorded metrics; medical interpretation and AI health advice remain out of scope.
 
 ## Quick start
 
@@ -88,9 +89,10 @@ For the Spring Boot + Spring AI + Ollama + React text demo in the existing kind
 cluster, see [Garmin chat](garmin-chat/README.md). `make chat-up` builds and loads
 the app images, deploys the chat Helm chart, initializes its model cache, and
 forwards the frontend to http://127.0.0.1:5173 in the same terminal.
-The demo resolves dates from natural questions, loads complete JSON summaries
-for a server-selected profile through a read-only account, and checks context
-capacity before asking the model for an answer.
+The demo interprets supported metrics, aggregations and dates from natural
+questions. PostgreSQL calculates results through a read-only account for the
+server-selected profile; Ollama explains compact evidence without raw summaries.
+The structured analytics flow is implemented locally and awaits deployment review.
 
 ### Prerequisites
 

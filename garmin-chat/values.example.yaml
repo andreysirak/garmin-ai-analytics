@@ -9,5 +9,6 @@ ollama:
 chat:
   timezone: Europe/Oslo
   responseTokens: 1024
+  maxQueryDays: 31
   # Raise this on slower CPUs; the frontend timeout adjusts automatically.
   modelTimeoutSeconds: 300

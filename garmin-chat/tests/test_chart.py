@@ -60,6 +60,7 @@ class ChartTest(unittest.TestCase):
             self.assertNotIn(name, config)
         self.assertEqual(config["GARMIN_CHAT_TIMEZONE"], "Europe/Oslo")
         self.assertEqual(config["GARMIN_CHAT_RESPONSE_TOKENS"], "1024")
+        self.assertEqual(config["GARMIN_CHAT_MAX_QUERY_DAYS"], "31")
         self.assertEqual(config["OLLAMA_BASE_URL"], "http://garmin-chat-ollama:11434")
         backend = self.container("backend")
         for name, key in [("GARMIN_CHAT_DB_USERNAME", "username"),
@@ -98,7 +99,8 @@ class ChartTest(unittest.TestCase):
                         "--set", "ollama.resources.limits.memory=4Gi",
                         "--set", "database.existingSecret=custom-reader",
                         "--set", "chat.timezone=America/New_York",
-                        "--set", "chat.responseTokens=512")
+                        "--set", "chat.responseTokens=512",
+                        "--set", "chat.maxQueryDays=14")
         self.assertEqual(result.returncode, 0, result.stderr)
         resources = [item for item in yaml.safe_load_all(result.stdout) if item]
         config = next(item["data"] for item in resources if item["kind"] == "ConfigMap")
@@ -106,6 +108,7 @@ class ChartTest(unittest.TestCase):
         self.assertEqual(config["OLLAMA_CONTEXT_LENGTH"], "4096")
         self.assertEqual(config["GARMIN_CHAT_TIMEZONE"], "America/New_York")
         self.assertEqual(config["GARMIN_CHAT_RESPONSE_TOKENS"], "512")
+        self.assertEqual(config["GARMIN_CHAT_MAX_QUERY_DAYS"], "14")
         for item in resources:
             if item["kind"] == "Deployment":
                 container = item["spec"]["template"]["spec"]["containers"][0]

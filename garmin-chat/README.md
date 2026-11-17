@@ -9,11 +9,15 @@ are required.
 
 A normal question follows this flow:
 
-1. Ollama extracts a structured date selection, without seeing Garmin data.
-2. Java resolves and validates the dates using an injected Clock and timezone.
-3. The fixed SQL loads full daily summaries for the server-selected profile/range.
-4. A conservative check verifies the complete answer request fits its context.
-5. The same Ollama model answers the original question using those JSON summaries.
+1. Ollama interprets the question as metrics, an aggregation and a period.
+2. Java validates the intent and resolves dates using an injected Clock/timezone.
+3. Fixed parameterized SQL calculates values and coverage for the server profile.
+4. A conservative check verifies the complete explanation request fits its context.
+5. The same Ollama model explains compact evidence alongside the original question.
+
+Raw daily summaries and profile identifiers are never sent to either model call.
+Clarification, unsupported questions and periods without numeric data return
+application-authored messages without an explanation call.
 
 Questions are independent. Memory, charts, model-generated SQL, tools, MCP and
 RAG remain deferred. Dates come from the question; a week is a demo example,
@@ -38,6 +42,7 @@ Local backend development supplies that environment variable directly.
 | --- | --- |
 | `chat.timezone` | `Europe/Oslo`; IANA timezone for relative dates |
 | `chat.responseTokens` | 1024; answer token limit and reserved context space |
+| `chat.maxQueryDays` | 31 inclusive calendar days; rejects larger ranges before PostgreSQL |
 | `chat.modelTimeoutSeconds` | 300 per Ollama call; proxy allows both calls plus 30 seconds |
 | `ollama.contextLength` | 8192; used by both Spring AI and Ollama |
 | `ollama.model` | `qwen2.5:1.5b-instruct-q4_K_M` |
@@ -51,13 +56,13 @@ Inference uses CPU, one loaded model, one concurrent inference and one queued
 request. Requests/limits/model are configurable. Keep the configured context
 within the selected model's supported window and available memory.
 
-A full week of JSON can take several minutes on CPU. The non-streaming request
-includes date extraction followed by an answer call; the frontend waits for
-both. Set `chat.modelTimeoutSeconds` higher on a slower machine. Helm adjusts
-the proxy timeout to twice that value plus 30 seconds, so the backend can return
+CPU inference can take time even with compact evidence. The non-streaming
+request includes intent interpretation followed by an explanation call; the
+frontend waits for both. Set `chat.modelTimeoutSeconds` higher on a slower
+machine. Helm adjusts the proxy timeout to twice that value plus 30 seconds, so the backend can return
 a useful timeout error before Nginx closes the request. Direct backend runs use
 `OLLAMA_REQUEST_TIMEOUT` (a duration such as `300s`). A timeout returns HTTP 503
-with a retry hint and asks for a shorter period; it does not reduce the JSON.
+with a retry hint and asks for a shorter period; evidence is never truncated.
 The browser stays on “Preparing your answer…” while waiting.
 
 Optional deployment overrides:
@@ -69,6 +74,93 @@ cp garmin-chat/values.example.yaml garmin-chat/values.local.yaml
 The local file is ignored by Git and optional. It can change model, context,
 resources, timezone and response reserve. It contains no fixed dates or personal
 profile ID. Existing overrides are preserved; no deployment happens during tests.
+
+## Structured analytics review checkpoints
+
+`QuestionDateResolver.intentPrompt` and `resolveIntent` define the interpretation
+contract below. Step 3 connects this validated intent to repository aggregation
+and compact evidence in `GarminChatService`. It is implemented locally for
+review; the running Kubernetes application has not been updated.
+
+```json
+{
+  "status": "OK",
+  "metrics": ["restingHeartRate"],
+  "aggregation": "AVG",
+  "period": {"type": "LAST_WEEK", "days": 0, "startDate": "", "endDate": ""}
+}
+```
+
+| Canonical field | Evidence unit | Allowed aggregations |
+| --- | --- | --- |
+| `totalSteps` | steps | SUM, AVG, MIN, MAX |
+| `restingHeartRate` | bpm | AVG, MIN, MAX |
+| `activeKilocalories` | kcal | SUM, AVG, MIN, MAX |
+| `sleepingSeconds` | hours (SQL conversion from seconds) | SUM, AVG, MIN, MAX |
+
+One operation applies independently to one to four distinct metrics. Profile,
+field metadata, units and conversion divisors come from server configuration
+and the Java catalog, never the model. Unknown properties, fields and operations,
+duplicate metrics/JSON keys, coercible-but-wrong JSON types, contradictory periods
+and invalid/future dates are rejected. The reference date and timezone stay in
+the system message; the question is passed verbatim as the user message.
+
+The other statuses are `CLARIFICATION` and `UNSUPPORTED`; each requires an empty
+metrics array, aggregation `NONE` and the canonical `CLARIFICATION` period with
+days 0 and empty date strings. Neither produces executable parameters. Missing
+metric/operation/period needs clarification. The interpretation prompt rejects
+sleep quality/stages/scores, medical conclusions, advice, causal findings,
+comparisons, trends, rankings, thresholds and correlation. It must reject an
+unsupported part of a question rather than silently answering a supported part.
+The explanation prompt repeats these restrictions. Live evaluation of the new
+interpretation and explanation prompts remains a review checkpoint.
+
+`garmin.chat.max-query-days` / `GARMIN_CHAT_MAX_QUERY_DAYS` is a positive server
+setting, default 31; Helm exposes `chat.maxQueryDays`. Count both boundary dates.
+No period is silently shortened. Existing relative-date semantics are retained:
+last N days excludes today, last week is the previous Monday–Sunday, and explicit
+dates require a four-digit year. Shared period rules live in one prompt resource.
+
+Coverage contract implemented by aggregation SQL and the `DataCoverage` record:
+
+| Disjoint day category, per metric | Definition |
+| --- | --- |
+| `missingSummaryDays` | No row for the configured profile and expected date |
+| `missingMetricDays` | Summary exists but the selected key is absent |
+| `nullMetricDays` | Summary and key exist; the value is JSON null |
+| `invalidTypeDays` | Key contains a non-null value whose JSON type is not number; numeric strings are invalid |
+| `daysWithData` | Key contains a JSON number, including recorded zero |
+
+Each expected calendar day belongs to exactly one category. `expectedDays` is
+the inclusive date count; `summaryDays = expectedDays - missingSummaryDays`.
+`missingDays = missingSummaryDays + missingMetricDays + nullMetricDays`, excluding
+invalid types. Consequently `expectedDays = daysWithData + missingDays + invalidTypeDays`.
+`zeroDays` is a subset of `daysWithData`, not another category. Aggregates use
+numeric readings only; all-unavailable values stay null, including SUM. AVG
+divides by numeric readings, not expected days. `complete()` is true only when
+every expected day has a numeric reading. Partial totals must be labelled
+incomplete by the explanation model. No missing reading is replaced with zero.
+
+### PostgreSQL aggregation
+
+`DailySummaryRepository.aggregate(QueryIntent)` returns one `MetricAggregation`
+per requested metric: typed metric/operation, PostgreSQL `numeric` as Java
+`BigDecimal` (nullable), unit, date range and coverage. It takes the profile from
+`GarminChatProperties`, not the intent or a caller-supplied ID. The repository
+also rejects reversed or oversized ranges before JDBC.
+
+One [fixed SQL template](backend/src/main/resources/sql/metric-aggregation.sql)
+runs per metric in a short read-only, repeatable-read transaction. Profile,
+inclusive dates, catalog field key, allowed operation and conversion divisor
+are bound parameters; SQL text never comes from the model. Expected calendar
+dates are left-joined to staging so completely absent summaries remain visible.
+Only JSON numbers are cast, and PostgreSQL performs SUM/AVG/MIN/MAX before
+dividing sleep seconds by 3600. Decimal precision is retained without Java
+rounding. Numeric strings, booleans, arrays and objects are invalid types.
+Numeric plausibility or medical interpretation is outside this query's scope.
+
+The legacy full-summary repository method remains available, but the chat
+service calls only aggregation. The React interface is unchanged.
 
 ## Reader login and Secret (manual setup/review)
 
@@ -186,146 +278,114 @@ An `Insufficient cpu` event means a scheduling reservation problem, not an
 active download. Interrupt an unsuccessful wait, fix resources and rerun
 `chat-up`; a cluster rebuild is not required.
 
-## Dates, complete JSON and context budget
+## Intent, evidence and context budget
 
-The date-selection resource prompt and Spring AI's native JSON-schema format
-constrain Ollama to a small typed selection. Spring AI `BeanOutputConverter`
-generates the schema; strict Jackson parsing and Java validation check the
-response before SQL. The model never generates SQL or chooses the profile.
+Spring AI's native JSON-schema format constrains interpretation; strict Jackson
+parsing and Java validation check the response before SQL. The reference date
+and configured timezone are system metadata, separate from the verbatim question.
+Explicit dates are inclusive and require a year. Last N days excludes today;
+last week is the previous Monday–Sunday. Java handles DST and month boundaries.
+A missing or ambiguous metric, operation or period needs clarification.
 
-- Explicit ISO dates are inclusive; one date uses the same start/end. Missing
-  years, ambiguous numeric dates, vague/conflicting/unsupported periods and
-  malformed selections ask for clarification. Reversed, impossible and future
-  dates are rejected before querying.
-- “Last seven days” means seven completed local dates ending yesterday. Last N
-  days and last N weeks use date arithmetic in Java, always excluding today.
-- “Last week” is the previous Monday–Sunday calendar week. “This week” ends today.
-  Last/this month, yesterday and today are also supported.
-- An injected Clock supplies a single reference date per request in
-  `chat.timezone`. DST and month/year boundaries use local calendar dates.
+The service checks that repository results match the requested metrics,
+operation, dates, units and expected coverage. An inconsistent repository result
+returns the safe database error rather than reaching the explanation model.
+The explanation message contains only `QueryEvidence`, for example (synthetic):
 
-The reference date is system metadata, separate from the verbatim user question.
-The structured schema puts `type` first, before its dependent fields. The prompt
-includes multilingual examples: “последнюю неделю” means seven completed days;
-“на прошлой неделе” means the previous Monday–Sunday calendar week.
-
-The existing repository owns this one parameterized query:
-
-```sql
-SELECT user_profile_id, calendar_date, payload
-FROM staging.stg_garmin_daily_summary
-WHERE user_profile_id = :profileId
-  AND calendar_date BETWEEN CAST(:startDate AS date) AND CAST(:endDate AS date)
-ORDER BY user_profile_id, calendar_date;
+```json
+{
+  "question": "Average recorded sleep duration from 2024-02-26 to 2024-03-03?",
+  "aggregation": "AVG",
+  "dateRange": {"startDate": "2024-02-26", "endDate": "2024-03-03"},
+  "metrics": [{
+    "metric": "sleepingSeconds", "value": 1.5, "unit": "hours",
+    "coverage": {
+      "expectedDays": 7, "summaryDays": 6, "daysWithData": 3, "zeroDays": 1,
+      "missingSummaryDays": 1, "missingMetricDays": 1, "nullMetricDays": 1,
+      "invalidTypeDays": 1, "missingDays": 3, "complete": false
+    }
+  }]
+}
 ```
 
-The server profile and validated dates are bound parameters. Complete JSONB
-payloads remain intact in typed records: no metric projection, field removal,
-aggregation, sampling or truncation. Missing dates/fields/null readings are
-unknown; recorded zeros are valid. The answer model may use any supplied fields.
-Missing sleep information must be reported, not invented or fetched elsewhere.
-Walking/sleep associations must not be described as causal effects.
+The explanation prompt requires supplied values only, no further calculations,
+unit conversions or invented measurements. It requires incomplete coverage and
+partial totals to be labelled, and unknown requested metrics to be reported.
+Sleep duration cannot establish sleep quality; medical conclusions, advice,
+comparisons, trends and correlations are outside the supported contract.
 
-Before the answer call, `PromptBudget` reserves:
+Before each model call, `PromptBudget` reserves:
 
 ```text
 UTF-8 bytes of every prompt message + 512 template tokens + chat.responseTokens
 ```
 
-One estimated token per UTF-8 byte intentionally overestimates ordinary text
-and JSON, including non-Latin text. The messages contain the full system prompt,
-selected period, metadata, all JSON and the original question. The answer's
-`num_predict` uses the same response reserve. The date prompt is checked too;
-its output limit is at most 256 tokens. Oversized questions skip both model calls.
-Oversized data returns “Please choose a shorter period” with the selected dates
-and skips the answer call. Nothing is silently removed to make the request fit.
-The original question and JSON share one user message to keep evidence together.
+One estimated token per byte deliberately overestimates text, including non-Latin
+text. This includes the full system prompt, original question and all compact
+evidence. Interpretation output is limited to at most 384 tokens; explanation
+uses `chat.responseTokens`. Oversized questions skip both model calls and SQL.
+Oversized evidence skips explanation and requests a shorter period or fewer
+metrics. Nothing is silently removed. Longer periods no longer send more raw
+JSON; the maximum date range and context checks are separate safeguards.
 
-`POST /api/chat` still accepts only `{"message":"..."}`. Its response still has
-`answer`, `startDate`, `endDate`. Dates describe the validated requested range,
-including gaps, rather than shrinking to existing rows. No summaries returns a
-direct explanation and that range, without an answer call. Clarification has
-null dates; resend the complete question with a clear period because there is
-no chat memory. Blank HTTP messages remain HTTP 400.
+`POST /api/chat` still accepts `{"message":"..."}` and returns `answer`,
+`startDate`, `endDate`. Dates cover the validated requested range, including gaps.
+No summaries or no numeric readings produce direct messages with those dates.
+When some metrics have data and others are unknown, all requested metrics and
+coverage reach explanation. Clarification and unsupported intent have null
+dates; resend the complete question because there is no conversation memory.
+Blank requests remain HTTP 400; database/model failures remain safe HTTP 503s.
 
-## Manual checks after review (not run for this change)
+## Manual checks after approval (not run for Step 3)
 
-1. Add the server profile key to the existing Secret, review settings, then run
-   `make chat-up`. Check all three Deployments and the latest model-pull Job.
-2. Choose a **known backfilled week**. For example, replace these example dates
-   with a week present for your server-selected profile:
-
-   ```sh
-   curl -sS http://127.0.0.1:5173/api/chat -H 'Content-Type: application/json' \
-     --data '{"message":"How did I sleep from 2026-10-05 to 2026-10-11?"}'
-   ```
-
-   Expect those inclusive dates and an answer supported by the full JSON. If
-   daily summaries lack sleep details, the answer must say what is missing.
-   Set `GARMIN_CHAT_PROFILE_ID` in your checking terminal to the same server
-   profile, then compare privately against the exact repository query:
+1. Review the local implementation before running `make chat-up`. After approval,
+   deploy and open http://127.0.0.1:5173 with the existing frontend port-forward.
+2. Choose a known backfilled week and ask a supported numeric question, such as
+   “What was my average resting heart rate from 2026-10-05 to 2026-10-11?”
+   Replace these example dates with your selected week. Compare privately with
+   the fixed query using the same server-selected profile. Set
+   `GARMIN_CHAT_PROFILE_ID` privately in your shell from the existing Secret's
+   `profile-id` before running the comparison:
 
    ```sh
    psql -X -h 127.0.0.1 -p 5432 -U garmin_chat_reader -d garmin_analytics -W \
      --set=profileId="$GARMIN_CHAT_PROFILE_ID" \
      --set=startDate="'2026-10-05'" --set=endDate="'2026-10-11'" \
-     --file=garmin-chat/backend/src/main/resources/sql/daily-summaries.sql
+     --set=metric="'restingHeartRate'" --set=aggregation="'AVG'" --set=divisor=1 \
+     --file=garmin-chat/backend/src/main/resources/sql/metric-aggregation.sql
    ```
 
-   A week is not guaranteed to fit every context or payload. The optional
-   example values use 32768 tokens; use settings supported by your model.
-3. Ask “How did I sleep last week?” and “How was my walking related to my sleep
-   over the last seven days?” Compare the dates with today's date in the
-   configured timezone. The seven-day period must end yesterday; last week
-   must be the previous Monday–Sunday. Check actual measurements against JSON,
-   including missing values and zeros; a small model can make arithmetic errors.
-   Also retry “как я спал последнюю неделю ?”. Allow several minutes for the
-   full-week CPU request. Expect an answer for the seven completed days or an
-   explanatory backend error, rather than the old generic proxy 504. On a
-   slower machine, raise `chat.modelTimeoutSeconds` and rerun `make chat-up`.
-4. Ask “How did I sleep?” or use ambiguous dates. Expect a request for a clear
-   period, with no database query and no answer call. Retry with the complete
-   question and explicit dates. A valid period with no rows should give a direct
-   no-data explanation and retain the requested range.
-5. Choose a **longer populated range whose full JSON exceeds the budget**, for
-   example all available history. Send an explicit dated question for that range.
-   Expect “Please choose a shorter period”, not a generic model answer. For
-   this isolated request there should be just **one** Ollama `/api/chat` call
-   (date extraction), not the second answer call. Inspect technical request
-   logs without enabling prompt/body logging:
+   Verify the value, unit and incomplete-coverage wording. For sleep, use
+   `sleepingSeconds` with divisor 3600 and compare hours; zeros must stay valid.
+3. Ask “Total steps over the last seven days?” and “Average resting heart rate
+   last week?” Verify the completed-day versus calendar-week date boundaries.
+   A supported multi-metric request, such as average steps and recorded sleep
+   duration for one week, should explain each metric independently.
+4. Ask “Was my sleep good last week?” or request a steps/sleep correlation.
+   Expect an unsupported response, no SQL and no explanation call. Ask
+   “Average resting heart rate” to check missing-period clarification. Choose
+   a period without summaries to check direct no-data handling with dates.
+5. Request more than `chat.maxQueryDays` and expect the date-cap message before
+   SQL. An excessively long question should fail its context check before either
+   model call. Automated tests cover oversized calculated evidence separately;
+   a longer valid range does not itself imply a larger explanation request.
+6. Check Ollama PVC persistence after an approved Pod restart, then repeat a
+   supported question. Model unavailability should give HTTP 503 with a retry
+   hint, and cached model files should be reused without another pull.
 
-   ```sh
-   kubectl --context kind-garmin-ai-analytics -n garmin-analytics \
-     logs deployment/garmin-chat-ollama --since=2m | rg '/api/chat'
-   ```
+Keep real readings, profile IDs, credentials and answers out of commits and
+public logs. Earlier live date-only extractor checks do not validate the new
+intent/explanation prompts. No deployment, live Ollama evaluation or manual
+Kubernetes end-to-end test has been performed for Step 3.
 
-   Avoid simultaneous questions when counting requests. If the chosen range
-   fits, widen it or lower the context temporarily in review settings; the guard
-   is based on the actual complete request, not a fixed number of days.
-6. Check cache persistence by recording the model PVC UID, model file sizes and
-   manifest checksums, restarting only `deployment/garmin-chat-ollama`, and
-   confirming the same files/model are present before any pull. Then ask again.
-   The setup Job must not rerun just because the Pod restarted. A later Helm
-   upgrade should report the model as cached.
+## Backend packages
 
-Keep real JSON, profile IDs, credentials and answers out of commits and public
-logs. No deployment or Secret changes are performed by these checks.
-
-Date-only regression checks of the revised extractor passed against the local
-`qwen2.5:1.5b-instruct-q4_K_M` model, with JSON schema, temperature 0 and context
-32768. These checks sent only questions and reference-date metadata, never
-Garmin summaries:
-
-| Question | Selection |
-| --- | --- |
-| как хорошо я спал последнюю неделю | LAST_N_DAYS, 7 |
-| как хорошо я спал | CLARIFICATION |
-| How did I sleep last week? | LAST_WEEK |
-| Як я спав за останні сім днів? | LAST_N_DAYS, 7 |
-| How was my walking related to my sleep over the last seven days? | LAST_N_DAYS, 7 |
-| как хорошо я спал недавно | CLARIFICATION |
-| Как я спал на прошлой неделе? | LAST_WEEK |
-| How did I sleep from 2026-10-05 to 2026-10-11? | EXPLICIT, 2026-10-05 through 2026-10-11 |
+Under `com.garmin.analytics.chat`, `controller` owns HTTP requests and errors,
+`service` coordinates the flow, `repository` owns PostgreSQL access, `model`
+contains shared records, `ai` handles interpretation, prompts and model
+availability, and `config` holds server settings. `GarminChatApplication` stays
+at the root for component scanning. Tests mirror these packages and share
+test-only fixtures through `support`.
 
 ## Offline verification
 
@@ -342,8 +402,40 @@ PATH="/tmp/garmin-chat-checks/bin:$PATH" make chat-validate
 
 Tests use synthetic summaries, a fixed Clock, stub repositories/models and fake
 HTTP transport/CLIs. They cover explicit/relative/invalid dates, timezone and DST,
-clarification before SQL, bound profile/date arguments, full JSON preservation,
-no data, model/database failures, independent questions, and oversized requests
+clarification and unsupported intent before SQL, bound profile/date arguments,
+compact evidence with distinct coverage and no raw payloads, no data,
+model/database failures, independent questions, and oversized requests
 skipping answer calls. Budget tests include system text, JSON, question, response
 reserve and non-Latin text. Configuration, React, Helm render, model setup and
 Make sequencing checks remain offline. No Git write operations are performed.
+
+The PostgreSQL aggregation suite is opt-in. Set `GARMIN_CHAT_TEST_DB_URL`
+(normally `jdbc:postgresql://127.0.0.1:5432/garmin_analytics`),
+`GARMIN_CHAT_TEST_DB_USERNAME` and `GARMIN_CHAT_TEST_DB_PASSWORD` privately from
+the existing reader Secret. Set `GARMIN_CHAT_TEST_PROFILE_ID` from its
+`profile-id` key to include comparison against backfilled data, then run:
+
+```sh
+mvn -B -ntp -f garmin-chat/backend/pom.xml \
+  -Dtest=PostgresMetricAggregationDatabaseTest test
+```
+
+These tests perform SELECTs only. Synthetic rows replace just the staging
+relation in the production SQL, so no test table, database, container or data
+writes are needed. They cover all approved operations, independent per-metric
+coverage, other-profile/out-of-range exclusion, absent/null/invalid values,
+recorded zeros, leap-day boundaries, decimal precision and fractional sleep
+hours. The reader-role check verifies default read-only mode and no staging
+write privileges. The optional real-data check selects the latest stored week
+and compares all 15 supported metric/operation pairs plus coverage against
+[direct table calculations](backend/src/test/resources/sql/metric-aggregation-comparison.sql).
+It prints no personal readings or profile identifiers. Database-backed service
+tests also verify calculated compact evidence and the no-data path with stubbed
+model responses. The offline HTTP integration test exercises MVC, repository
+mapping and the real Spring AI client with mocked JDBC and HTTP boundaries.
+
+Step 3 verification: 226 offline tests and 35 read-only PostgreSQL tests passed;
+the executable JAR also builds successfully. All model responses in these checks
+are stubbed. No deployment, workload changes or SQL writes were performed.
+Without database environment settings, the opt-in suite is skipped; no Ollama
+connection is needed for either suite.
