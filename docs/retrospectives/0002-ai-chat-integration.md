@@ -16,7 +16,7 @@
 - The project owner had already noted in the PR discussion that frontend, backend and AI implementation should have been split. Faster AI-assisted implementation made further scope expansion feel deceptively inexpensive.
 - The human review, integration and real-world verification workload grew with the PR. Passing mocked model tests did not guarantee natural-language reliability with a real local model.
 - A live question — “How active have I been over the past week?” — returned an inappropriate date-validation message. This remains a follow-up and should not be described as solved.
-- An appealing demo question about whether active days are followed by longer sleep turned out to require **additional overnight sleep staging and explicit date alignment**, not just a new LLM prompt.
+- The **original intended demo question** — whether more active days tend to be followed by longer sleep — was not delivered within this PR. Investigation revealed it requires **additional overnight sleep staging and explicit date alignment**, not just a new LLM prompt. We chose to stabilize and merge the smaller summary-only foundation rather than misrepresent the intended demo as complete.
 
 A large PR can be a pragmatic choice for a first demonstrable vertical slice. The lesson is to stop expansion when that slice is achieved and track improvements separately.
 
@@ -40,7 +40,7 @@ Each stage should have an explicit scope, review checkpoint, definition of done 
 2. Continue intent quality, relative-date resolution, ambiguity handling and real-model evaluation in [#66](https://github.com/andreysirak/garmin-ai-analytics/issues/66).
 3. Benchmark cold/warm local Ollama and end-to-end request latency before optimizing in [#67](https://github.com/andreysirak/garmin-ai-analytics/issues/67).
 4. Keep owner-led cleanup/refactoring separate in [#62](https://github.com/andreysirak/garmin-ai-analytics/issues/62); defer conversation memory [#61](https://github.com/andreysirak/garmin-ai-analytics/issues/61).
-5. Preserve the meaningful future demo question — **“Do days with more physical activity tend to be followed by longer sleep?”** — as a relationship-analysis goal, not a steps-count demo. First stage overnight sleep records and pair activity on day N with sleep ending on N+1; coordinate with the sleep data foundation in [#17](https://github.com/andreysirak/garmin-ai-analytics/issues/17). Calculate correlation in validated SQL, report coverage and avoid causal claims.
+5. Carry forward the **original demo question that was deferred from PR #57** — **“Do days with more physical activity tend to be followed by longer sleep?”** — as the outstanding relationship-analysis acceptance goal, not a steps-count demo. First stage overnight sleep records and pair activity on day N with sleep ending on N+1; coordinate with the sleep data foundation in [#17](https://github.com/andreysirak/garmin-ai-analytics/issues/17). Calculate correlation in validated SQL, report coverage and avoid causal claims.
 6. Require documented manual verification using **real Ollama responses**, plus SQL comparison, alongside mocked automated tests before calling a demo scenario reliable.
 
 ## Follow-up
