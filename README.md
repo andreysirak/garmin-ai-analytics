@@ -80,13 +80,132 @@ See [Architecture](docs/architecture.md) for component details, storage, and sec
 - Java, Python, and infrastructure validation in GitHub Actions.
 - Optional, separate local PostgreSQL database with persistent storage and deployment rollback.
 
-The project currently **collects and archives** data; it does not yet compute health analytics or generate AI advice.
+The platform collects and archives data. The local chat demo can aggregate four
+recorded metrics; medical interpretation and AI health advice remain out of scope.
 
 ## Quick start
+
+For the Spring Boot + Spring AI + Ollama + React text demo in the existing kind
+cluster, see [Garmin chat](garmin-chat/README.md). `make chat-up` builds and loads
+the app images, deploys the chat Helm chart, initializes its model cache, and
+forwards the frontend to http://127.0.0.1:5173 in the same terminal.
+The demo interprets supported metrics, aggregations and dates from natural
+questions. PostgreSQL calculates results through a read-only account for the
+server-selected profile; Ollama explains compact evidence without raw summaries.
+The structured analytics flow is implemented locally and awaits deployment review.
 
 ### Prerequisites
 
 Install Docker (or Colima), kind, kubectl, Helm, Python 3.12, and OpenSSL. Analytics PostgreSQL also requires the local `psql` client (`brew install libpq` on macOS). Make checks find Homebrew libpq automatically, even when its `bin` directory is not on PATH. Java 25 and Maven are needed for direct Java development; Make targets can build Java code using Docker.
+
+#### Local hardware and VM capacity
+
+For Airflow, both PostgreSQL instances, Garmin Chat, CPU-based Ollama and two
+Java ingestion Pods together, the initial recommendation is:
+
+| Resource | Recommendation |
+| --- | --- |
+| Host | 8 or more logical CPUs and 16 GiB or more RAM, leaving room for the OS and IDE |
+| Container VM | 4 CPUs and 8 GiB RAM, initially retaining existing workload requests/limits |
+
+The 4-CPU/8-GiB VM passed the bounded local check below; the host recommendation
+is not a verified minimum. Larger models, longer prompts and historical backfills
+need separate measurement. Four CPUs do not increase the available memory.
+
+#### Colima and Docker configuration
+
+For a new Colima profile, run `colima start --profile default --cpu 4 --memory 8`.
+For an existing profile, arrange a maintenance window, finish active tasks and
+[back up the databases](docs/postgresql.md#existing-clusters-back-up-before-recreation)
+before the supported stop/start resize:
+
+```bash
+docker --context colima stop --timeout 120 garmin-ai-analytics-control-plane
+colima stop --profile default
+colima start --profile default --cpu 4 --memory 8
+docker --context colima start garmin-ai-analytics-control-plane  # Existing kind node
+```
+
+This reuses the same VM and kind container. Preserve the existing profile, disk,
+runtime and mounts; do not delete/recreate the cluster for this CPU change.
+Plan approximately 5–10 minutes of downtime, possibly longer during recovery.
+Every container in that Colima profile is affected, including services outside
+kind; gracefully stop those containers before stopping the VM, then restore
+previously running containers and reconnect port-forwards afterward (`make chat-ui`
+for Chat). The verified resize recovered in about 6 minutes 18 seconds.
+See [Colima's resize instructions](https://github.com/abiosoft/colima/blob/v0.8.1/README.md#customizing-the-vm)
+and [persistent storage](docs/database-storage.md).
+
+With Docker Desktop instead, configure equivalent CPU/RAM in its
+[VM resource settings](https://docs.docker.com/desktop/settings-and-maintenance/settings/#resources).
+kind runs inside the container VM: host CPU count alone does not determine
+Kubernetes capacity. Other Docker containers also share that VM's resources.
+Saved configuration alone does not prove a running VM was resized. Verify what
+Docker and the node actually see after the stop/start:
+
+```bash
+docker info --format 'CPUs={{.NCPU}} RAM(bytes)={{.MemTotal}}'
+kubectl --context kind-garmin-ai-analytics get nodes \
+  -o 'custom-columns=NAME:.metadata.name,CPU:.status.allocatable.cpu,MEMORY:.status.allocatable.memory'
+```
+
+#### CPU scheduling and troubleshooting
+
+A CPU **request** is the amount Kubernetes budgets when scheduling and affects
+CPU sharing under contention. A **limit** caps CPU consumption; it does not
+reserve that amount. `1000m` equals one CPU. Placement depends on allocatable
+capacity minus existing requests, even when measured usage is low.
+[Kubernetes resource documentation](https://v1-33.docs.kubernetes.io/docs/concepts/configuration/manage-resources-containers/#how-pods-with-resource-requests-are-scheduled)
+
+For `FailedScheduling: Insufficient cpu`, inspect allocation and the pending
+Pod's requests/events; replace `POD_NAME` with its actual name:
+
+```bash
+make infra-resources
+kubectl --context kind-garmin-ai-analytics -n airflow-jobs describe pod POD_NAME
+kubectl --context kind-garmin-ai-analytics get events --all-namespaces \
+  --field-selector reason=FailedScheduling --sort-by=.lastTimestamp
+```
+
+Budget for both ingestion Pods plus temporary Jobs and rollout headroom.
+Lowering CPU limits or increasing retries does not fix insufficient requests
+capacity. Keep workload requests/limits unchanged for the initial 4-CPU test;
+subsequent tuning requires usage evidence and review. `kubectl top` needs Metrics
+Server; its absence does not prevent inspecting allocation or scheduling events.
+
+#### Verified local configuration (2026-11-17)
+
+The following were verified after resizing the existing profile and cluster:
+
+| Item | Observed value |
+| --- | --- |
+| Host | 10 logical CPUs, 16 GiB RAM |
+| Colima / Docker | Colima 0.8.1, default profile, Docker runtime, 4 CPUs, 8 GiB VM RAM, 100 GiB disk |
+| kind | Same ARM64 node, Kubernetes v1.33.7; allocatable CPU 4000m, memory 8113432Ki (about 7.74 GiB) |
+| Baseline requests | CPU 1925m (48%); memory 4162Mi; CPU headroom 2075m before ingestion |
+| Java ingestion specification, each Pod | Requests: 100m CPU / 256Mi RAM; limits: 1000m CPU / 512Mi RAM |
+| Inference workload | Cached `qwen2.5:1.5b-instruct-q4_K_M`, CPU inference, context 32768, one concurrent synthetic request capped at 512 generated tokens |
+| Sampled node usage during the check | Peak CPU 3409.8m; peak memory working set 4941.5Mi (about 4.83 GiB); sampled every approximately 3 seconds |
+
+Before the resize, 1925m of requests left only 75m on a 2000m node, preventing
+either 100m ingestion Pod from fitting. After the resize, both Java containers
+were observed running together during Ollama inference. The retried daily run
+completed authentication, Daily Summary, Sleep and staging successfully, with no
+`FailedScheduling` events for its Java Pods. Both ingestion tasks completed in
+about 10.6 seconds; the synthetic inference completed with 512 generated tokens.
+
+Before stopping Colima, full PostgreSQL 16.1/17.11 backups were restored into
+isolated test containers, including roles, ownership and grants. All 71 Airflow
+tables and the analytics table matched source-snapshot row counts and content
+digests. Recovery preserved existing Docker containers, node/PVC identities,
+backfilled rows, Ollama model files and all workload resource settings. Daily
+scheduling was restored and backend/database/model health reported `UP`.
+
+With both Java Pods, unchanged CPU requests total 2125m, leaving 1875m of
+scheduling headroom. This was one daily run with bounded synthetic inference,
+not a historical-backfill or long-prompt stress test. Explicit memory limits
+still total 9222Mi, above node memory; limits can overcommit memory. The sampled
+peak is evidence for this check, not a guarantee for larger workloads.
 
 ### 1. Configure credentials once
 
@@ -183,6 +302,20 @@ installations require the documented migration first. Follow the
 [storage migration and rebuild guide](docs/database-storage.md#startup-and-restart-55)
 when a preflight fails; the wrappers never recreate a cluster automatically.
 
+Inspect the running cluster:
+
+```bash
+make infra-status     # Namespaces, Helm releases and Pods across all namespaces
+make infra-resources  # Node capacity, Pod requests/limits, allocation totals and actual usage
+```
+
+`infra-resources` uses `kubectl top nodes` and
+`kubectl top pods --all-namespaces --sort-by=memory` for actual CPU/memory usage.
+This requires a working Metrics Server. If metrics are unavailable, it prints
+an explanation; the capacity, requests/limits and allocation report still works.
+Requests and limits are configured values; usage shows measured consumption.
+Both targets use the existing kind context.
+
 ### 4. Run the pipeline
 
 The local scheduler uses four LocalExecutor workers and a 2 GiB memory limit.
@@ -199,6 +332,10 @@ make airflow-ui
 ```
 
 Sign in to Airflow as `admin` using the printed password, then trigger or unpause `garmin_daily_pipeline`. Manual runs support an optional date in `YYYY-MM-DD` format.
+
+The existing `admin` user has the administrator role through SimpleAuthManager.
+Admin → Configuration is enabled with `[api] expose_config=True`; Airflow 3.3.1
+always masks sensitive configuration values.
 
 To reset this DAG's Airflow metadata and run history, pause it and finish
 active tasks first, then run:
@@ -331,15 +468,27 @@ Dependency vulnerability scanning is currently excluded while the NVD integratio
 
 ## Roadmap
 
-- [x] Local Kubernetes and Airflow environment
-- [x] Garmin authentication and Java ingestion
-- [x] Raw JSON archiving with local access
-- [x] Initial tests and CI workflows
-- [ ] PostgreSQL storage and data normalization
-- [ ] Historical backfill and data quality checks
+### Implemented foundations
+
+- [x] Local Kubernetes environment with Airflow orchestration
+- [x] Garmin authentication and Java-based daily data ingestion
+- [x] Raw JSON archiving with local access and success markers
+- [x] Initial automated tests and CI workflows
+- [x] PostgreSQL deployment and JSONB daily-summary staging
+- [x] First end-to-end AI chat integration: React, Spring Boot, PostgreSQL and local Ollama
+- [x] Validated, parameterized SQL summaries with missing-data coverage and AI-generated explanations
+
+### Next milestones
+
+- [ ] Stabilize natural-language intent and date interpretation with real-model testing ([#66](https://github.com/andreysirak/garmin-ai-analytics/issues/66))
+- [ ] Benchmark and optimize local AI chat response time ([#67](https://github.com/andreysirak/garmin-ai-analytics/issues/67))
+- [ ] Historical backfill and extended data-quality checks
+- [ ] Normalize and transform staged data into reusable analytical datasets
 - [ ] Apache Beam processing and derived datasets
-- [ ] Sleep/activity statistics and correlations
-- [ ] AI-generated daily summaries and recommendations
+- [ ] Overnight sleep staging, activity/sleep statistics and correctly aligned correlations
+- [ ] Automated AI insights and recommendations grounded in validated analytics
+
+**Demo focus:** “Do days with more physical activity tend to be followed by longer sleep?” This original demo question remains an **open goal**, not a capability of the current summary-only chat. It requires validated overnight sleep data and next-day pairing; do not infer correlation from calendar-day sleep totals.
 
 ## Contributions welcome
 
@@ -355,6 +504,7 @@ Interested in Java, Python, Airflow, Kubernetes, or data engineering? Contributi
 - [Java ingestion and Airflow integration decision](docs/decisions/0002-java-garmin-data-ingestion.md)
 - [Contributing, Story/Task workflow and PR review standards](CONTRIBUTING.md)
 - [Garmin API integration retrospective](docs/retrospectives/0001-garmin-api-integration.md)
+- [AI chat integration retrospective (PR #57)](docs/retrospectives/0002-ai-chat-integration.md)
 - [Changelog](CHANGELOG.md)
 
 ## Project philosophy

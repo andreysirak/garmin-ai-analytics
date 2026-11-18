@@ -1,0 +1,19 @@
+{{- if ne .Release.Namespace "garmin-analytics" }}
+{{- fail "Install this chat chart in the existing garmin-analytics namespace" }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "garmin-chat.name" . }}-backend
+  labels:
+    {{- include "garmin-chat.labels" . | nindent 4 }}
+data:
+  SERVER_ADDRESS: "0.0.0.0"
+  GARMIN_CHAT_DB_URL: {{ .Values.database.url | quote }}
+  GARMIN_CHAT_TIMEZONE: {{ .Values.chat.timezone | quote }}
+  GARMIN_CHAT_RESPONSE_TOKENS: {{ .Values.chat.responseTokens | quote }}
+  GARMIN_CHAT_MAX_QUERY_DAYS: {{ .Values.chat.maxQueryDays | quote }}
+  OLLAMA_BASE_URL: {{ printf "http://%s-ollama:11434" (include "garmin-chat.name" .) | quote }}
+  OLLAMA_MODEL: {{ .Values.ollama.model | quote }}
+  OLLAMA_CONTEXT_LENGTH: {{ .Values.ollama.contextLength | quote }}
+  OLLAMA_REQUEST_TIMEOUT: {{ printf "%ds" (int .Values.chat.modelTimeoutSeconds) | quote }}

@@ -1,0 +1,12 @@
+Open the generic Garmin chat UI:
+  make chat-up starts the frontend port-forward automatically after deployment.
+  Use make chat-ui to reconnect later, or forward the Service directly:
+  kubectl --context kind-garmin-ai-analytics -n {{ .Release.Namespace }} port-forward service/{{ include "garmin-chat.name" . }}-frontend 5173:80
+  http://127.0.0.1:5173
+
+Model initialization status and logs:
+  kubectl --context kind-garmin-ai-analytics -n {{ .Release.Namespace }} get jobs -l app.kubernetes.io/component=model-pull
+  kubectl --context kind-garmin-ai-analytics -n {{ .Release.Namespace }} logs job/{{ include "garmin-chat.name" . }}-model-pull-{{ .Release.Revision }}
+
+The models PVC survives Pod replacement and Helm uninstall, but kind's default
+node-local storage does not survive cluster deletion. See garmin-chat/README.md.

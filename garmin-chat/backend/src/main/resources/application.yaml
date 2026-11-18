@@ -1,0 +1,63 @@
+server:
+  address: ${SERVER_ADDRESS:127.0.0.1}
+  port: 8081
+
+spring:
+  application:
+    name: garmin-chat
+  datasource:
+    url: ${GARMIN_CHAT_DB_URL:jdbc:postgresql://127.0.0.1:5432/garmin_analytics}
+    username: ${GARMIN_CHAT_DB_USERNAME:garmin_chat_reader}
+    password: ${GARMIN_CHAT_DB_PASSWORD}
+    hikari:
+      read-only: true
+      maximum-pool-size: 2
+      connection-timeout: 5000
+  jdbc:
+    template:
+      query-timeout: 10s
+  ai:
+    model:
+      chat: ollama
+      embedding: none
+    ollama:
+      base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+      init:
+        pull-model-strategy: never
+      chat:
+        options:
+          model: ${OLLAMA_MODEL:qwen2.5:1.5b-instruct-q4_K_M}
+          temperature: 0
+          num-ctx: ${OLLAMA_CONTEXT_LENGTH:8192}
+          num-gpu: 0
+          num-predict: ${garmin.chat.response-tokens}
+    retry:
+      max-attempts: 1
+  http:
+    client:
+      connect-timeout: 5s
+      read-timeout: ${OLLAMA_REQUEST_TIMEOUT:300s}
+
+garmin:
+  chat:
+    profile-id: ${GARMIN_CHAT_PROFILE_ID}
+    timezone: ${GARMIN_CHAT_TIMEZONE:Europe/Oslo}
+    context-tokens: ${spring.ai.ollama.chat.options.num-ctx}
+    response-tokens: ${GARMIN_CHAT_RESPONSE_TOKENS:1024}
+    max-query-days: ${GARMIN_CHAT_MAX_QUERY_DAYS:31}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState
+        liveness:
+          include: livenessState

@@ -17,6 +17,9 @@ airflow/config/simple_auth_passwords.json
 
 # Build output
 **/target/
+**/node_modules/
+**/dist/
+garmin-chat/values.local.yaml
 
 # Airflow runtime artifacts
 airflow/logs/*

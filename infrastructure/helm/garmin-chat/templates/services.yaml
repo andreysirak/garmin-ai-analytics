@@ -1,0 +1,19 @@
+{{- range $component, $ports := dict "frontend" (dict "port" 80) "backend" (dict "port" 8081) "ollama" (dict "port" 11434) }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "garmin-chat.name" $ }}-{{ $component }}
+  labels:
+    {{- include "garmin-chat.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $component }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/instance: {{ $.Release.Name }}
+    app.kubernetes.io/component: {{ $component }}
+  ports:
+    - name: http
+      port: {{ $ports.port }}
+      targetPort: http
+{{- end }}

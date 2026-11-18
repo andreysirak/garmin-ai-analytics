@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "garmin-chat.name" . }}-backend
+  labels:
+    {{- include "garmin-chat.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: backend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: backend
+      annotations:
+        chat.garmin/build-id: {{ .Values.buildId | quote }}
+        checksum/config: {{ include (print $.Template.BasePath "/config.yaml") . | sha256sum }}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: backend
+          image: {{ .Values.backend.image | quote }}
+          imagePullPolicy: {{ .Values.backend.imagePullPolicy }}
+          ports:
+            - {name: http, containerPort: 8081}
+          envFrom:
+            - configMapRef:
+                name: {{ include "garmin-chat.name" . }}-backend
+          env:
+            - name: GARMIN_CHAT_PROFILE_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.existingSecret }}
+                  key: {{ .Values.database.profileIdKey }}
+            - name: GARMIN_CHAT_DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.existingSecret }}
+                  key: {{ .Values.database.usernameKey }}
+            - name: GARMIN_CHAT_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.existingSecret }}
+                  key: {{ .Values.database.passwordKey }}
+          startupProbe:
+            httpGet: {path: /actuator/health/liveness, port: http}
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            # Keep the HTTP endpoint available to explain model initialization with 503.
+            httpGet: {path: /actuator/health/readiness, port: http}
+          livenessProbe:
+            httpGet: {path: /actuator/health/liveness, port: http}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          resources:
+            {{- toYaml .Values.backend.resources | nindent 12 }}

@@ -1,0 +1,49 @@
+# Make changes this for each build so local images are used on repeated chat-up runs.
+buildId: ""
+
+database:
+  url: jdbc:postgresql://garmin-postgresql.garmin-analytics.svc.cluster.local:5432/garmin_analytics
+  existingSecret: garmin-chat-database
+  usernameKey: username
+  passwordKey: password
+  profileIdKey: profile-id
+
+chat:
+  timezone: Europe/Oslo
+  responseTokens: 1024
+  maxQueryDays: 31
+  # Per model call. The frontend allows two calls plus 30 seconds of overhead.
+  modelTimeoutSeconds: 300
+
+frontend:
+  image: garmin-chat-frontend:local
+  imagePullPolicy: Never
+  resources:
+    requests: {cpu: 25m, memory: 32Mi}
+    limits: {cpu: 250m, memory: 128Mi}
+
+backend:
+  image: garmin-chat-backend:local
+  imagePullPolicy: Never
+  resources:
+    requests: {cpu: 100m, memory: 384Mi}
+    limits: {cpu: "1", memory: 768Mi}
+
+ollama:
+  image: ollama/ollama:0.40.16
+  imagePullPolicy: IfNotPresent
+  model: qwen2.5:1.5b-instruct-q4_K_M
+  contextLength: 8192
+  resources:
+    # Fit beside the existing Airflow/PostgreSQL requests on a 2-vCPU kind node.
+    requests: {cpu: 250m, memory: 1536Mi}
+    limits: {cpu: "2", memory: 3Gi}
+  persistence:
+    # kind's default local-path provisioner; survives Pod replacement, not cluster deletion.
+    storageClass: standard
+    size: 5Gi
+  initialization:
+    activeDeadlineSeconds: 1200
+    resources:
+      requests: {cpu: 50m, memory: 64Mi}
+      limits: {cpu: 500m, memory: 256Mi}

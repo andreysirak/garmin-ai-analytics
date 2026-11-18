@@ -32,9 +32,15 @@ POSTGRESQL_STORAGE_USER := --set primary.podSecurityContext.runAsUser=$(DATABASE
                           --set primary.containerSecurityContext.runAsUser=$(DATABASE_STORAGE_UID)
 AIRFLOW_POSTGRESQL_STORAGE_USER := --set postgresql.primary.podSecurityContext.runAsUser=$(DATABASE_STORAGE_UID) \
                                   --set postgresql.primary.containerSecurityContext.runAsUser=$(DATABASE_STORAGE_UID)
+CHAT_CHART := infrastructure/helm/garmin-chat
+CHAT_RELEASE := garmin-chat
+CHAT_VALUES ?= $(wildcard garmin-chat/values.local.yaml)
+CHAT_FRONTEND_IMAGE := garmin-chat-frontend:local
+CHAT_BACKEND_IMAGE := garmin-chat-backend:local
+CHAT_PORT ?= 5173
 
 .PHONY: help prepare-garmin-raw-data cluster-create cluster-status cluster-delete infra-validate infra-up airflow-operator-rollout infra-down \
-        infra-status airflow-ui airflow-password airflow-logs test-infra java-verify \
+        infra-status infra-resources airflow-ui airflow-password airflow-logs test-infra java-verify \
         java-package-ingestion java-package-summary java-package-sleep \
         docker-build docker-build-summary docker-build-sleep \
         kind-load-images kind-load-ingestion-java-images \
@@ -44,7 +50,7 @@ AIRFLOW_POSTGRESQL_STORAGE_USER := --set postgresql.primary.podSecurityContext.r
         postgresql-preflight postgresql-roles postgresql-password postgresql-loader-password \
         postgresql-schema-manager-password airflow-connections-import airflow-dag-reset \
         prepare-database-storage database-storage-check analytics-credentials-check airflow-credentials-check \
-        stack-up stack-restart stack-config-check
+        stack-up stack-restart stack-config-check chat-up chat-ui chat-images kind-load-chat-images chat-validate
 
 help:
 	@echo "Cluster and infrastructure:"
@@ -59,7 +65,8 @@ help:
 	@echo "  make infra-validate         - Render Kustomize and Helm manifests"
 	@echo "  make infra-up               - Deploy Airflow using credentials.local.json and derived connections"
 	@echo "  make infra-down             - Uninstall Airflow (keeps volumes, Secrets and cluster)"
-	@echo "  make infra-status           - Show Helm release and Pods"
+	@echo "  make infra-status           - Show namespaces, Helm releases and Pods across the cluster"
+	@echo "  make infra-resources        - Show capacity, Pod requests/limits and available live usage"
 	@echo "PostgreSQL (separate from Airflow metadata):"
 	@echo "  make postgresql-up          - Deploy analytics and configure role passwords from credentials.local.json"
 	@echo "  make postgresql-rollback    - Restore previous release (or POSTGRESQL_REVISION=N), keeping data"
@@ -91,6 +98,11 @@ help:
 	@echo "  make test-infra             - Run the KubernetesPodOperator smoke DAG"
 	@echo "  make airflow-image          - Build the Airflow image with Garmin operator packages"
 	@echo "  make kind-load-airflow-image - Load the local Airflow image into kind"
+	@echo "Chat (existing garmin-analytics namespace):"
+	@echo "  make chat-validate          - Offline chat chart lint, render checks and setup-script unit tests"
+	@echo "  make chat-up                - Build/deploy the full chat stack and forward the UI to localhost:$(CHAT_PORT)"
+	@echo "                                Requires the reader database Secret; CHAT_VALUES is optional"
+	@echo "  make chat-ui                - Reconnect to the deployed UI without rebuilding"
 
 stack-config-check:
 	$(DATABASE_CREDENTIALS) validate --scope analytics --file "$(CREDENTIALS_FILE)"
@@ -187,9 +199,19 @@ infra-down:
 	$(HELM) uninstall airflow --namespace $(NAMESPACE)
 
 infra-status:
-	$(HELM) list -n $(NAMESPACE)
-	$(KUBECTL) get pods -n $(NAMESPACE)
-	$(KUBECTL) get pods -n $(JOBS_NAMESPACE)
+	$(KUBECTL) get namespaces
+	$(HELM) list --all-namespaces
+	$(KUBECTL) get pods --all-namespaces
+
+infra-resources:
+	$(KUBECTL) get nodes -o 'custom-columns=NAME:.metadata.name,CPU_CAPACITY:.status.capacity.cpu,CPU_ALLOCATABLE:.status.allocatable.cpu,MEMORY_CAPACITY:.status.capacity.memory,MEMORY_ALLOCATABLE:.status.allocatable.memory'
+	@node_resources=$$($(KUBECTL) describe nodes) || exit $$?; \
+		printf '%s\n' "$$node_resources" | sed -n '/^Name:/p; /^Non-terminated Pods:/,/^Events:/p'
+	@if $(KUBECTL) top nodes; then \
+		$(KUBECTL) top pods --all-namespaces --sort-by=memory; \
+	else \
+		echo "Live usage unavailable; kubectl top needs a working Metrics Server."; \
+	fi
 
 # PVC and Secret are deliberately managed outside the Helm release.
 postgresql-preflight: analytics-credentials-check database-storage-check
@@ -329,3 +351,31 @@ kind-load-auth-image: auth-image
 
 auth-policy-verify:
 	KUBE_CONTEXT="$(CONTEXT)" python3 infrastructure/scripts/verify_garmin_auth_admission.py
+
+chat-images:
+	docker build -f garmin-chat/frontend/Dockerfile -t $(CHAT_FRONTEND_IMAGE) .
+	docker build -f garmin-chat/backend/Dockerfile -t $(CHAT_BACKEND_IMAGE) .
+
+kind-load-chat-images: chat-images
+	kind load docker-image $(CHAT_FRONTEND_IMAGE) $(CHAT_BACKEND_IMAGE) --name $(CLUSTER)
+
+chat-validate:
+	helm lint $(CHAT_CHART) --strict --namespace $(POSTGRESQL_NAMESPACE)
+	python3 -m unittest discover -s garmin-chat/tests -v
+
+chat-up:
+	@if [ -n "$(CHAT_VALUES)" ]; then test -f "$(CHAT_VALUES)" || { echo "CHAT_VALUES file not found: $(CHAT_VALUES)"; exit 1; }; fi
+	helm lint $(CHAT_CHART) --strict --namespace $(POSTGRESQL_NAMESPACE) $(if $(strip $(CHAT_VALUES)),-f "$(CHAT_VALUES)")
+	$(MAKE) kind-load-chat-images
+	$(HELM) upgrade --install $(CHAT_RELEASE) $(CHAT_CHART) \
+		--namespace $(POSTGRESQL_NAMESPACE) $(if $(strip $(CHAT_VALUES)),-f "$(CHAT_VALUES)") \
+		--set-string frontend.image=$(CHAT_FRONTEND_IMAGE) --set-string backend.image=$(CHAT_BACKEND_IMAGE) \
+		--set-string buildId="$$(python3 -c 'import uuid; print(uuid.uuid4())')" \
+		--wait --wait-for-jobs --timeout 30m
+	$(MAKE) chat-ui
+
+chat-ui:
+	@echo "Open http://127.0.0.1:$(CHAT_PORT) once forwarding starts. Keep this terminal open."
+	@echo "Ctrl+C stops forwarding; the chat Pods keep running in Kubernetes."
+	$(KUBECTL) -n $(POSTGRESQL_NAMESPACE) port-forward --address 127.0.0.1 \
+		service/$(CHAT_RELEASE)-frontend $(CHAT_PORT):80
