@@ -1,30 +1,23 @@
 # Chat diagnostics and local model evaluation (#66)
 
-This is the diagnostic foundation for #66, not evidence that natural-language
-reliability is fixed. The default model and prompts are unchanged. Real Ollama
-and SQL-backed evaluation is still required on the owner's local cluster.
+These diagnostics cover the Spring AI tool conversation. Live Ollama and
+SQL-backed evaluation is still required on the owner's local cluster.
 
 ## Normal operation
 
-Each service request receives a generated `request_id` in logging MDC. It is
-restored/cleared on completion or failure, including reused HTTP threads. Follow
-that ID through `chat_started`, `model_started`/`model_completed` for `intent`,
-validation, `sql_completed`, the `explanation` model call, and `chat_completed`.
-Failures identify the stage, exception class and elapsed milliseconds; exception
-messages/provider bodies are not included by these diagnostic statements.
+Each request gets a generated `request_id` in logging MDC, shared across
+the HTTP thread and the conversation worker. Follow it through `chat_started`,
+`model_started` and `model_completed` for each turn, `sql_completed`,
+`tool_execution` and `chat_completed`. Tool events report the registered name,
+outcome and duration. Failure events report exception types and latencies.
 
-Normal logs contain prompt character counts (not token estimates), configured
-context and per-call output budgets, a SHA-256 fingerprint of system instructions,
-SQL query name, allowed metric/aggregation names and inclusive day count. The
-fingerprint includes the intent reference date/catalog, so compare it alongside
-the git revision and server date. Model completion metadata reports model, usage
-and finish reason when the provider supplies them; missing metadata is not proof
-of token usage or absence of truncation. Request options may override configured
-defaults. The resolved period and aggregate values require the optional trace.
-
-No questions, prompt text, model response text, dates, profile IDs, row values,
-passwords or connection URLs are deliberately added to normal logs by this change.
-Existing framework logging is separate; do not enable broad HTTP/SQL debug logs.
+Normal logs include prompt character counts, context and response budgets, a
+SHA-256 fingerprint of system instructions, the SQL query name, catalog metric
+and aggregation names, and the inclusive day count. The system fingerprint
+includes the reference date and catalog. Model completion metadata includes
+usage and finish reason when the provider supplies them. Questions, responses,
+exact user dates, profile IDs, readings and credentials are excluded from the
+normal application log.
 
 ## Explicit local sensitive diagnostics
 
@@ -49,12 +42,10 @@ as logging/rollover occurs, not by an independent deletion timer.
 
 Each trace event is one JSON-escaped line with the same request ID:
 
-- `intent_request`: exact messages and request options, including the output schema.
-- `intent_response`: original returned text before parsing or validation.
-- `sql_request`: validated allowlisted intent and resolved inclusive dates.
-- `sql_evidence`: returned aggregate values and coverage; no raw daily JSON.
-- `explanation_request`: complete system/user messages and request options.
-- `explanation_response`: original model answer.
+- `model_request`: turn number, messages, options and tool definition.
+- `model_response`: turn number and assistant message, including any tool calls.
+- `sql_request`: validated query with catalog metrics and resolved inclusive dates.
+- `sql_evidence`: tool values and coverage.
 
 These files contain **personal health information and user-supplied text**.
 They do not intentionally include configuration Secrets, database credentials,
@@ -106,10 +97,11 @@ invented below: establish them independently from PostgreSQL.
 | 14 | Shortest recorded daily sleep duration in the last seven days? | sleepingSeconds / MIN / LAST_N_DAYS=7 |
 | 15 | Longest recorded daily sleep duration last week? | sleepingSeconds / MAX / LAST_WEEK |
 | 16 | How active have I been over the past week? | Clarify metric/operation; never claim the relative period is absent |
-| 17 | Average resting heart rate? | CLARIFICATION; no SQL or explanation call |
-| 18 | Total steps from 2026-02-30 to 2026-03-01? | Invalid date rejected; no SQL or explanation call |
-| 19 | Do days with more physical activity tend to be followed by longer sleep? | UNSUPPORTED correlation; no fabricated finding |
-| 20 | Is my resting heart rate healthy last week? | UNSUPPORTED health assessment |
+| 17 | Average resting heart rate? | Clarification without a tool call |
+| 18 | Total steps from 2026-02-30 to 2026-03-01? | Invalid date rejected before SQL |
+| 19 | Do days with more physical activity tend to be followed by longer sleep? | Unsupported correlation, with no fabricated finding |
+| 20 | Is my resting heart rate healthy last week? | Unsupported health assessment |
+| 21 | How productively did I work yesterday? | Clarify work versus physical activity without a tool call |
 
 Cases 1–15 cover all currently permitted metric/aggregation combinations. Case 16
 is the exact reported failure, not a disguised steps-only question. The current
@@ -119,16 +111,15 @@ an incorrect date error as a successful clarification.
 Use the existing API, for example through `make chat-ui`:
 
 ```sh
-curl --fail-with-body --max-time 630 http://127.0.0.1:5173/api/chat \
+curl --fail-with-body --max-time 690 http://127.0.0.1:5173/api/chat \
   -H 'Content-Type: application/json' \
   -d '{"message":"How active have I been over the past week?"}'
 ```
 
-For each case inspect the raw `intent_response`, the validation event, and (if
-accepted) `sql_request`. This distinguishes malformed period JSON, unsupported
-metric/operation, legitimate ambiguity and Java rejection. Match explanation
-numbers/units/coverage to `sql_evidence`. HTTP 200 or plausible prose alone is
-not a pass.
+For each case inspect the first `model_response` for the tool call or direct
+reply. Match accepted arguments to `sql_request`, then match the final response's
+numbers, units and coverage to `sql_evidence`. Use `tool_execution` to tell
+whether an attempted call executed, failed or was rejected.
 
 Independently check accepted ranges in PostgreSQL using the configured reader
 and the resolved dates. Reproduce SUM/AVG/MIN/MAX and numeric-only coverage from
@@ -139,7 +130,7 @@ answers or use the service result itself as the reference. Preserve missing,
 null, wrong-type and zero distinctions. Sleep is the daily-summary clipped
 `sleepingSeconds` field, not primary overnight sleep or sleep quality.
 
-Record per case/repetition: expected versus actual intent, resolved dates,
+For each repetition, record the expected and actual tool selection, resolved dates,
 SQL-checked value and coverage, explanation correctness, stage/total latency,
 usage if available, and failure classification. Record CPU/memory separately
 with your normal cluster monitoring. Include cold versus warm runs; compare

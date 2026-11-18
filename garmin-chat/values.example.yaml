@@ -12,3 +12,5 @@ chat:
   maxQueryDays: 31
   # Raise this on slower CPUs; the frontend timeout adjusts automatically.
   modelTimeoutSeconds: 300
+  # Optional total request deadline, including capability checks and SQL.
+  # executionTimeoutSeconds: 660

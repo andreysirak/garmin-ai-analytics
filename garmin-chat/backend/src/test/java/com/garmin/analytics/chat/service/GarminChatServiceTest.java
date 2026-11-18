@@ -1,306 +1,328 @@
 package com.garmin.analytics.chat.service;
 
-import static com.garmin.analytics.chat.support.ChatTestSupport.LAST_SEVEN;
+import static com.garmin.analytics.chat.support.ChatTestSupport.JSON;
+import static com.garmin.analytics.chat.support.ChatTestSupport.PROPERTIES;
 import static com.garmin.analytics.chat.support.ChatTestSupport.WEEK;
-import static com.garmin.analytics.chat.support.ChatTestSupport.intent;
-import static com.garmin.analytics.chat.support.ChatTestSupport.isSelection;
-import static com.garmin.analytics.chat.support.ChatTestSupport.model;
-import static com.garmin.analytics.chat.support.ChatTestSupport.rejected;
 import static com.garmin.analytics.chat.support.ChatTestSupport.response;
-import static com.garmin.analytics.chat.support.ChatTestSupport.result;
 import static com.garmin.analytics.chat.support.ChatTestSupport.service;
+import static com.garmin.analytics.chat.support.ChatTestSupport.toolCall;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.garmin.analytics.chat.ai.ChatModelUnavailableException;
-import com.garmin.analytics.chat.model.ChatAnswer;
+import com.garmin.analytics.chat.ai.ChatModelAvailability.Status;
+import com.garmin.analytics.chat.ai.exception.ChatModelUnavailableException;
+import com.garmin.analytics.chat.execution.exception.ChatRequestTimeoutException;
 import com.garmin.analytics.chat.model.DataCoverage;
-import com.garmin.analytics.chat.model.DateRange;
 import com.garmin.analytics.chat.model.MetricAggregation;
 import com.garmin.analytics.chat.model.QueryIntent.Aggregation;
 import com.garmin.analytics.chat.model.QueryIntent.Metric;
+import com.garmin.analytics.chat.model.QueryIntent;
+import com.garmin.analytics.chat.repository.DailySummaryRepository;
+import com.garmin.analytics.chat.support.ChatTestSupport;
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.LocalDate;
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.ai.ollama.api.OllamaChatOptions;
+import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.dao.DataAccessResourceFailureException;
-import org.springframework.dao.DataRetrievalFailureException;
 
 class GarminChatServiceTest {
 
-  private final ObjectMapper json = new ObjectMapper();
-  private final LocalDate start = LocalDate.of(2026, 11, 9);
-  private final LocalDate end = LocalDate.of(2026, 11, 15);
+  private final DailySummaryRepository repository = mock(DailySummaryRepository.class);
+
+  @ParameterizedTest
+  @MethodSource("allowedCalculations")
+  void executesEveryAllowedCalculationAndReturnsEvidenceDates(Metric metric, Aggregation operation)
+      throws IOException {
+    when(repository.aggregate(any())).thenAnswer(call ->
+        List.of(ChatTestSupport.result(call.getArgument(0), "0")));
+    var arguments = WEEK.replace("totalSteps", metric.field()).replace("SUM", operation.name());
+    var chat = service(repository, ChatTestSupport.model(arguments, prompt -> {
+      assertThat(prompt.getInstructions()).hasSize(4);
+      assertThat(prompt.getUserMessage().getText()).isEqualTo("Synthetic question");
+      var evidence = evidence(prompt);
+      assertThat(evidence.get("aggregation").asText()).isEqualTo(operation.name());
+      assertThat(evidence.at("/dateRange/startDate").asText()).isEqualTo("2026-11-09");
+      assertThat(evidence.at("/metrics/0/metric").asText()).isEqualTo(metric.field());
+      assertThat(evidence.at("/metrics/0/unit").asText()).isEqualTo(metric.unit());
+      assertThat(evidence.at("/metrics/0/value").intValue()).isZero();
+      assertThat(evidence.at("/metrics/0/coverage/zeroDays").intValue()).isEqualTo(7);
+      return response("Recorded zero. Misleading text date: 2099-01-01.");
+    }));
+    var answer = chat.answer("Synthetic question");
+    assertThat(answer.answer()).startsWith("Recorded zero.");
+    assertThat(answer.startDate()).isEqualTo("2026-11-09");
+    assertThat(answer.endDate()).isEqualTo("2026-11-15");
+    verify(repository).aggregate(any());
+  }
+
+  static Stream<Arguments> allowedCalculations() {
+    return Arrays.stream(Metric.values()).flatMap(metric -> Arrays.stream(Aggregation.values())
+        .filter(operation -> metric != Metric.RESTING_HEART_RATE || operation != Aggregation.SUM)
+        .map(operation -> Arguments.of(metric, operation)));
+  }
 
   @Test
-  void sendsOnlyCompactEvidenceAndTheVerbatimQuestionAndKeepsRecordedZero() throws Exception {
-    String question = "  Сколько шагов с 2026-11-09 по 2026-11-15? {keep}\n  ";
-    var calls = new ArrayList<Prompt>();
-    var service = service(query -> {
-      assertThat(query.metrics()).containsExactly(Metric.TOTAL_STEPS);
-      assertThat(query.aggregation()).isEqualTo(Aggregation.SUM);
-      assertThat(query.range()).isEqualTo(new DateRange(start, end));
-      return List.of(result(query, "0"));
-    }, prompt -> {
-      calls.add(prompt);
-      if (isSelection(prompt)) {
-        assertThat(prompt.getInstructions().getLast().getText()).isEqualTo(question);
-        return response(WEEK);
-      }
-      return response("За указанный период записано 0 шагов.");
+  void suppliesTheCatalogAndToolDefinitionBeforeSelection() throws IOException {
+    var chat = service(repository, prompt -> {
+      assertThat(prompt.getSystemMessage().getText()).contains(
+          "totalSteps: daily step count (steps)", "work productivity, walking speed or distance",
+          "restingHeartRate: daily resting heart rate (bpm)", "resting pulse",
+          "rolling seven-day resting-heart-rate", "allowed: AVG, MIN, MAX",
+          "activeKilocalories: daily active energy (kcal)", "total calories or food intake",
+          "sleepingSeconds: recorded daily-summary sleep duration (hours)",
+          "Clipped to calendar-day windows", "primary overnight sleep duration", "sleep quality",
+          "Europe/Oslo", "2026-11-16");
+      var options = (ToolCallingChatOptions) prompt.getOptions();
+      assertThat(options.getInternalToolExecutionEnabled()).isFalse();
+      assertThat(options.getToolCallbacks()).singleElement().satisfies(callback -> {
+        var tool = callback.getToolDefinition();
+        assertThat(tool.name()).isEqualTo(ChatTestSupport.TOOL_NAME);
+        assertThat(tool.description())
+            .contains("Garmin daily-summary metrics", "values and coverage");
+        assertThat(tool.inputSchema())
+            .contains("metrics", "aggregation", "period", "LAST_N_DAYS", "startDate", "days")
+            .doesNotContain("profileId", "tableName", "jsonPath");
+      });
+      return response("Do you mean work or physical activity?");
     });
-
-    assertThat(service.answer(question))
-        .isEqualTo(new ChatAnswer("За указанный период записано 0 шагов.", start, end));
-    assertThat(calls).hasSize(2);
-    var explanation = calls.get(1);
-    assertThat(explanation.getInstructions()).hasSize(2);
-    assertThat(explanation.getInstructions().getFirst()).isInstanceOf(SystemMessage.class);
-    assertThat(explanation.getInstructions().getFirst().getText()).contains(
-        "PostgreSQL has already performed all calculations", "Do not invent measurements",
-        "Sleep duration cannot establish sleep quality", "Do not make medical conclusions",
-        "never the total for the entire period", "not a rolling average", "plain text");
-    var evidence = evidence(explanation);
-    assertThat(evidence.size()).isEqualTo(4);
-    assertThat(evidence.get("question").asText()).isEqualTo(question);
-    assertThat(evidence.get("aggregation").asText()).isEqualTo("SUM");
-    assertThat(evidence.at("/dateRange/startDate").asText()).isEqualTo("2026-11-09");
-    assertThat(evidence.at("/dateRange/endDate").asText()).isEqualTo("2026-11-15");
-    assertThat(evidence.get("metrics").size()).isEqualTo(1);
-    assertThat(evidence.at("/metrics/0/metric").asText()).isEqualTo("totalSteps");
-    assertThat(evidence.at("/metrics/0/value").decimalValue()).isEqualByComparingTo("0");
-    assertThat(evidence.at("/metrics/0/unit").asText()).isEqualTo("steps");
-    assertThat(evidence.at("/metrics/0/coverage/zeroDays").asInt()).isEqualTo(7);
-    assertThat(evidence.at("/metrics/0/coverage/complete").asBoolean()).isTrue();
-    assertThat(evidence.toString()).doesNotContain("profileId", "payload", "dailySummaries");
-    var options = (OllamaChatOptions) explanation.getOptions();
-    assertThat(options.getNumPredict()).isEqualTo(1024);
-    assertThat(options.getFormat()).isNull();
-  }
-
-  @Test
-  void resolvesTheIntentRelativePeriodBeforeAggregationAndExcludesToday() throws Exception {
-    var service = service(query -> {
-      assertThat(query.range()).isEqualTo(new DateRange(start, end));
-      assertThat(query.metrics()).containsExactly(Metric.RESTING_HEART_RATE);
-      assertThat(query.aggregation()).isEqualTo(Aggregation.AVG);
-      return List.of(result(query, "55.4"));
-    }, model(intent("[\"restingHeartRate\"]", "AVG", LAST_SEVEN),
-        prompt -> response("Average recorded resting heart rate: 55.4 bpm.")));
-    assertThat(service.answer("Average resting heart rate over the last seven days?").endDate())
-        .isEqualTo(end);
-  }
-
-  @Test
-  void retainsAllCoverageCategoriesAndUnknownMetricsAlongsideNumericResults() throws Exception {
-    String structured = WEEK.replace("[\"totalSteps\"]", "[\"sleepingSeconds\",\"totalSteps\"]")
-        .replace("\"SUM\"", "\"AVG\"");
-    var service = service(query -> List.of(
-        new MetricAggregation(Metric.SLEEPING_SECONDS, Aggregation.AVG, new BigDecimal("1.5"),
-            "hours", query.range(), new DataCoverage(7, 1, 1, 1, 1, 3, 1)),
-        new MetricAggregation(Metric.TOTAL_STEPS, Aggregation.AVG, null,
-            "steps", query.range(), new DataCoverage(7, 1, 2, 2, 2, 0, 0))),
-        model(structured, prompt -> {
-          var data = evidence(prompt);
-          var sleep = data.at("/metrics/0");
-          assertThat(sleep.get("metric").asText()).isEqualTo("sleepingSeconds");
-          assertThat(sleep.get("value").decimalValue()).isEqualByComparingTo("1.5");
-          assertThat(sleep.get("unit").asText()).isEqualTo("hours");
-          var coverage = sleep.get("coverage");
-          for (String name : List.of("missingSummaryDays", "missingMetricDays", "nullMetricDays",
-              "invalidTypeDays", "zeroDays")) {
-            assertThat(coverage.get(name).asInt()).isEqualTo(1);
-          }
-          assertThat(coverage.get("daysWithData").asInt()).isEqualTo(3);
-          assertThat(coverage.get("summaryDays").asInt()).isEqualTo(6);
-          assertThat(coverage.get("missingDays").asInt()).isEqualTo(3);
-          assertThat(coverage.get("complete").asBoolean()).isFalse();
-          assertThat(data.at("/metrics/1/value").isNull()).isTrue();
-          assertThat(data.at("/metrics/1/coverage/invalidTypeDays").asInt()).isEqualTo(2);
-          return response("Sleep duration averaged 1.5 hours over 3 of 7 days; steps are unknown.");
-        }));
-    assertThat(service.answer("Average sleep duration and steps last week?").answer())
-        .contains("steps are unknown");
+    assertThat(chat.answer("How productively did I work yesterday?").startDate()).isNull();
+    verifyNoInteractions(repository);
   }
 
   @ParameterizedTest
-  @ValueSource(strings = {"CLARIFICATION", "UNSUPPORTED"})
-  void rejectedQuestionsSkipSqlAndExplanation(String status) throws Exception {
-    var calls = new AtomicInteger();
-    var service = service(query -> { throw new AssertionError("No SQL for rejected intent"); },
-        prompt -> { calls.incrementAndGet(); return response(rejected(status)); });
-    var answer = service.answer("Was my sleep healthy last week?");
+  @CsvSource({
+      "Average resting heart rate?, What time period should I use?",
+      "How did I sleep last week?, Which sleep measurement do you mean?",
+      "Do activity and sleep correlate?, This chat cannot calculate correlations.",
+      "Який пульс у спокої?, За який період?"
+  })
+  void returnsTheModelsClarificationOrUnsupportedAnswerWithoutData(String question, String text)
+      throws IOException {
+    var answer = service(repository, prompt -> response(text)).answer(question);
+    assertThat(answer.answer()).isEqualTo(text);
     assertThat(answer.startDate()).isNull();
     assertThat(answer.endDate()).isNull();
-    assertThat(answer.answer()).contains(status.equals("CLARIFICATION")
-        ? "Please specify" : "not supported");
-    assertThat(calls.get()).isEqualTo(1);
+    verifyNoInteractions(repository);
   }
 
   @ParameterizedTest
-  @MethodSource("invalidIntents")
-  void invalidIntentNeverQueriesPostgresOrCallsExplanation(String structured) throws Exception {
-    var calls = new AtomicInteger();
-    var service = service(query -> { throw new AssertionError("No SQL for invalid intent"); },
-        prompt -> { calls.incrementAndGet(); return response(structured); });
-    var answer = service.answer("Numeric summary for this period?");
-    assertThat(answer.startDate()).isNull();
+  @MethodSource("invalidArguments")
+  void rejectsInvalidToolArgumentsBeforeLoadingData(String arguments) throws IOException {
+    var chat = service(repository, prompt -> toolCall(arguments));
+    var answer = chat.answer("Synthetic question");
+
     assertThat(answer.answer()).isNotBlank();
-    assertThat(calls.get()).isEqualTo(1);
+    assertThat(answer.startDate()).isNull();
+    assertThat(answer.endDate()).isNull();
+    verifyNoInteractions(repository);
   }
 
-  private static Stream<String> invalidIntents() {
-    return Stream.of("{}", "not JSON", WEEK.replace("totalSteps", "sleepScore"),
+  static Stream<String> invalidArguments() {
+    return Stream.of("", "null", "[]", "{}", WEEK + "{}", WEEK.replace("SUM", "sum"),
+        WEEK.replace("SUM", "CORRELATION"), WEEK.replace("\"SUM\"", "1"),
         WEEK.replace("totalSteps", "restingHeartRate"),
-        WEEK.replace("\"status\":", "\"profileId\":99,\"status\":"),
-        WEEK.replace("2026-11-09", "2026-11-17"),
-        WEEK.replace("2026-11-09", "2026-02-29"),
-        WEEK.replace("2026-11-09", "2026-10-15"));
+        WEEK.replace("totalSteps", "averageRestingHeartRate"),
+        WEEK.replace("\"totalSteps\"", "null"), WEEK.replace("\"totalSteps\"", "42"),
+        WEEK.replace("\"totalSteps\"", ""),
+        WEEK.replace("\"totalSteps\"", "\"totalSteps\",\"totalSteps\""),
+        WEEK.replace("\"metrics\":", "\"profileId\":123,\"metrics\":"),
+        WEEK.replace("\"days\":0", "\"days\":0,\"days\":0"),
+        WEEK.replace("\"days\":0", "\"days\":\"0\""),
+        WEEK.replace("\"days\":0", "\"days\":0.0"),
+        WEEK.replace("\"days\":0", "\"days\":2147483648"),
+        WEEK.replace("\"days\":0", "\"days\":1"),
+        WEEK.replace("\"days\":0", "\"days\":0,\"jsonPath\":\"payload\""),
+        WEEK.replace("LAST_WEEK", "LAST_YEAR"),
+        WEEK.replace("\"startDate\":\"\"", "\"startDate\":null"),
+        WEEK.replace("\"startDate\":\"\",", ""));
   }
 
   @Test
-  void noSummariesReturnsDatesWithoutExplanationCall() throws Exception {
-    var service = service(query -> List.of(result(query, null)), model(WEEK, prompt -> {
-      throw new AssertionError("No explanation call without summaries");
-    }));
-    var answer = service.answer("Total steps last week?");
-    assertThat(answer.answer()).contains("No Garmin daily summaries", "unknown readings");
-    assertThat(answer.startDate()).isEqualTo(start);
-    assertThat(answer.endDate()).isEqualTo(end);
-  }
-
-  @ParameterizedTest
-  @ValueSource(strings = {"missing", "null", "invalid"})
-  void allUnknownReadingsAreReportedDirectlyWithoutInventingZero(String category) throws Exception {
-    var coverage = new DataCoverage(7, 0, category.equals("missing") ? 7 : 0,
-        category.equals("null") ? 7 : 0, category.equals("invalid") ? 7 : 0, 0, 0);
-    var service = service(query -> List.of(new MetricAggregation(Metric.TOTAL_STEPS,
-        Aggregation.SUM, null, "steps", query.range(), coverage)), model(WEEK, prompt -> {
-          throw new AssertionError("No explanation call without numeric data");
-        }));
-    var answer = service.answer("Total steps last week?");
-    assertThat(answer.answer()).contains("No valid numeric readings", "do not mean zero");
-    assertThat(answer.startDate()).isEqualTo(start);
-    assertThat(answer.endDate()).isEqualTo(end);
-  }
-
-  @Test
-  void mismatchedRepositoryResultsNeverReachExplanation() throws Exception {
-    for (var metric : List.of(Metric.RESTING_HEART_RATE, Metric.SLEEPING_SECONDS)) {
-      var service = service(query -> List.of(new MetricAggregation(metric, Aggregation.AVG,
-          BigDecimal.ONE, metric.unit(), query.range(), new DataCoverage(7, 0, 0, 0, 0, 7, 0))),
-          model(WEEK, prompt -> { throw new AssertionError("No unrequested evidence"); }));
-      assertThatThrownBy(() -> service.answer("Total steps last week?"))
-          .isInstanceOf(DataRetrievalFailureException.class);
-    }
-    var empty = service(query -> List.of(), model(WEEK, prompt -> {
-      throw new AssertionError("No incomplete results");
-    }));
-    assertThatThrownBy(() -> empty.answer("Total steps last week?"))
-        .isInstanceOf(DataRetrievalFailureException.class);
-  }
-
-  @Test
-  void oversizedEvidenceSkipsExplanationWithoutTruncation() throws Exception {
-    var service = service(query -> List.of(result(query, "1".repeat(20_000))),
-        model(WEEK, prompt -> { throw new AssertionError("No oversized explanation call"); }));
-    var answer = service.answer("Total steps last week?");
-    assertThat(answer.answer()).contains("choose a shorter period", "No data was truncated");
-    assertThat(answer.startDate()).isEqualTo(start);
-    assertThat(answer.endDate()).isEqualTo(end);
-  }
-
-  @Test
-  void oversizedQuestionSkipsBothModelCallsAndPostgres() throws Exception {
-    var service = service(query -> { throw new AssertionError("No query should happen"); },
-        prompt -> { throw new AssertionError("No model call should happen"); });
-    assertThat(service.answer("x".repeat(20_000)).answer()).contains("question is too long");
-  }
-
-  @Test
-  void unavailableModelSkipsInterpretationAndPostgres() throws Exception {
-    var service = service(query -> { throw new AssertionError("No query should happen"); },
-        prompt -> { throw new AssertionError("No model call should happen"); }, () -> false);
-    assertThatThrownBy(() -> service.answer("Total steps last week?"))
-        .isInstanceOf(ChatModelUnavailableException.class).hasMessageContaining("retry shortly");
-  }
-
-  @Test
-  void interpretationFailureIsRetryableWithoutQuery() throws Exception {
-    var failure = new IllegalStateException("synthetic interpretation failure");
-    var service = service(query -> { throw new AssertionError("No query should happen"); },
-        prompt -> { throw failure; });
-    assertThatThrownBy(() -> service.answer("Total steps last week?"))
-        .isInstanceOf(ChatModelUnavailableException.class).hasCause(failure);
-  }
-
-  @Test
-  void explanationFailureIsRetryable() throws Exception {
-    var failure = new IllegalStateException("synthetic explanation failure");
-    var service = service(query -> List.of(result(query, "10")), model(WEEK, prompt -> {
-      throw failure;
-    }));
-    assertThatThrownBy(() -> service.answer("Total steps last week?"))
-        .isInstanceOf(ChatModelUnavailableException.class).hasCause(failure);
-  }
-
-  @ParameterizedTest
-  @NullAndEmptySource
-  @ValueSource(strings = "   ")
-  void absentExplanationTextIsAModelFailure(String text) throws Exception {
-    var service = service(query -> List.of(result(query, "10")),
-        model(WEEK, prompt -> text == null ? null : response(text)));
-    assertThatThrownBy(() -> service.answer("Total steps last week?"))
-        .isInstanceOf(ChatModelUnavailableException.class);
-  }
-
-  @Test
-  void databaseFailureSkipsExplanation() throws Exception {
-    var failure = new DataAccessResourceFailureException("synthetic database failure");
-    var service = service(query -> { throw failure; }, model(WEEK, prompt -> {
-      throw new AssertionError("No explanation should be requested");
-    }));
-    assertThatThrownBy(() -> service.answer("Total steps last week?")).isSameAs(failure);
-  }
-
-  @Test
-  void questionsAreIndependentWithExactlyTwoCallsPerSupportedQuestion() throws Exception {
-    var prompts = new ArrayList<Prompt>();
-    var loads = new AtomicInteger();
-    var service = service(query -> {
-      loads.incrementAndGet();
-      return List.of(result(query, "0"));
-    }, prompt -> {
-      prompts.add(prompt);
-      return response(isSelection(prompt) ? WEEK : "Synthetic explanation");
+  void forwardsIndependentCoverageAndNullEvidenceAlongsideRecordedZero() throws IOException {
+    when(repository.aggregate(any())).thenAnswer(call -> {
+      QueryIntent intent = call.getArgument(0);
+      return List.of(new MetricAggregation(Metric.TOTAL_STEPS, Aggregation.AVG, BigDecimal.ZERO,
+              "steps", intent.range(), new DataCoverage(7, 1, 1, 1, 1, 3, 3)),
+          new MetricAggregation(Metric.SLEEPING_SECONDS, Aggregation.AVG, null, "hours",
+              intent.range(), new DataCoverage(7, 1, 2, 3, 1, 0, 0)));
     });
-    service.answer("First question last week?");
-    service.answer("Second question last week?");
-    assertThat(loads.get()).isEqualTo(2);
-    assertThat(prompts).hasSize(4);
-    for (var prompt : prompts.subList(2, 4)) {
-      assertThat(prompt.getContents()).doesNotContain("First question", "Synthetic explanation");
+    var multiMetric = WEEK.replace("SUM", "AVG")
+        .replace("\"totalSteps\"", "\"totalSteps\",\"sleepingSeconds\"");
+    var chat = service(repository, ChatTestSupport.model(multiMetric, prompt -> {
+      var evidence = evidence(prompt);
+      var coverage = evidence.at("/metrics/0/coverage");
+      for (var field : List.of("missingSummaryDays", "missingMetricDays", "nullMetricDays",
+          "invalidTypeDays")) {
+        assertThat(coverage.get(field).intValue()).isEqualTo(1);
+      }
+      assertThat(coverage.get("daysWithData").intValue()).isEqualTo(3);
+      assertThat(coverage.get("zeroDays").intValue()).isEqualTo(3);
+      assertThat(coverage.get("complete").booleanValue()).isFalse();
+      assertThat(evidence.at("/metrics/0/value").decimalValue()).isEqualTo(BigDecimal.ZERO);
+      assertThat(evidence.at("/metrics/1/value").isNull()).isTrue();
+      assertThat(evidence.at("/metrics/1/coverage/daysWithData").intValue()).isZero();
+      return response("0 steps on average, from 3 of 7 days. Sleep duration is unknown.");
+    }));
+    assertThat(chat.answer("Average steps and sleep last week?").answer()).contains("3 of 7");
+  }
+
+  @Test
+  void rejectsAToolBatchBeforeExecutingAnyCall() throws IOException {
+    var first = new AssistantMessage.ToolCall("1", "function", ChatTestSupport.TOOL_NAME, WEEK);
+    var second = new AssistantMessage.ToolCall("2", "function", ChatTestSupport.TOOL_NAME, WEEK);
+    var chat = service(repository, prompt -> ChatTestSupport.toolCalls(first, second));
+
+    assertThat(chat.answer("Synthetic question").answer()).contains("one calculation");
+    verifyNoInteractions(repository);
+  }
+
+  @Test
+  void rejectsAnUnknownToolWithoutResolvingOrExecutingIt() throws IOException {
+    var call = new AssistantMessage.ToolCall("1", "function", "execute_sql", WEEK);
+    var chat = service(repository, prompt -> ChatTestSupport.toolCalls(call));
+
+    assertThat(chat.answer("Synthetic question").startDate()).isNull();
+    verifyNoInteractions(repository);
+  }
+
+  @Test
+  void stopsRepeatedToolCallsAfterOneRepositoryExecution() throws IOException {
+    when(repository.aggregate(any())).thenAnswer(call ->
+        List.of(ChatTestSupport.result(call.getArgument(0), null)));
+    var calls = new AtomicInteger();
+    var chat = service(repository, prompt -> {
+      calls.incrementAndGet();
+      return toolCall(WEEK);
+    });
+
+    assertThat(chat.answer("Synthetic question").answer()).contains("one calculation");
+    assertThat(calls.get()).isEqualTo(2);
+    verify(repository).aggregate(any());
+  }
+
+  @Test
+  void neverSendsDatabaseFailuresToTheModelAsToolResults() throws IOException {
+    when(repository.aggregate(any()))
+        .thenThrow(new DataAccessResourceFailureException("private connection details"));
+    var chat = service(repository, ChatTestSupport.model(WEEK, prompt -> {
+      throw new AssertionError("A failed query must not reach the final model turn");
+    }));
+
+    assertThatThrownBy(() -> chat.answer("Synthetic question"))
+        .isInstanceOf(DataAccessResourceFailureException.class);
+  }
+
+  @Test
+  void rejectsModelsWithoutToolCapability() throws IOException {
+    var chat = service(repository, prompt -> {
+      throw new AssertionError("An incompatible model must not be called");
+    }, () -> Status.TOOLS_UNSUPPORTED, PROPERTIES, Duration.ofSeconds(10));
+
+    assertThatThrownBy(() -> chat.answer("Synthetic question"))
+        .isInstanceOf(ChatModelUnavailableException.class).hasMessageContaining("tool calling");
+    verifyNoInteractions(repository);
+  }
+
+  @Test
+  void timesOutTheWholeRequestAndCancelsAnInFlightModelCall() throws Exception {
+    var interrupted = new CountDownLatch(1);
+    var chat = service(repository, prompt -> {
+      try {
+        new CountDownLatch(1).await();
+      } catch (InterruptedException failure) {
+        interrupted.countDown();
+      }
+      return toolCall(WEEK);
+    }, () -> Status.AVAILABLE, PROPERTIES, Duration.ofSeconds(1));
+
+    assertThatThrownBy(() -> chat.answer("Synthetic question"))
+        .isInstanceOf(ChatRequestTimeoutException.class).hasMessageContaining("too long");
+    assertThat(interrupted.await(5, TimeUnit.SECONDS)).isTrue();
+    verifyNoInteractions(repository);
+  }
+
+  @Test
+  void concurrentConversationsKeepTheirToolEvidenceSeparate() throws Exception {
+    when(repository.aggregate(any())).thenAnswer(call ->
+        List.of(ChatTestSupport.result(call.getArgument(0), "0")));
+    var evidenceReady = new CountDownLatch(2);
+    var chat = service(repository, prompt -> {
+      String question = prompt.getUserMessage().getText();
+      if (prompt.getInstructions().size() == 2) {
+        return toolCall(question.equals("Yesterday") ? WEEK.replace("LAST_WEEK", "YESTERDAY")
+            : WEEK);
+      }
+      evidenceReady.countDown();
+      try {
+        assertThat(evidenceReady.await(5, TimeUnit.SECONDS)).isTrue();
+      } catch (InterruptedException failure) {
+        Thread.currentThread().interrupt();
+        throw new AssertionError(failure);
+      }
+      return response(evidence(prompt).at("/dateRange/startDate").asText());
+    });
+
+    try (var callers = Executors.newVirtualThreadPerTaskExecutor()) {
+      var week = callers.submit(() -> chat.answer("Last week"));
+      var yesterday = callers.submit(() -> chat.answer("Yesterday"));
+      assertThat(week.get().answer()).isEqualTo("2026-11-09");
+      assertThat(week.get().startDate()).isEqualTo("2026-11-09");
+      assertThat(yesterday.get().answer()).isEqualTo("2026-11-15");
+      assertThat(yesterday.get().startDate()).isEqualTo("2026-11-15");
     }
   }
 
-  private JsonNode evidence(Prompt prompt) {
+  @Test
+  void rejectsOversizedInitialContextBeforeAnyOllamaOrDatabaseAccess() throws IOException {
+    var chat = service(repository, prompt -> {
+      throw new AssertionError("Oversized input must not reach the model");
+    }, () -> { throw new AssertionError("Oversized input must not reach Ollama"); },
+        PROPERTIES, Duration.ofSeconds(10));
+
+    assertThat(chat.answer("x".repeat(8192)).answer()).contains("too long");
+    verifyNoInteractions(repository);
+  }
+
+  @Test
+  void neverTruncatesOversizedToolEvidence() throws IOException {
+    when(repository.aggregate(any())).thenAnswer(call ->
+        List.of(ChatTestSupport.result(call.getArgument(0), "9".repeat(4000))));
+    var chat = service(repository, ChatTestSupport.model(WEEK, prompt -> {
+      throw new AssertionError("Partial evidence must not reach the model");
+    }));
+
+    var answer = chat.answer("Total steps last week?");
+    assertThat(answer.answer()).contains("complete question and Garmin evidence exceed");
+    assertThat(answer.startDate()).isEqualTo(LocalDate.parse("2026-11-09"));
+  }
+
+  private static JsonNode evidence(Prompt prompt) {
     try {
-      return json.readTree(prompt.getInstructions().getLast().getText());
+      return JSON.readTree(ChatTestSupport.toolEvidence(prompt));
     } catch (IOException failure) {
-      throw new AssertionError("Explanation input must be JSON", failure);
+      throw new AssertionError(failure);
     }
   }
 }

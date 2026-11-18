@@ -4,8 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.garmin.analytics.chat.GarminChatApplication;
 import com.garmin.analytics.chat.ai.ChatModelAvailability;
-import com.garmin.analytics.chat.ai.PromptBudget;
-import com.garmin.analytics.chat.ai.QuestionDateResolver;
+import com.garmin.analytics.chat.ai.GarminChatConversation;
+import com.garmin.analytics.chat.ai.prompt.PromptBudget;
+import com.garmin.analytics.chat.analytics.GarminAnalyticsService;
 import com.garmin.analytics.chat.controller.ChatExceptionHandler;
 import com.garmin.analytics.chat.controller.GarminChatController;
 import com.garmin.analytics.chat.repository.DailySummaryRepository;
@@ -14,8 +15,10 @@ import java.time.Duration;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.boot.autoconfigure.http.client.HttpClientProperties;
+import org.springframework.boot.http.client.JdkClientHttpRequestFactoryBuilder;
 import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
@@ -33,13 +36,18 @@ class ChatConfigurationTest {
       assertThat(context).hasSingleBean(GarminChatController.class);
       assertThat(context).hasSingleBean(ChatExceptionHandler.class);
       assertThat(context).hasSingleBean(GarminChatService.class);
+      assertThat(context).hasSingleBean(GarminChatConversation.class);
       assertThat(context).hasSingleBean(ChatModel.class);
+      assertThat(context).hasSingleBean(ChatClient.Builder.class);
       assertThat(context).hasSingleBean(ChatModelAvailability.class);
       assertThat(context).hasSingleBean(DailySummaryRepository.class);
-      assertThat(context).hasSingleBean(QuestionDateResolver.class);
+      assertThat(context).hasSingleBean(GarminAnalyticsService.class);
       assertThat(context).hasSingleBean(PromptBudget.class);
       assertThat(context.getBean(HttpClientProperties.class).getReadTimeout())
           .isEqualTo(Duration.ofSeconds(300));
+      assertThat(context).hasSingleBean(JdkClientHttpRequestFactoryBuilder.class);
+      assertThat(context.getBean(ChatExecutionProperties.class).timeout())
+          .isEqualTo(Duration.ofSeconds(660));
       assertThat(context.getBean(GarminChatProperties.class).maxQueryDays()).isEqualTo(31);
     });
   }
@@ -50,6 +58,19 @@ class ChatConfigurationTest {
       assertThat(context).hasNotFailed();
       assertThat(context.getBean(HttpClientProperties.class).getReadTimeout())
           .isEqualTo(Duration.ofSeconds(420));
+      assertThat(context.getBean(ChatExecutionProperties.class).timeout())
+          .isEqualTo(Duration.ofSeconds(660));
+    });
+  }
+
+  @Test
+  void bindsTheExecutionTimeoutIndependentlyOfTheHttpClient() {
+    runner.withPropertyValues("GARMIN_CHAT_EXECUTION_TIMEOUT=12m").run(context -> {
+      assertThat(context).hasNotFailed();
+      assertThat(context.getBean(ChatExecutionProperties.class).timeout())
+          .isEqualTo(Duration.ofMinutes(12));
+      assertThat(context.getBean(HttpClientProperties.class).getReadTimeout())
+          .isEqualTo(Duration.ofSeconds(300));
     });
   }
 
@@ -65,9 +86,11 @@ class ChatConfigurationTest {
   @ValueSource(strings = {
       "GARMIN_CHAT_PROFILE_ID=0", "GARMIN_CHAT_TIMEZONE=Not/A_Timezone",
       "GARMIN_CHAT_RESPONSE_TOKENS=0", "GARMIN_CHAT_RESPONSE_TOKENS=8192",
-      "GARMIN_CHAT_MAX_QUERY_DAYS=0", "GARMIN_CHAT_MAX_QUERY_DAYS=-1"
+      "GARMIN_CHAT_MAX_QUERY_DAYS=0", "GARMIN_CHAT_MAX_QUERY_DAYS=-1",
+      "GARMIN_CHAT_EXECUTION_TIMEOUT=0s", "GARMIN_CHAT_EXECUTION_TIMEOUT=-1s",
+      "OLLAMA_REQUEST_TIMEOUT=0s"
   })
-  void rejectsInvalidProfileTimezoneOrResponseBudgetAtStartup(String override) {
+  void rejectsInvalidChatConfigurationAtStartup(String override) {
     runner.withPropertyValues(override).run(context -> assertThat(context).hasFailed());
   }
 }

@@ -1,4 +1,4 @@
-package com.garmin.analytics.chat.repository;
+package com.garmin.analytics.chat.repository.impl;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -18,7 +18,7 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.core.namedparam.SqlParameterSource;
 
-class PostgresDailySummaryRepositoryTest {
+class DailySummaryRepositoryPostgresImplTest {
 
   @Test
   void bindsProfileAndDatesAndPreservesEveryJsonField() throws Exception {
@@ -51,7 +51,7 @@ class PostgresDailySummaryRepositoryTest {
           RowMapper<DailySummary> mapper = invocation.getArgument(2);
           return List.of(mapper.mapRow(zeroRow, 0), mapper.mapRow(unknownRow, 1));
         });
-    var repository = new PostgresDailySummaryRepository(jdbc,
+    var repository = new DailySummaryRepositoryPostgresImpl(jdbc,
         new ClassPathResource("sql/daily-summaries.sql"),
         new ClassPathResource("sql/metric-aggregation.sql"), ChatTestSupport.PROPERTIES);
 

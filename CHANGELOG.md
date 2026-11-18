@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Split Garmin chat request execution, prompt assembly, tool lifecycle and
+  model-turn diagnostics into dedicated components. Configure the total chat
+  deadline independently of Ollama's HTTP timeout.
+
+- Use Spring AI tool calling for Garmin scalar analytics. Send the metric catalog
+  before tool selection and return structured SQL evidence with dates, units and
+  coverage. Cap each request at one tool call and require Ollama tool capability.
+
 - Add per-request AI chat stage timings, intent validation diagnostics and opt-in
   rotating local prompt/response traces; document a repeatable model evaluation (#66).
 

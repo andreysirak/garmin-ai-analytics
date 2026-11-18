@@ -8,9 +8,10 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.garmin.analytics.chat.model.DateRange;
-import com.garmin.analytics.chat.model.QueryIntent;
 import com.garmin.analytics.chat.model.QueryIntent.Aggregation;
 import com.garmin.analytics.chat.model.QueryIntent.Metric;
+import com.garmin.analytics.chat.model.QueryIntent;
+import com.garmin.analytics.chat.repository.impl.DailySummaryRepositoryPostgresImpl;
 import com.garmin.analytics.chat.support.ChatTestSupport;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -136,8 +137,8 @@ class PostgresMetricAggregationTest {
     verifyNoInteractions(jdbc);
   }
 
-  private PostgresDailySummaryRepository repository() throws Exception {
-    return new PostgresDailySummaryRepository(jdbc,
+  private DailySummaryRepositoryPostgresImpl repository() throws Exception {
+    return new DailySummaryRepositoryPostgresImpl(jdbc,
         new ClassPathResource("sql/daily-summaries.sql"), sql, ChatTestSupport.PROPERTIES);
   }
 

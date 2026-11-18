@@ -13,17 +13,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
-import com.garmin.analytics.chat.ai.PromptBudget;
-import com.garmin.analytics.chat.repository.PostgresDailySummaryRepository;
-import com.garmin.analytics.chat.service.GarminChatService;
+import com.garmin.analytics.chat.repository.impl.DailySummaryRepositoryPostgresImpl;
 import com.garmin.analytics.chat.support.ChatTestSupport;
 import java.math.BigDecimal;
 import java.sql.Date;
 import java.sql.ResultSet;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
-import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentMatchers;
 import org.springframework.ai.ollama.OllamaChatModel;
 import org.springframework.ai.ollama.api.OllamaApi;
@@ -62,7 +60,7 @@ class GarminChatFlowTest {
       "sleepingSeconds, AVG, 1.5, hours, 3600, "
           + "Средняя длительность сна за последние семь дней?"
   })
-  void routesValidatedIntentThroughAggregationAndOnlyCompactEvidenceToExplanation(
+  void sendsCompactEvidenceInToolMessages(
       String field, String operation, String expectedValue, String unit, int divisor,
       String questionText)
       throws Exception {
@@ -91,20 +89,28 @@ class GarminChatFlowTest {
       var body = json.readTree(((MockClientHttpRequest) request).getBodyAsString());
       assertThat(body.at("/messages/1/content").asText()).isEqualTo(question);
       assertThat(body.at("/messages/0/content").asText()).contains("2026-11-16", "Europe/Oslo");
-      assertThat(body.at("/format/properties/metrics/items/enum").size()).isEqualTo(4);
-      assertThat(body.at("/format/properties/status").isObject()).isTrue();
-      assertThat(body.at("/options/num_predict").asInt()).isEqualTo(384);
-    }).andRespond(withSuccess(modelResponse(ChatTestSupport.intent("[\"" + field + "\"]",
+      assertThat(body.hasNonNull("format")).isFalse();
+      assertThat(body.at("/tools/0/function/name").asText()).isEqualTo(ChatTestSupport.TOOL_NAME);
+      var period = body.at("/tools/0/function/parameters/properties/period");
+      assertThat(period.at("/properties/days/type").asText()).isEqualTo("integer");
+      assertThat(period.get("required")).map(fieldName -> fieldName.asText())
+          .containsExactlyInAnyOrder("type", "startDate", "endDate", "days");
+      assertThat(body.at("/options/num_predict").asInt()).isEqualTo(1024);
+    }).andRespond(withSuccess(modelToolResponse(ChatTestSupport.arguments("[\"" + field + "\"]",
         operation, ChatTestSupport.LAST_SEVEN)), MediaType.APPLICATION_JSON));
     String explanation = operation + " " + field + ": " + expectedValue + " " + unit
         + ". Coverage is incomplete: 3 of 7 days have numeric readings.";
     server.expect(requestTo("http://ollama:11434/api/chat")).andExpect(request -> {
       var body = json.readTree(((MockClientHttpRequest) request).getBodyAsString());
-      assertThat(body.get("messages").size()).isEqualTo(2);
+      assertThat(body.get("messages").size()).isEqualTo(4);
       assertThat(body.at("/format").isMissingNode() || body.at("/format").isNull()).isTrue();
       assertThat(body.at("/options/num_predict").asInt()).isEqualTo(1024);
-      var data = json.readTree(body.at("/messages/1/content").asText());
-      assertThat(data.get("question").asText()).isEqualTo(question);
+      assertThat(body.at("/messages/1/content").asText()).isEqualTo(question);
+      assertThat(body.at("/messages/2/tool_calls/0/function/name").asText())
+          .isEqualTo(ChatTestSupport.TOOL_NAME);
+      assertThat(body.at("/messages/3/role").asText()).isEqualTo("tool");
+      var data = json.readTree(body.at("/messages/3/content").asText());
+      assertThat(data.has("question")).isFalse();
       assertThat(data.get("aggregation").asText()).isEqualTo(operation);
       assertThat(data.at("/dateRange/startDate").asText()).isEqualTo("2026-11-09");
       assertThat(data.at("/metrics/0/metric").asText()).isEqualTo(field);
@@ -125,25 +131,32 @@ class GarminChatFlowTest {
   }
 
   @ParameterizedTest
-  @ValueSource(strings = {"CLARIFICATION", "UNSUPPORTED"})
-  void refusalsStopAfterTheStructuredCallWithoutDatabaseAccess(String selection) throws Exception {
-    String question = selection.equals("UNSUPPORTED")
-        ? "Do days with more physical activity tend to be followed by longer sleep?"
-        : "Average resting heart rate?";
+  @CsvSource({
+      "Do days with more physical activity tend to be followed by longer sleep?, "
+          + "This chat cannot calculate correlations.",
+      "Average resting heart rate?, Please specify a time period.",
+      "How productively did I work yesterday?, Do you mean work or physical activity?"
+  })
+  void answersWithoutDatabaseAccessWhenOllamaDoesNotCallATool(String question, String answer)
+      throws Exception {
     server.expect(requestTo("http://ollama:11434/api/chat"))
-        .andRespond(withSuccess(modelResponse(ChatTestSupport.rejected(selection)),
-            MediaType.APPLICATION_JSON));
+        .andRespond(withSuccess(modelResponse(answer), MediaType.APPLICATION_JSON));
     mvc().perform(post("/api/chat").contentType(MediaType.APPLICATION_JSON)
             .content(json.writeValueAsString(Map.of("message", question))))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.answer").value(org.hamcrest.Matchers.containsString(
-            selection.equals("UNSUPPORTED") ? "not supported" : "Please specify")))
-        .andExpect(jsonPath("$.answer").value(org.hamcrest.Matchers.not(
-            org.hamcrest.Matchers.containsString("Unsupported aggregation"))))
+        .andExpect(jsonPath("$.answer").value(answer))
         .andExpect(jsonPath("$.startDate").value(org.hamcrest.Matchers.nullValue()))
         .andExpect(jsonPath("$.endDate").value(org.hamcrest.Matchers.nullValue()));
     verifyNoInteractions(jdbc);
     server.verify();
+  }
+
+  private String modelToolResponse(String arguments) throws Exception {
+    return json.writeValueAsString(Map.of("model", "synthetic-model", "done", true,
+        "message", Map.of("role", "assistant", "content", "", "tool_calls",
+            List.of(Map.of("function",
+                Map.of("name", ChatTestSupport.TOOL_NAME,
+                    "arguments", json.readTree(arguments)))))));
   }
 
   private String modelResponse(String content) throws Exception {
@@ -152,16 +165,13 @@ class GarminChatFlowTest {
   }
 
   private MockMvc mvc() throws Exception {
-    var repository = new PostgresDailySummaryRepository(jdbc,
+    var repository = new DailySummaryRepositoryPostgresImpl(jdbc,
         new ClassPathResource("sql/daily-summaries.sql"),
         new ClassPathResource("sql/metric-aggregation.sql"), ChatTestSupport.PROPERTIES);
     var model = OllamaChatModel.builder().ollamaApi(OllamaApi.builder()
         .baseUrl("http://ollama:11434").restClientBuilder(client).build())
         .defaultOptions(OllamaChatOptions.builder().model("synthetic-model").build()).build();
-    var service = new GarminChatService(repository, model, () -> true,
-        ChatTestSupport.dates(ChatTestSupport.CLOCK, ChatTestSupport.PROPERTIES),
-        new PromptBudget(ChatTestSupport.PROPERTIES), ChatTestSupport.PROPERTIES, json,
-        new ClassPathResource("prompts/garmin-evidence-system.txt"));
+    var service = ChatTestSupport.service(repository, model);
     return MockMvcBuilders.standaloneSetup(new GarminChatController(service))
         .setControllerAdvice(new ChatExceptionHandler())
         .setMessageConverters(new MappingJackson2HttpMessageConverter(json)).build();

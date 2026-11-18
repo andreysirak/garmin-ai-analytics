@@ -6,9 +6,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.garmin.analytics.chat.config.GarminChatProperties;
 import com.garmin.analytics.chat.model.DataCoverage;
 import com.garmin.analytics.chat.model.DateRange;
-import com.garmin.analytics.chat.model.QueryIntent;
 import com.garmin.analytics.chat.model.QueryIntent.Aggregation;
 import com.garmin.analytics.chat.model.QueryIntent.Metric;
+import com.garmin.analytics.chat.model.QueryIntent;
+import com.garmin.analytics.chat.repository.impl.DailySummaryRepositoryPostgresImpl;
 import com.garmin.analytics.chat.support.ChatTestSupport;
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -170,15 +171,15 @@ class PostgresMetricAggregationDatabaseTest {
 
   @Test
   void serviceExplainsOnlyCalculatedEvidenceFromPostgres() throws Exception {
-    String selection = ChatTestSupport.intent("[\"totalSteps\",\"sleepingSeconds\"]", "AVG", """
+    String selection = ChatTestSupport.arguments("[\"totalSteps\",\"sleepingSeconds\"]", "AVG", """
         {"type":"EXPLICIT","days":0,"startDate":"2024-02-26","endDate":"2024-03-03"}
         """);
     var repository = mixedFixture();
-    var service = ChatTestSupport.service(repository::aggregate,
+    var service = ChatTestSupport.service(repository,
         ChatTestSupport.model(selection, prompt -> {
           try {
             var evidence = new ObjectMapper()
-                .readTree(prompt.getInstructions().getLast().getText());
+                .readTree(ChatTestSupport.toolEvidence(prompt));
             assertThat(evidence.at("/metrics/0/metric").asText()).isEqualTo("totalSteps");
             assertThat(evidence.at("/metrics/0/value").decimalValue()).isEqualByComparingTo("100");
             assertThat(evidence.at("/metrics/1/value").decimalValue()).isEqualByComparingTo("1.5");
@@ -200,11 +201,18 @@ class PostgresMetricAggregationDatabaseTest {
   }
 
   @Test
-  void serviceSkipsExplanationWhenPostgresFindsNoSummaries() throws Exception {
+  void servicePassesMissingSummariesAsToolEvidence() throws Exception {
     var repository = synthetic();
-    var service = ChatTestSupport.service(repository::aggregate,
+    var service = ChatTestSupport.service(repository,
         ChatTestSupport.model(ChatTestSupport.WEEK, prompt -> {
-          throw new AssertionError("No explanation without summaries");
+          try {
+            var evidence = new ObjectMapper().readTree(ChatTestSupport.toolEvidence(prompt));
+            assertThat(evidence.at("/metrics/0/value").isNull()).isTrue();
+            assertThat(evidence.at("/metrics/0/coverage/missingSummaryDays").asInt()).isEqualTo(7);
+          } catch (IOException failure) {
+            throw new AssertionError(failure);
+          }
+          return ChatTestSupport.response("No Garmin daily summaries are available.");
         }));
     assertThat(service.answer("Total steps last week?").answer()).contains("No Garmin daily");
   }
@@ -298,7 +306,7 @@ class PostgresMetricAggregationDatabaseTest {
 
   private DailySummaryRepository repository(Resource statement, GarminChatProperties properties)
       throws Exception {
-    var target = new PostgresDailySummaryRepository(jdbc,
+    var target = new DailySummaryRepositoryPostgresImpl(jdbc,
         new ClassPathResource("sql/daily-summaries.sql"), statement, properties);
     var transaction = new TransactionInterceptor();
     transaction.setTransactionManager(new DataSourceTransactionManager(dataSource));
