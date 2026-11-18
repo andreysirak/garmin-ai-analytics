@@ -21,8 +21,8 @@ import java.math.BigDecimal;
 import java.sql.Date;
 import java.sql.ResultSet;
 import java.util.Map;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentMatchers;
 import org.springframework.ai.ollama.OllamaChatModel;
@@ -49,12 +49,26 @@ class GarminChatFlowTest {
   private final RestClient.Builder client = RestClient.builder();
   private final MockRestServiceServer server = MockRestServiceServer.bindTo(client).build();
 
-  @Test
-  void routesValidatedIntentThroughAggregationAndOnlyCompactEvidenceToExplanation()
+  @ParameterizedTest
+  @CsvSource({
+      "totalSteps, SUM, 300, steps, 1, "
+          + "How many steps did I record in total over the last seven days?",
+      "restingHeartRate, AVG, 36, bpm, 1, "
+          + "What was my average resting heart rate over the last seven days?",
+      "activeKilocalories, MAX, 200.25, kcal, 1, "
+          + "What was my maximum daily active calorie burn over the last seven days?",
+      "sleepingSeconds, MIN, 0, hours, 3600, "
+          + "What was my minimum daily recorded sleep time over the last seven days?",
+      "sleepingSeconds, AVG, 1.5, hours, 3600, "
+          + "Средняя длительность сна за последние семь дней?"
+  })
+  void routesValidatedIntentThroughAggregationAndOnlyCompactEvidenceToExplanation(
+      String field, String operation, String expectedValue, String unit, int divisor,
+      String questionText)
       throws Exception {
-    String question = "  Средняя длительность сна за последние семь дней? {keep}  ";
+    String question = "  " + questionText + " {keep}  ";
     var row = mock(ResultSet.class);
-    when(row.getBigDecimal("value")).thenReturn(new BigDecimal("1.5"));
+    when(row.getBigDecimal("value")).thenReturn(new BigDecimal(expectedValue));
     when(row.getInt("expected_days")).thenReturn(7);
     when(row.getInt("days_with_data")).thenReturn(3);
     for (String category : new String[] {"missing_summary_days", "missing_metric_days",
@@ -67,9 +81,9 @@ class GarminChatFlowTest {
           assertThat(parameters.getValue("profileId")).isEqualTo(123L);
           assertThat(parameters.getValue("startDate")).isEqualTo(Date.valueOf("2026-11-09"));
           assertThat(parameters.getValue("endDate")).isEqualTo(Date.valueOf("2026-11-15"));
-          assertThat(parameters.getValue("metric")).isEqualTo("sleepingSeconds");
-          assertThat(parameters.getValue("aggregation")).isEqualTo("AVG");
-          assertThat(parameters.getValue("divisor")).isEqualTo(3600);
+          assertThat(parameters.getValue("metric")).isEqualTo(field);
+          assertThat(parameters.getValue("aggregation")).isEqualTo(operation);
+          assertThat(parameters.getValue("divisor")).isEqualTo(divisor);
           RowMapper<?> mapper = call.getArgument(2);
           return mapper.mapRow(row, 0);
         });
@@ -80,10 +94,10 @@ class GarminChatFlowTest {
       assertThat(body.at("/format/properties/metrics/items/enum").size()).isEqualTo(4);
       assertThat(body.at("/format/properties/status").isObject()).isTrue();
       assertThat(body.at("/options/num_predict").asInt()).isEqualTo(384);
-    }).andRespond(withSuccess(modelResponse(ChatTestSupport.intent("[\"sleepingSeconds\"]", "AVG",
-        ChatTestSupport.LAST_SEVEN)), MediaType.APPLICATION_JSON));
-    String explanation =
-        "Recorded sleep averaged 1.5 hours over 3 of 7 days. Coverage is incomplete.";
+    }).andRespond(withSuccess(modelResponse(ChatTestSupport.intent("[\"" + field + "\"]",
+        operation, ChatTestSupport.LAST_SEVEN)), MediaType.APPLICATION_JSON));
+    String explanation = operation + " " + field + ": " + expectedValue + " " + unit
+        + ". Coverage is incomplete: 3 of 7 days have numeric readings.";
     server.expect(requestTo("http://ollama:11434/api/chat")).andExpect(request -> {
       var body = json.readTree(((MockClientHttpRequest) request).getBodyAsString());
       assertThat(body.get("messages").size()).isEqualTo(2);
@@ -91,10 +105,11 @@ class GarminChatFlowTest {
       assertThat(body.at("/options/num_predict").asInt()).isEqualTo(1024);
       var data = json.readTree(body.at("/messages/1/content").asText());
       assertThat(data.get("question").asText()).isEqualTo(question);
-      assertThat(data.get("aggregation").asText()).isEqualTo("AVG");
+      assertThat(data.get("aggregation").asText()).isEqualTo(operation);
       assertThat(data.at("/dateRange/startDate").asText()).isEqualTo("2026-11-09");
-      assertThat(data.at("/metrics/0/value").decimalValue()).isEqualByComparingTo("1.5");
-      assertThat(data.at("/metrics/0/unit").asText()).isEqualTo("hours");
+      assertThat(data.at("/metrics/0/metric").asText()).isEqualTo(field);
+      assertThat(data.at("/metrics/0/value").decimalValue()).isEqualByComparingTo(expectedValue);
+      assertThat(data.at("/metrics/0/unit").asText()).isEqualTo(unit);
       assertThat(data.at("/metrics/0/coverage/invalidTypeDays").asInt()).isEqualTo(1);
       assertThat(data.at("/metrics/0/coverage/complete").asBoolean()).isFalse();
       assertThat(data.toString()).doesNotContain("profileId", "user_profile_id", "payload");
@@ -112,12 +127,19 @@ class GarminChatFlowTest {
   @ParameterizedTest
   @ValueSource(strings = {"CLARIFICATION", "UNSUPPORTED"})
   void refusalsStopAfterTheStructuredCallWithoutDatabaseAccess(String selection) throws Exception {
+    String question = selection.equals("UNSUPPORTED")
+        ? "Do days with more physical activity tend to be followed by longer sleep?"
+        : "Average resting heart rate?";
     server.expect(requestTo("http://ollama:11434/api/chat"))
         .andRespond(withSuccess(modelResponse(ChatTestSupport.rejected(selection)),
             MediaType.APPLICATION_JSON));
     mvc().perform(post("/api/chat").contentType(MediaType.APPLICATION_JSON)
-            .content("{\"message\":\"Was my sleep healthy last week?\"}"))
+            .content(json.writeValueAsString(Map.of("message", question))))
         .andExpect(status().isOk())
+        .andExpect(jsonPath("$.answer").value(org.hamcrest.Matchers.containsString(
+            selection.equals("UNSUPPORTED") ? "not supported" : "Please specify")))
+        .andExpect(jsonPath("$.answer").value(org.hamcrest.Matchers.not(
+            org.hamcrest.Matchers.containsString("Unsupported aggregation"))))
         .andExpect(jsonPath("$.startDate").value(org.hamcrest.Matchers.nullValue()))
         .andExpect(jsonPath("$.endDate").value(org.hamcrest.Matchers.nullValue()));
     verifyNoInteractions(jdbc);

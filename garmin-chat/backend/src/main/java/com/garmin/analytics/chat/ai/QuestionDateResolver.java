@@ -114,11 +114,10 @@ public class QuestionDateResolver {
             || !clarificationPeriod(selection.period())) {
           return invalidIntent();
         }
-        return new QueryIntentResolution(null, selection.status() == IntentStatus.CLARIFICATION
-            ? "Please specify a supported metric, an aggregation and an unambiguous period."
-            : "That question is not supported. Ask for a numeric summary of steps, resting heart "
-                + "rate, active calories or recorded sleep duration. Sleep quality, medical "
-                + "conclusions, comparisons and correlations are not supported.");
+        return selection.status() == IntentStatus.CLARIFICATION
+            ? new QueryIntentResolution(null,
+                "Please specify a measurement, how to summarize it, and a clear period.")
+            : unsupportedAnalysis(List.of());
       }
       if (selection.metrics().isEmpty()
           || selection.metrics().size() > QueryIntent.Metric.values().length
@@ -141,10 +140,14 @@ public class QuestionDateResolver {
       try {
         aggregation = QueryIntent.Aggregation.valueOf(selection.aggregation());
       } catch (IllegalArgumentException unsupported) {
-        return unsupportedAggregation();
+        return unsupportedAnalysis(metrics);
       }
-      if (metrics.stream().anyMatch(metric -> !metric.supports(aggregation))) {
-        return unsupportedAggregation();
+      var incompatible = metrics.stream()
+          .filter(metric -> !metric.supports(aggregation)).findFirst();
+      if (incompatible.isPresent()) {
+        return new QueryIntentResolution(null,
+            "That calculation is not supported for " + metricLabel(incompatible.get()) + ". "
+                + supportedExample(incompatible.get()));
       }
       var range = resolvePeriod(selection.period(), referenceDate);
       if (range.isEmpty()) {
@@ -256,10 +259,26 @@ public class QuestionDateResolver {
             + "aggregation and clear period.");
   }
 
-  private QueryIntentResolution unsupportedAggregation() {
+  private QueryIntentResolution unsupportedAnalysis(List<QueryIntent.Metric> metrics) {
     return new QueryIntentResolution(null,
-        "Unsupported aggregation for these metrics. Use AVG, SUM, MIN or MAX; "
-            + "restingHeartRate supports AVG, MIN and MAX only.");
+        "This demo supports summaries for one period. Correlations, trends, period comparisons "
+            + "and causal or medical conclusions are not supported. "
+            + supportedExample(metrics.isEmpty() ? QueryIntent.Metric.TOTAL_STEPS
+                : metrics.getFirst()));
+  }
+
+  private String supportedExample(QueryIntent.Metric metric) {
+    String period = properties.maxQueryDays() >= 7 ? "over the last seven days" : "yesterday";
+    return "Try: \"What was my average " + metricLabel(metric) + " " + period + "?\"";
+  }
+
+  private String metricLabel(QueryIntent.Metric metric) {
+    return switch (metric) {
+      case TOTAL_STEPS -> "daily step count";
+      case RESTING_HEART_RATE -> "resting heart rate";
+      case ACTIVE_KILOCALORIES -> "active calories";
+      case SLEEPING_SECONDS -> "recorded sleep duration";
+    };
   }
 
   private DateRange relativeRange(DateSelection selection, LocalDate start, LocalDate end) {

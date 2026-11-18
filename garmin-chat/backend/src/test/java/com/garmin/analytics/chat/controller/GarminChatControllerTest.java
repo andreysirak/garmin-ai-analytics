@@ -19,6 +19,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -95,6 +96,52 @@ class GarminChatControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.answer").value(
             org.hamcrest.Matchers.containsString("Please specify")))
+        .andExpect(jsonPath("$.startDate").value(org.hamcrest.Matchers.nullValue()))
+        .andExpect(jsonPath("$.endDate").value(org.hamcrest.Matchers.nullValue()));
+  }
+
+  @ParameterizedTest
+  @CsvSource({"totalSteps, CORRELATION", "sleepingSeconds, TREND", "totalSteps, COMPARISON",
+      "restingHeartRate, SUM"})
+  void explainsRejectedCalculationsWithoutSqlOrAnExplanationCall(String field, String operation)
+      throws Exception {
+    var calls = new AtomicInteger();
+    String selection = ChatTestSupport.WEEK.replace("totalSteps", field)
+        .replace("\"SUM\"", "\"" + operation + "\"");
+    var service = ChatTestSupport.service(query -> {
+      throw new AssertionError("Rejected calculations must not query PostgreSQL");
+    }, prompt -> {
+      calls.incrementAndGet();
+      assertThat(ChatTestSupport.isSelection(prompt)).isTrue();
+      return ChatTestSupport.response(selection);
+    });
+    mvc(service).perform(post("/api/chat").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"message\":\"How is activity related to sleep last week?\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$").value(org.hamcrest.Matchers.aMapWithSize(3)))
+        .andExpect(jsonPath("$.answer").value(org.hamcrest.Matchers.containsString(
+            "not supported")))
+        .andExpect(jsonPath("$.answer").value(org.hamcrest.Matchers.containsString("Try:")))
+        .andExpect(jsonPath("$.answer").value(org.hamcrest.Matchers.not(
+            org.hamcrest.Matchers.containsString("Unsupported aggregation"))))
+        .andExpect(jsonPath("$.startDate").value(org.hamcrest.Matchers.nullValue()))
+        .andExpect(jsonPath("$.endDate").value(org.hamcrest.Matchers.nullValue()));
+    assertThat(calls.get()).isEqualTo(1);
+  }
+
+  @Test
+  void keepsInvalidDateGuidanceDistinctFromUnsupportedCalculations() throws Exception {
+    var service = ChatTestSupport.service(query -> {
+      throw new AssertionError("Invalid dates must not query PostgreSQL");
+    }, prompt -> ChatTestSupport.response(
+        ChatTestSupport.WEEK.replace("2026-11-09", "2026-02-29")));
+    mvc(service).perform(post("/api/chat").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"message\":\"Total steps for this period?\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.answer").value(org.hamcrest.Matchers.containsString(
+            "valid, ordered dates")))
+        .andExpect(jsonPath("$.answer").value(org.hamcrest.Matchers.not(
+            org.hamcrest.Matchers.containsString("not supported"))))
         .andExpect(jsonPath("$.startDate").value(org.hamcrest.Matchers.nullValue()))
         .andExpect(jsonPath("$.endDate").value(org.hamcrest.Matchers.nullValue()));
   }

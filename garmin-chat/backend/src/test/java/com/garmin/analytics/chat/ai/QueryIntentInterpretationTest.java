@@ -95,13 +95,40 @@ class QueryIntentInterpretationTest {
   }
 
   @ParameterizedTest
-  @ValueSource(strings = {"SUM", "CORR", "DIAGNOSE", "TREND", "TOP_K", "NONE", "avg",
+  @ValueSource(strings = {"CORR", "CORRELATION", "CAUSATION", "COMPARISON", "DIAGNOSE",
+      "TREND", "TOP_K", "NONE", "avg",
       "AVG(value); DROP TABLE x", ""})
-  void rejectsUnsupportedHeartRateOperations(String aggregation) throws Exception {
+  void explainsUnsupportedAnalyticsWithoutTechnicalValidationText(String aggregation)
+      throws Exception {
     var result = resolver(31).resolveIntent(
         intent("OK", "[\"restingHeartRate\"]", aggregation, LAST_WEEK), TODAY);
     assertThat(result.accepted()).isFalse();
-    assertThat(result.message()).contains("Unsupported aggregation", "AVG, MIN and MAX only");
+    assertThat(result.message()).contains("not supported", "Correlations", "medical", "Try:",
+        "What was my average resting heart rate over the last seven days?");
+    assertThat(result.message()).doesNotContain("Unsupported aggregation", "AVG, SUM",
+        "DROP TABLE", "restingHeartRate supports");
+  }
+
+  @ParameterizedTest
+  @CsvSource({"totalSteps, daily step count", "restingHeartRate, resting heart rate",
+      "activeKilocalories, active calories", "sleepingSeconds, recorded sleep duration"})
+  void suggestsOneSupportedExampleForARecognizedMeasurement(String field, String label)
+      throws Exception {
+    var result = resolver(31).resolveIntent(
+        intent("OK", "[\"" + field + "\"]", "CORR", LAST_WEEK), TODAY);
+    assertThat(result.accepted()).isFalse();
+    assertThat(result.message()).containsOnlyOnce("Try:")
+        .contains("What was my average " + label + " over the last seven days?");
+  }
+
+  @Test
+  void rejectsAddingHeartRatesWithARelevantSupportedExample() throws Exception {
+    var result = resolver(31).resolveIntent(
+        intent("OK", "[\"restingHeartRate\"]", "SUM", LAST_WEEK), TODAY);
+    assertThat(result.accepted()).isFalse();
+    assertThat(result.message()).contains("not supported for resting heart rate", "Try:",
+        "What was my average resting heart rate over the last seven days?");
+    assertThat(result.message()).doesNotContain("SUM", "AVG", "restingHeartRate");
   }
 
   @Test
@@ -109,7 +136,8 @@ class QueryIntentInterpretationTest {
     var result = resolver(31).resolveIntent(
         intent("OK", "[\"totalSteps\",\"restingHeartRate\"]", "SUM", LAST_WEEK), TODAY);
     assertThat(result.accepted()).isFalse();
-    assertThat(result.message()).contains("Unsupported aggregation");
+    assertThat(result.message()).contains("not supported for resting heart rate",
+        "average resting heart rate").doesNotContain("average daily step count");
   }
 
   @ParameterizedTest
@@ -121,8 +149,28 @@ class QueryIntentInterpretationTest {
     assertThat(result.intent()).isNull();
     assertThat(result.message()).isNotBlank();
     if (status.equals("UNSUPPORTED")) {
-      assertThat(result.message()).contains("Sleep quality", "medical", "correlations");
+      assertThat(result.message()).contains("medical", "Correlations", "Try:");
     }
+  }
+
+  @Test
+  void keepsUnsupportedAnalyticsSeparateFromPeriodProblems() throws Exception {
+    var unsupported = resolver(31).resolveIntent(
+        intent("OK", "[\"totalSteps\"]", "CORR", CLARIFICATION), TODAY);
+    assertThat(unsupported.message()).contains("not supported")
+        .doesNotContain("valid, ordered dates", "Please provide");
+    var invalidDate = resolver(31).resolveIntent(intent("OK", "[\"totalSteps\"]", "SUM",
+        period("EXPLICIT", "2026-11-15", "2026-11-09", 0)), TODAY);
+    assertThat(invalidDate.message()).contains("valid, ordered dates")
+        .doesNotContain("not supported", "Try:");
+  }
+
+  @Test
+  void keepsTheExampleWithinTheConfiguredDateLimit() throws Exception {
+    var result = resolver(1).resolveIntent(intent("UNSUPPORTED", "[]", "NONE", CLARIFICATION),
+        TODAY);
+    assertThat(result.message()).contains("average daily step count yesterday?")
+        .doesNotContain("last seven days");
   }
 
   @ParameterizedTest

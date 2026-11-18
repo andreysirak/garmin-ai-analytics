@@ -64,7 +64,65 @@ it('shows a clarification answer without inventing a date range', async () => {
   fireEvent.click(screen.getByText('Send'));
 
   expect(await screen.findByText('Which dates should I use?')).toBeTruthy();
-  expect(screen.getByText('Date range not selected.')).toBeTruthy();
+  expect(screen.queryByText('Date range not selected.')).toBeNull();
+  expect(screen.queryByText(/^Readings:/)).toBeNull();
+});
+
+it.each([
+  ['unsupported analytics', 'Correlations are not supported. Try an average step count.', null, null],
+  ['invalid calculation', 'That calculation is not supported for resting heart rate.', null, null],
+  ['invalid dates', 'Please provide valid, ordered dates.', null, null],
+  ['missing end date', 'Please provide an end date.', '2026-11-01', null],
+  ['missing start date', 'Please provide a start date.', null, '2026-11-07'],
+])('shows %s without a misleading date label', async (_kind, answer, startDate, endDate) => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({ answer, startDate, endDate }),
+  }));
+  render(<ChatScreen />);
+  fireEvent.change(screen.getByLabelText('Your question'), { target: { value: 'My question?' } });
+  fireEvent.click(screen.getByText('Send'));
+
+  expect(await screen.findByText(answer)).toBeTruthy();
+  expect(screen.queryByText('Date range not selected.')).toBeNull();
+  expect(screen.queryByText(/^Readings:/)).toBeNull();
+});
+
+it('keeps the selected date range visible when data is missing', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({
+      answer: 'No valid numeric readings are available.',
+      startDate: '2026-11-01', endDate: '2026-11-07',
+    }),
+  }));
+  render(<ChatScreen />);
+  fireEvent.change(screen.getByLabelText('Your question'), { target: { value: 'Average steps?' } });
+  fireEvent.click(screen.getByText('Send'));
+  await screen.findByText('No valid numeric readings are available.');
+  expect(screen.getByText('Readings: 2026-11-01 through 2026-11-07 (inclusive)')).toBeTruthy();
+});
+
+it('clears a previous date range when the next question is unsupported', async () => {
+  vi.stubGlobal('fetch', vi.fn()
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ answer: 'Recorded average.', startDate: 'a', endDate: 'b' }),
+    })
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ answer: 'That analysis is not supported.', startDate: null, endDate: null }),
+    }));
+  render(<ChatScreen />);
+  fireEvent.change(screen.getByLabelText('Your question'), { target: { value: 'Average steps?' } });
+  fireEvent.click(screen.getByText('Send'));
+  await screen.findByText('Recorded average.');
+  expect(screen.getByText('Readings: a through b (inclusive)')).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('Your question'), { target: { value: 'Correlate sleep?' } });
+  fireEvent.click(screen.getByText('Send'));
+  await screen.findByText('That analysis is not supported.');
+  expect(screen.queryByText(/^Readings:/)).toBeNull();
+  expect(screen.queryByText('Date range not selected.')).toBeNull();
 });
 
 it('shows a model failure, clears the previous answer, and allows retry', async () => {

@@ -78,9 +78,9 @@ profile ID. Existing overrides are preserved; no deployment happens during tests
 ## Structured analytics review checkpoints
 
 `QuestionDateResolver.intentPrompt` and `resolveIntent` define the interpretation
-contract below. Step 3 connects this validated intent to repository aggregation
-and compact evidence in `GarminChatService`. It is implemented locally for
-review; the running Kubernetes application has not been updated.
+contract below. `GarminChatService` connects validated intent to repository
+aggregation and compact evidence. The Step 1 unsupported-question UX changes
+are local and require approved deployment before live verification.
 
 ```json
 {
@@ -336,16 +336,44 @@ coverage reach explanation. Clarification and unsupported intent have null
 dates; resend the complete question because there is no conversation memory.
 Blank requests remain HTTP 400; database/model failures remain safe HTTP 503s.
 
-## Manual checks after approval (not run for Step 3)
+## Step 1 manual verification (deployment requires approval)
 
-1. Review the local implementation before running `make chat-up`. After approval,
-   deploy and open http://127.0.0.1:5173 with the existing frontend port-forward.
-2. Choose a known backfilled week and ask a supported numeric question, such as
-   “What was my average resting heart rate from 2026-10-05 to 2026-10-11?”
-   Replace these example dates with your selected week. Compare privately with
-   the fixed query using the same server-selected profile. Set
-   `GARMIN_CHAT_PROFILE_ID` privately in your shell from the existing Secret's
-   `profile-id` before running the comparison:
+The local automated checks do not establish live Ollama answer correctness.
+Run this checklist after the application deployment has been explicitly approved.
+It uses the existing summary analytics; correlation remains unsupported.
+
+1. **After deployment approval only**, rebuild/load the app images and upgrade
+   the existing chat release:
+
+   ```sh
+   make chat-up
+   ```
+
+   This also checks the cached model and forwards the frontend. Keep the
+   terminal open and open http://127.0.0.1:5173. Confirm the introduction reads
+   “Ask your Garmin watch”. Existing local values and the reader Secret are
+   reused; no cluster recreation is needed. If only forwarding needs restarting,
+   use `make chat-ui`.
+
+2. Use a known backfilled week. Replace the example dates below if necessary.
+   Each answer should show the requested inclusive range, correct units and
+   coverage, with numbers matching PostgreSQL:
+
+   | Question | Expected calculation/unit |
+   | --- | --- |
+   | How many steps did I record in total from 2026-10-05 through 2026-10-11? | SUM / steps |
+   | What was my average resting heart rate from 2026-10-05 through 2026-10-11? | AVG / bpm |
+   | What was my maximum daily active calorie burn from 2026-10-05 through 2026-10-11? | MAX / kcal |
+   | What was my average daily recorded sleep time from 2026-10-05 through 2026-10-11? | AVG / hours |
+   | What was my minimum daily step count from 2026-10-05 through 2026-10-11? | MIN / steps |
+
+   Sleep summaries still use the existing calendar-day `sleepingSeconds` field
+   divided by 3600. They must not be described as a verified overnight sleep
+   duration, a sleep-quality assessment or a medical finding.
+
+   Set `GARMIN_CHAT_PROFILE_ID` privately in the checking terminal to the
+   server-configured profile. Compare with the fixed SQL using the existing
+   reader login/password prompt; for example:
 
    ```sh
    psql -X -h 127.0.0.1 -p 5432 -U garmin_chat_reader -d garmin_analytics -W \
@@ -355,28 +383,33 @@ Blank requests remain HTTP 400; database/model failures remain safe HTTP 503s.
      --file=garmin-chat/backend/src/main/resources/sql/metric-aggregation.sql
    ```
 
-   Verify the value, unit and incomplete-coverage wording. For sleep, use
-   `sleepingSeconds` with divisor 3600 and compare hours; zeros must stay valid.
-3. Ask “Total steps over the last seven days?” and “Average resting heart rate
-   last week?” Verify the completed-day versus calendar-week date boundaries.
-   A supported multi-metric request, such as average steps and recorded sleep
-   duration for one week, should explain each metric independently.
-4. Ask “Was my sleep good last week?” or request a steps/sleep correlation.
-   Expect an unsupported response, no SQL and no explanation call. Ask
-   “Average resting heart rate” to check missing-period clarification. Choose
-   a period without summaries to check direct no-data handling with dates.
-5. Request more than `chat.maxQueryDays` and expect the date-cap message before
-   SQL. An excessively long question should fail its context check before either
-   model call. Automated tests cover oversized calculated evidence separately;
-   a longer valid range does not itself imply a larger explanation request.
-6. Check Ollama PVC persistence after an approved Pod restart, then repeat a
-   supported question. Model unavailability should give HTTP 503 with a retry
-   hint, and cached model files should be reused without another pull.
+   Repeat with the selected field/operation; use divisor 3600 for
+   `sleepingSeconds` and 1 for other metrics. Recorded zeros must stay valid,
+   unknowns must remain unknown and incomplete totals must be labelled partial.
 
-Keep real readings, profile IDs, credentials and answers out of commits and
-public logs. Earlier live date-only extractor checks do not validate the new
-intent/explanation prompts. No deployment, live Ollama evaluation or manual
-Kubernetes end-to-end test has been performed for Step 3.
+3. Ask “Do days with more physical activity tend to be followed by longer
+   sleep?” and “Correlate steps and sleep from 2026-10-05 through 2026-10-11”.
+   Expect friendly unsupported guidance and one supported example, no coefficient
+   or invented conclusion, and no date caption. The old “Unsupported aggregation”
+   and “Date range not selected” messages must not appear. Unsupported requests
+   should stop before SQL and the explanation call, as the automated tests check.
+
+4. Ask “Average resting heart rate” to check clarification, then ask a dated
+   question containing an impossible date such as 2026-02-30. Expect clear
+   guidance without a date caption. Ask for total steps over a known empty
+   period, such as 2000-01-01 through 2000-01-07: expect a direct no-data answer
+   with those dates still displayed.
+
+5. Repeat one supported dated question three times. Wording may vary; the
+   calculated values, units, dates and coverage must remain consistent with SQL.
+   Then alternate supported and unsupported questions: the date caption should
+   disappear for rejection and reappear for a supported result. Inspect the
+   browser Network panel if needed: requests remain `{"message":"..."}` and
+   successful responses contain only `answer`, `startDate`, `endDate`.
+
+Keep profile IDs, credentials, real measurements and answers out of commits and
+public logs. No deployment or live Ollama test has been performed for this UX
+change; record actual manual results only after executing the checks above.
 
 ## Backend packages
 

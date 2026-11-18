@@ -26,7 +26,7 @@ export default function ChatScreen() {
   return (
     <main>
       <h1>Garmin chat</h1>
-      <p>Ask about your Garmin data and include a period. Each question starts fresh.</p>
+      <p>Ask your Garmin watch</p>
       <form onSubmit={handleSubmit}>
         <label htmlFor="message">Your question</label>
         <div className="question-row">
@@ -45,11 +45,11 @@ export default function ChatScreen() {
         {loading && <p>Preparing your answer…</p>}
         {answer && (
           <>
-            <p className="date-range">
-              {answer.startDate && answer.endDate
-                ? `Readings: ${answer.startDate} through ${answer.endDate} (inclusive)`
-                : 'Date range not selected.'}
-            </p>
+            {answer.startDate && answer.endDate && (
+              <p className="date-range">
+                Readings: {answer.startDate} through {answer.endDate} (inclusive)
+              </p>
+            )}
             <p className="answer">{answer.answer}</p>
           </>
         )}
