@@ -468,15 +468,27 @@ Dependency vulnerability scanning is currently excluded while the NVD integratio
 
 ## Roadmap
 
-- [x] Local Kubernetes and Airflow environment
-- [x] Garmin authentication and Java ingestion
-- [x] Raw JSON archiving with local access
-- [x] Initial tests and CI workflows
-- [ ] PostgreSQL storage and data normalization
-- [ ] Historical backfill and data quality checks
+### Implemented foundations
+
+- [x] Local Kubernetes environment with Airflow orchestration
+- [x] Garmin authentication and Java-based daily data ingestion
+- [x] Raw JSON archiving with local access and success markers
+- [x] Initial automated tests and CI workflows
+- [x] PostgreSQL deployment and JSONB daily-summary staging
+- [x] First end-to-end AI chat integration: React, Spring Boot, PostgreSQL and local Ollama
+- [x] Validated, parameterized SQL summaries with missing-data coverage and AI-generated explanations
+
+### Next milestones
+
+- [ ] Stabilize natural-language intent and date interpretation with real-model testing ([#66](https://github.com/andreysirak/garmin-ai-analytics/issues/66))
+- [ ] Benchmark and optimize local AI chat response time ([#67](https://github.com/andreysirak/garmin-ai-analytics/issues/67))
+- [ ] Historical backfill and extended data-quality checks
+- [ ] Normalize and transform staged data into reusable analytical datasets
 - [ ] Apache Beam processing and derived datasets
-- [ ] Sleep/activity statistics and correlations
-- [ ] AI-generated daily summaries and recommendations
+- [ ] Overnight sleep staging, activity/sleep statistics and correctly aligned correlations
+- [ ] Automated AI insights and recommendations grounded in validated analytics
+
+**Demo focus:** “Do days with more physical activity tend to be followed by longer sleep?” This original demo question remains an **open goal**, not a capability of the current summary-only chat. It requires validated overnight sleep data and next-day pairing; do not infer correlation from calendar-day sleep totals.
 
 ## Contributions welcome
 
