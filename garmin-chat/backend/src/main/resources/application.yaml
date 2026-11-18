@@ -61,3 +61,7 @@ management:
           include: readinessState
         liveness:
           include: livenessState
+
+logging:
+  pattern:
+    level: "%5p request_id=%X{chatRequestId:-none}"

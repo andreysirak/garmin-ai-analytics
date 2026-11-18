@@ -8,6 +8,10 @@ metadata:
   labels:
     {{- include "garmin-chat.labels" . | nindent 4 }}
 data:
+  {{- if .Values.chat.diagnosticsEnabled }}
+  SPRING_PROFILES_ACTIVE: "chat-diagnostics"
+  GARMIN_CHAT_DIAGNOSTIC_DIRECTORY: "/tmp/chat-diagnostics"
+  {{- end }}
   SERVER_ADDRESS: "0.0.0.0"
   GARMIN_CHAT_DB_URL: {{ .Values.database.url | quote }}
   GARMIN_CHAT_TIMEZONE: {{ .Values.chat.timezone | quote }}

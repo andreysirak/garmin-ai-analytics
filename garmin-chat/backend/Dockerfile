@@ -9,4 +9,5 @@ WORKDIR /app
 COPY --from=build /workspace/target/garmin-chat-0.1.0-SNAPSHOT.jar /app/garmin-chat.jar
 USER 10001:10001
 EXPOSE 8081
-ENTRYPOINT ["java", "-XX:MaxRAMPercentage=70", "-jar", "/app/garmin-chat.jar"]
+# Opt-in diagnostic files must be readable only by the backend user.
+ENTRYPOINT ["sh", "-c", "umask 077; exec java -XX:MaxRAMPercentage=70 -jar /app/garmin-chat.jar"]

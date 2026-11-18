@@ -23,6 +23,9 @@ Questions are independent. Memory, charts, model-generated SQL, tools, MCP and
 RAG remain deferred. Dates come from the question; a week is a demo example,
 not a fixed query window. Missing dates trigger clarification before any query.
 
+See [request diagnostics and the repeatable model evaluation](docs/chat-diagnostics.md)
+for the opt-in local trace mode and the #66 verification checklist.
+
 ## Configuration and prerequisites
 
 Use the existing single-node `kind-garmin-ai-analytics` context, analytics

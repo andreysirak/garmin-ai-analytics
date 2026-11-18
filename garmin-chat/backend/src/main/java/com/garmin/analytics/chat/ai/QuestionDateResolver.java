@@ -23,6 +23,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.Prompt;
@@ -34,6 +36,8 @@ import org.springframework.stereotype.Component;
 
 @Component
 public class QuestionDateResolver {
+
+  private static final Logger log = LoggerFactory.getLogger(QuestionDateResolver.class);
 
   private final Clock clock;
   private final GarminChatProperties properties;
@@ -106,6 +110,7 @@ public class QuestionDateResolver {
     try {
       var node = json.readTree(structuredIntent);
       if (!validIntentShape(node)) {
+        log.info("intent_validation_failed reason=invalid_shape");
         return invalidIntent();
       }
       var selection = json.treeToValue(node, IntentSelection.class);
@@ -151,6 +156,10 @@ public class QuestionDateResolver {
       }
       var range = resolvePeriod(selection.period(), referenceDate);
       if (range.isEmpty()) {
+        log.info("intent_validation_failed reason=invalid_period type={} days={} "
+                + "start_present={} end_present={}", selection.period().type(),
+            selection.period().days(), !selection.period().startDate().isEmpty(),
+            !selection.period().endDate().isEmpty());
         return new QueryIntentResolution(null,
             "Please provide valid, ordered dates no later than today, or a clear relative period.");
       }
@@ -160,6 +169,8 @@ public class QuestionDateResolver {
       }
       return new QueryIntentResolution(new QueryIntent(metrics, aggregation, range.get()), "");
     } catch (JsonProcessingException | IllegalArgumentException invalidSelection) {
+      log.info("intent_validation_failed reason=unparseable_intent error_type={}",
+          invalidSelection.getClass().getSimpleName());
       return invalidIntent();
     }
   }

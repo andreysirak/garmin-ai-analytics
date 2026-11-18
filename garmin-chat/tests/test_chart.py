@@ -30,6 +30,17 @@ class ChartTest(unittest.TestCase):
         cls.deployments = {item["metadata"]["name"]: item for item in cls.resources
                            if item["kind"] == "Deployment"}
 
+    def test_sensitive_diagnostics_are_disabled_unless_explicitly_enabled(self):
+        config = self.resource("ConfigMap")["data"]
+        self.assertNotIn("SPRING_PROFILES_ACTIVE", config)
+        self.assertNotIn("GARMIN_CHAT_DIAGNOSTIC_DIRECTORY", config)
+        rendered = render("--set", "chat.diagnosticsEnabled=true")
+        self.assertEqual(rendered.returncode, 0, rendered.stderr)
+        config = next(item["data"] for item in yaml.safe_load_all(rendered.stdout)
+                      if item and item["kind"] == "ConfigMap")
+        self.assertEqual(config["SPRING_PROFILES_ACTIVE"], "chat-diagnostics")
+        self.assertEqual(config["GARMIN_CHAT_DIAGNOSTIC_DIRECTORY"], "/tmp/chat-diagnostics")
+
     def resource(self, kind):
         return next(item for item in self.resources if item["kind"] == kind)
 

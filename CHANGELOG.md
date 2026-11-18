@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add per-request AI chat stage timings, intent validation diagnostics and opt-in
+  rotating local prompt/response traces; document a repeatable model evaluation (#66).
+
 - Preserve Airflow metadata and Garmin analytics PostgreSQL files on separate
   host-backed kind mounts; check identities, majors, and UID write permissions
   before server startup. Recreate missing database and Airflow Secrets from the
