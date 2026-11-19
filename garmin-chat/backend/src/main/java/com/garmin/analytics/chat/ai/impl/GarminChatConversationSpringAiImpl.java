@@ -1,7 +1,6 @@
 package com.garmin.analytics.chat.ai.impl;
 
 import com.garmin.analytics.chat.ai.ChatCompletion;
-import com.garmin.analytics.chat.ai.ChatModelAvailability;
 import com.garmin.analytics.chat.ai.GarminChatConversation;
 import com.garmin.analytics.chat.ai.prompt.GarminChatPromptFactory;
 import com.garmin.analytics.chat.ai.prompt.PromptBudget;
@@ -17,7 +16,6 @@ import org.springframework.stereotype.Component;
 @Component
 public class GarminChatConversationSpringAiImpl implements GarminChatConversation {
 
-  private final ChatModelAvailability modelAvailability;
   private final GarminChatPromptFactory prompts;
   private final GarminAnalyticsService analytics;
   private final PromptBudget budget;
@@ -25,10 +23,8 @@ public class GarminChatConversationSpringAiImpl implements GarminChatConversatio
   private final GarminAnalysisWorkflow workflow;
   private final ChatCompletion completion;
 
-  public GarminChatConversationSpringAiImpl(ChatModelAvailability modelAvailability,
-      GarminChatPromptFactory prompts, GarminAnalyticsService analytics, PromptBudget budget,
+  public GarminChatConversationSpringAiImpl(GarminChatPromptFactory prompts, GarminAnalyticsService analytics, PromptBudget budget,
       GarminRequestRouter router, GarminAnalysisWorkflow workflow, ChatCompletion completion) {
-    this.modelAvailability = modelAvailability;
     this.prompts = prompts;
     this.analytics = analytics;
     this.budget = budget;
@@ -47,7 +43,6 @@ public class GarminChatConversationSpringAiImpl implements GarminChatConversatio
     RoutingDecision decision;
     try {
       deadline.check();
-      modelAvailability.requireAvailable();
       decision = router.route(prompt, referenceDate, deadline);
     } catch (InvalidAnalyticsRequest rejected) {
       return completion.failed(rejected.getMessage(), null);

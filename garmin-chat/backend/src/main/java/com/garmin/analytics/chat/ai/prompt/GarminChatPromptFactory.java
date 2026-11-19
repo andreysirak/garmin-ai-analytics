@@ -1,8 +1,6 @@
 package com.garmin.analytics.chat.ai.prompt;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.garmin.analytics.chat.ai.routing.RoutingOutput;
+import com.garmin.analytics.chat.ai.routing.RoutingSchema;
 import com.garmin.analytics.chat.config.GarminChatProperties;
 import com.garmin.analytics.chat.model.AnalyticsSelection;
 import com.garmin.analytics.chat.model.QueryIntent.Metric;
@@ -14,7 +12,6 @@ import java.util.Map;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.ai.ollama.api.OllamaChatOptions;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.util.json.JsonParser;
@@ -30,14 +27,7 @@ public class GarminChatPromptFactory {
   private final String periodInstructions;
   private final String routingInstructions;
   private final String answerInstructions;
-  private final Map<String, Object> routingSchema =
-      new BeanOutputConverter<>(RoutingOutput.class) {
-        @Override
-        protected void postProcessSchema(JsonNode schema) {
-          // Spring AI 1.1.8 marks all fields required by default. Branch fields are conditional.
-          ((ObjectNode) schema).putArray("required").add("route");
-        }
-      }.getJsonSchemaMap();
+  private final Map<String, Object> routingSchema = RoutingSchema.generate();
   private final String metricCatalog = Metric.catalog();
 
   public GarminChatPromptFactory(GarminChatProperties properties,

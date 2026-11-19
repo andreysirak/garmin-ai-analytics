@@ -11,6 +11,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.garmin.analytics.chat.repository.impl.DailySummaryRepositoryPostgresImpl;
@@ -18,6 +19,7 @@ import com.garmin.analytics.chat.support.ChatTestSupport;
 import java.math.BigDecimal;
 import java.sql.Date;
 import java.sql.ResultSet;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -91,9 +93,11 @@ class GarminChatFlowTest {
       var body = json.readTree(((MockClientHttpRequest) request).getBodyAsString());
       assertThat(body.at("/messages/1/content").asText()).isEqualTo(question);
       assertThat(body.at("/messages/0/content").asText()).contains("2026-11-16", "Europe/Oslo");
-      assertThat(body.at("/format/properties/route").isObject()).isTrue();
-      assertThat(body.at("/format/required")).map(fieldName -> fieldName.asText())
-          .containsExactly("route");
+      var branches = body.at("/format/anyOf");
+      assertThat(branches).hasSize(3);
+      assertRoutingBranch(branches.get(0), "CLARIFY", "target", "question");
+      assertRoutingBranch(branches.get(1), "UNSUPPORTED", "reason");
+      assertRoutingBranch(branches.get(2), "ANALYZE", "selection");
       assertThat(body.at("/tools").size()).isZero();
     }).andRespond(withSuccess(modelResponse(ChatTestSupport.analyze(arguments)),
         MediaType.APPLICATION_JSON));
@@ -144,7 +148,7 @@ class GarminChatFlowTest {
   @CsvSource({
       "Do days with more physical activity tend to be followed by longer sleep?, "
           + "Garmin chat can summarize individual metrics over a period. "
-          + "It cannot determine whether activity is related to later sleep.",
+          + "It cannot determine relationships between metrics.",
       "Average resting heart rate?, Which time period should I use?",
       "How productively did I work yesterday?, Do you mean work productivity or physical activity?"
   })
@@ -162,6 +166,19 @@ class GarminChatFlowTest {
         .andExpect(jsonPath("$.endDate").value(org.hamcrest.Matchers.nullValue()));
     verifyNoInteractions(jdbc);
     server.verify();
+  }
+
+  private static void assertRoutingBranch(JsonNode branch,
+      String... fields) {
+    assertThat(branch.get("additionalProperties").asBoolean()).isFalse();
+    assertThat(branch.at("/properties/route/enum/0").asText()).isEqualTo(fields[0]);
+    var required = new ArrayList<>(List.of(fields));
+    required.set(0, "route");
+    assertThat(branch.get("required")).map(field -> field.asText()).containsExactlyElementsOf(
+        required);
+    var propertyNames = new ArrayList<String>();
+    branch.get("properties").fieldNames().forEachRemaining(propertyNames::add);
+    assertThat(propertyNames).containsExactlyInAnyOrderElementsOf(required);
   }
 
   private String modelToolResponse(String arguments) throws Exception {

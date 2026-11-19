@@ -98,11 +98,10 @@ class GarminChatServiceTest {
       assertThat(options.getInternalToolExecutionEnabled()).isFalse();
       assertThat(options.getToolCallbacks()).isEmpty();
       assertThat(ChatTestSupport.routing(prompt)).isTrue();
-      // A schema-valid misroute must not reinterpret work productivity as steps.
-      return response(ChatTestSupport.analyze(WEEK));
+      return response(ChatTestSupport.clarify("METRIC", "Which activity metric do you mean?"));
     });
-    var answer = chat.answer("How productively did I work last week?");
-    assertThat(answer.answer()).isEqualTo("Do you mean work productivity or physical activity?");
+    var answer = chat.answer("How active was I last week?");
+    assertThat(answer.answer()).isEqualTo("Which activity metric do you mean?");
     assertThat(answer.startDate()).isNull();
     verifyNoInteractions(repository);
   }
@@ -111,7 +110,9 @@ class GarminChatServiceTest {
   @CsvSource({
       "Average resting heart rate?, PERIOD, What time period should I use?",
       "How did I sleep last week?, METRIC, Which sleep measurement do you mean?",
-      "Який пульс у спокої?, PERIOD, За який період?"
+      "Який пульс у спокої?, PERIOD, За який період?",
+      "How many steps?, PERIOD, Please specify the period e.g. yesterday",
+      "how productive i was last week ?, GOAL, Do you mean work productivity or physical activity?"
   })
   void returnsFocusedClarificationWithoutData(String question, String target, String text)
       throws IOException {
@@ -124,32 +125,43 @@ class GarminChatServiceTest {
   }
 
   @Test
-  void rejectsActivityFollowedBySleepEvenIfRouterSelectsAValidScalarQuery() throws IOException {
-    var chat = service(repository, prompt -> response(ChatTestSupport.analyze(WEEK)));
-    assertThat(chat.answer("Is more activity followed by longer sleep?").answer())
-        .contains("cannot determine whether activity is related to later sleep");
+  void handlesAnUnsupportedMetricFromStructuredRouting() throws IOException {
+    var chat = service(repository, prompt -> response(
+        ChatTestSupport.unsupported("UNSUPPORTED_METRIC")));
+    assertThat(chat.answer("What was my average walking speed last week?").answer())
+        .contains("does not have a supported metric");
     verifyNoInteractions(repository);
   }
 
   @ParameterizedTest
-  @ValueSource(strings = {"{}", "analysis plan", "{\"route\":\"ANALYZE\"}",
-      "{\"route\":\"UNSUPPORTED\",\"reason\":\"OTHER\",\"target\":\"PERIOD\"}",
-      "{\"route\":\"UNSUPPORTED\",\"route\":\"CLARIFY\",\"target\":\"PERIOD\"," +
-          "\"question\":\"Which period?\"}"})
-  void rejectsMalformedOrInconsistentRoutingDecisions(String output) throws IOException {
+  @ValueSource(strings = {"{}", "analysis plan",
+      "{\"route\":\"UNSUPPORTED\",\"route\":\"CLARIFY\",\"target\":\"PERIOD\","
+          + "\"question\":\"Which period?\"}"})
+  void reportsMalformedRoutingOutput(String output) throws IOException {
     var answer = service(repository, prompt -> response(output)).answer("Total steps yesterday?");
-    assertThat(answer.answer()).contains("couldn't interpret");
+    assertThat(answer.answer()).contains("did not return a valid routing response");
+    assertThat(answer.startDate()).isNull();
+    verifyNoInteractions(repository);
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"{\"route\":\"ANALYZE\"}",
+      "{\"route\":\"UNSUPPORTED\",\"reason\":\"OTHER\",\"target\":\"PERIOD\"}",
+      "{\"route\":\"CLARIFY\",\"target\":\"PERIOD\",\"question\":\" \"}"})
+  void reportsInconsistentRoutingDecisions(String output) throws IOException {
+    var answer = service(repository, prompt -> response(output)).answer("Total steps yesterday?");
+    assertThat(answer.answer()).contains("inconsistent routing decision");
     assertThat(answer.startDate()).isNull();
     verifyNoInteractions(repository);
   }
 
   @Test
-  void doesNotRelabelLastWeekAsMissingOrCurrentWeek() throws IOException {
-    for (String invalid : List.of(ChatTestSupport.clarify("PERIOD", "Which period?"),
-        ChatTestSupport.analyze(WEEK.replace("LAST_WEEK", "THIS_WEEK")))) {
-      var answer = service(repository, prompt -> response(invalid)).answer("Total steps last week?");
-      assertThat(answer.answer()).contains("last week reliably").doesNotContain("Which period?");
-    }
+  void delegatesRoutedPeriodValidationToAnalytics() throws IOException {
+    var invalidPeriod = WEEK.replace("\"days\":0", "\"days\":1");
+    var answer = service(repository, prompt -> response(ChatTestSupport.analyze(invalidPeriod)))
+        .answer("Total steps last week?");
+    assertThat(answer.answer()).contains("The model selected an invalid analysis");
+    assertThat(answer.startDate()).isNull();
     verifyNoInteractions(repository);
   }
 

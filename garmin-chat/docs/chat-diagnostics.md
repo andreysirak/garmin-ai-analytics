@@ -104,7 +104,7 @@ invented below: establish them independently from PostgreSQL.
 | 18 | Total steps from 2026-02-30 to 2026-03-01? | Invalid date rejected before SQL |
 | 19 | Do days with more physical activity tend to be followed by longer sleep? | Unsupported correlation, with no fabricated finding |
 | 20 | Is my resting heart rate healthy last week? | Unsupported health assessment |
-| 21 | How productively did I work last week? | Clarify work versus physical activity without a tool call |
+| 21 | how productive i was last week ? | Clarify work versus physical activity without a tool call |
 
 Cases 1–15 cover all currently permitted metric/aggregation combinations. Case 16
 is the exact reported failure, not a disguised steps-only question. The current
@@ -119,18 +119,29 @@ curl --fail-with-body --max-time 690 http://127.0.0.1:5173/api/chat \
   -d '{"message":"How active have I been over the past week?"}'
 ```
 
-Inspect the first `model_response` for the structured route. On `ANALYZE`, inspect
+Inspect the first `model_response` for the structured route. The output schema
+offers one shape per route, with only the fields that route requires. Java
+still checks the decoded output. On `ANALYZE`, inspect
 the next response for matching tool arguments. Compare `sql_request` and
 `sql_evidence` with the final answer. Use `tool_execution` to distinguish
 executed, rejected and failed calls.
 
 For the short routing regression check, use cases 17, 19 and 21 above, then ask
-“How many steps yesterday?” and “How many steps last week?”. Confirm one route
-turn with zero SQL for clarification and unsupported requests. Confirm a matching
+“How many steps yesterday?” and “How many steps last week?”. Confirm one routing
+call and zero SQL for the productivity, activity–sleep, and missing-period cases. Confirm a matching
 tool call for the step questions, with yesterday resolved in the configured
 timezone and last week resolved as the previous Monday through Sunday. Use one
 known empty period and one partially covered period to verify that missing
 readings and recorded zeros stay distinct.
+
+Record undecodable output or a response outside the wire contract as
+`malformed_output`. Record route-specific field conflicts as
+`inconsistent_decision` and rejected analytics parameters as
+`invalid_analytics_arguments`. In a separate evaluation column, record
+**semantic mismatch** if a contract-valid decision misreads the question,
+such as asking for dates already given or substituting steps for productivity.
+The backend's `accepted` event indicates validation success only. Use the
+original question and the private routing trace to assess relevance.
 
 Check malformed routing, plan-only output, mismatched tool arguments, database
 failure and timeout with the offline mocked cases. Model behavior on the live

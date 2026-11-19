@@ -87,11 +87,11 @@ public final class ChatTestSupport {
     var tools = new GarminAnalyticsToolFactory(analytics);
     var modelTurn = new ChatModelTurnAdvisor(budget, properties, new ChatDiagnostics(JSON));
     var completion = new ChatCompletion();
-    var router = new GarminRequestRouter(ChatClient.builder(model), modelTurn,
-        new RoutingDecisionValidator(analytics), JSON);
+    var router = new GarminRequestRouter(ChatClient.builder(model), availability, modelTurn,
+        new RoutingDecisionValidator(), analytics, JSON);
     var workflow = new GarminAnalysisWorkflow(ChatClient.builder(model), prompts, tools, budget,
         new GarminToolArguments(JSON), modelTurn, completion);
-    var conversation = new GarminChatConversationSpringAiImpl(availability, prompts, analytics,
+    var conversation = new GarminChatConversationSpringAiImpl(prompts, analytics,
         budget, router, workflow, completion);
     return new GarminChatServiceImpl(new ChatRequestExecutor(new ChatExecutionProperties(timeout)),
         conversation);

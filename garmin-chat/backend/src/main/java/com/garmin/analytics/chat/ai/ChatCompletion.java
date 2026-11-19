@@ -19,7 +19,7 @@ public class ChatCompletion {
   public ChatAnswer unsupported(UnsupportedReason reason) {
     String message = switch (reason) {
       case RELATIONSHIP -> "Garmin chat can summarize individual metrics over a period. "
-          + "It cannot determine whether activity is related to later sleep.";
+          + "It cannot determine relationships between metrics.";
       case UNSUPPORTED_METRIC -> "Garmin chat does not have a supported metric for that question.";
       case UNSUPPORTED_CALCULATION, OTHER ->
           "Garmin chat supports scalar summaries over one period. This analysis is unavailable.";

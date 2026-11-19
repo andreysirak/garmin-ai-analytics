@@ -6,4 +6,8 @@ public class InvalidAnalyticsRequest extends RuntimeException {
   public InvalidAnalyticsRequest(String message) {
     super(message);
   }
+
+  public InvalidAnalyticsRequest(String message, Throwable cause) {
+    super(message, cause);
+  }
 }
