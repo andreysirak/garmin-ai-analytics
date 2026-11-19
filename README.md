@@ -12,42 +12,52 @@ A free, community-driven platform that helps Garmin users better understand thei
 
 ## Architecture
 
-```text
-                  Apache Airflow 3
-                         |
-                 Daily Garmin pipeline
-                         |
-                Garmin authentication
-                  (Python auth Pod)
-                         |
-                 Bearer-token Secret
-                         |
-                +--------+--------+
-                |                 |
-          Daily summary         Sleep
-           Java 25 Pod       Java 25 Pod
-                |                 |
-                +--------+--------+
-                         |
-                  Raw JSON archive
-                   Kubernetes PVC
-                         |
-                 Project-local files
+### Current Airflow pipeline
 
-             Future: PostgreSQL / Beam
-                         |
-                  Analytics & AI
-```
+![Current Airflow DAG: authentication unlocks parallel daily-summary and sleep ingestion; staging setup and daily-summary ingestion both gate the PostgreSQL loader](docs/images/airflow-daily-pipeline.png)
 
-Airflow manages scheduling, task dependencies, and retries. Authentication runs in a restricted Kubernetes namespace; after it succeeds, daily-summary and sleep ingestion run in parallel as independent Java jobs in Kubernetes Pods.
+Airflow schedules the daily workflow and manages dependencies and retries.
+Authentication runs first; daily-summary and sleep ingestion then run in parallel
+as independent Java 25 jobs in Kubernetes Pods. Both preserve the original JSON
+in the raw archive. The daily-summary loader waits for ingestion and staging-table
+setup, validates the successful archive, and upserts the complete response into
+PostgreSQL JSONB staging. Sleep data is currently archived only; sleep staging
+remains a follow-up.
 
-The Java for Garmin data ingestion code has no Airflow dependency, so it can be run and tested independently.
+The Java ingestion code has no Airflow dependency and can be run and tested
+independently. Daily Summary and Sleep share the
+`garmin-integration/garmin-data-ingestion` module and `GarminIngestionOperator`,
+with explicit endpoints, date parameters and separate Pods and retries.
 
-Daily Summary and Sleep share the `garmin-integration/garmin-data-ingestion` module,
-with `java/` and `python/` directories. `GarminDataIngestionJob.main()` constructs
-dependencies and calls `GarminDataIngestionApp.run()`. Each invocation handles one
-data type, preserving separate Pods and retries. Both tasks use the shared Python
-`GarminIngestionOperator`, with explicit endpoints and date query parameters.
+### Planned AI workflow
+
+![Planned AI workflow: classify a question, clarify or reject unsupported requests, validate parameters, query PostgreSQL, and present facts with a checked AI explanation or a limitation](docs/images/planned-ai-workflow.png)
+
+The target is an application-controlled workflow: the model interprets the
+question, Java validates the selected metrics, calculation and period, and
+parameterized read-only SQL calculates the facts and data coverage. A second
+model call explains compact evidence rather than receiving every raw JSON response.
+Ambiguous questions should receive a clarification; unsupported analyses should
+receive a clear explanation of the limitation.
+
+**Implemented foundation:** React chat, Spring Boot and Spring AI, structured
+routing, Java request validation, PostgreSQL scalar aggregates and coverage, and
+an evidence-based explanation prompt. Real-model evaluation still finds routing
+and factual explanation failures; the prompt alone does not verify an answer.
+See the [controlled evaluation](docs/evaluations/2026-11-19-garmin-chat/README.md).
+
+**Planned additions shown in the diagram:** displaying calculated facts separately
+from model prose, checking whether the explanation is supported, and falling back
+to facts with limitations when it is not. The diagram separates classification
+and parameter extraction conceptually; it does not require a separate model call
+for each box. These additions are not yet implemented. See
+[intent and answer reliability #66](https://github.com/andreysirak/garmin-ai-analytics/issues/66).
+
+The motivating question is **“Do days with more physical activity tend to be
+followed by longer sleep?”** It remains an open goal: answering it requires
+validated overnight sleep data, pairing each activity day with the following
+night, and a supported statistical calculation. Calendar-day sleep totals and
+scalar averages alone cannot establish that relationship.
 
 See [Architecture](docs/architecture.md) for component details, storage, and security boundaries.
 
@@ -63,6 +73,8 @@ See [Architecture](docs/architecture.md) for component details, storage, and sec
 | Orchestration | Apache Airflow 3, Python |
 | Runtime | Kubernetes, kind, Docker |
 | Infrastructure | Helm, Kustomize |
+| Analytics storage | PostgreSQL, full-response JSONB staging |
+| Chat demo | React, Spring Boot, Spring AI, local Ollama |
 | Archive storage | Original JSON files, Kubernetes PV/PVC, local host mount |
 | Security | Kubernetes Secrets, RBAC, ValidatingAdmissionPolicy |
 | Quality | JUnit 5, pytest, Ruff, SpotBugs, PMD |
@@ -78,7 +90,8 @@ See [Architecture](docs/architecture.md) for component details, storage, and sec
 - Task retries and parallel ingestion after an authentication gate.
 - Dedicated authentication namespace, restricted ServiceAccounts, and admission controls.
 - Java, Python, and infrastructure validation in GitHub Actions.
-- Optional, separate local PostgreSQL database with persistent storage and deployment rollback.
+- Separate local PostgreSQL database with persistent storage, full-response daily-summary staging and deployment rollback.
+- React and Spring AI chat with validated scalar SQL analytics, coverage reporting and local Ollama inference; answer reliability remains under development.
 
 The platform collects and archives data. The local chat demo can aggregate four
 recorded metrics; medical interpretation and AI health advice remain out of scope.
