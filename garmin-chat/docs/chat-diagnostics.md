@@ -188,6 +188,7 @@ acceptable latency and no OOM/restart regression are demonstrated. Log the
 result even if neither model is good enough. Prompt tuning should be a separate
 measured change after the baseline, not silently bundled into the comparison.
 
-Current evidence: no live model or private SQL data is available in the remote
-implementation workspace. The original failure and model comparison remain
-unverified; #66 stays open.
+Historical baseline: the owner completed 45 isolated local inference calls on
+19 November 2026. See the [controlled evaluation report](../../docs/evaluations/2026-11-19-garmin-chat/README.md)
+for reviewed results and limitations. No larger candidate was evaluated, and the
+report is not an end-to-end deployment verification. #66 stays open.

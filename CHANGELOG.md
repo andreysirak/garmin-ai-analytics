@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Record the 19 November controlled Garmin chat evaluation in PR #68: 45 local
+  inference calls, per-stage failures, grading caveats and sanitized per-run
+  results. Keep personal evidence and raw traces private; no model comparison
+  or application fix is claimed.
+
 - Execute accepted Garmin scalar selections in Java before the explanation call,
   removing the redundant model-generated tool call. Use compact period schemas,
   constrain routing fields to the metric catalog, log validation rejection reasons,

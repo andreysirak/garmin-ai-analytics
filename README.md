@@ -506,6 +506,7 @@ Interested in Java, Python, Airflow, Kubernetes, or data engineering? Contributi
 - [Contributing, Story/Task workflow and PR review standards](CONTRIBUTING.md)
 - [Garmin API integration retrospective](docs/retrospectives/0001-garmin-api-integration.md)
 - [AI chat integration retrospective (PR #57)](docs/retrospectives/0002-ai-chat-integration.md)
+- [Garmin chat controlled evaluation — 19 November 2026 (PR #68)](docs/evaluations/2026-11-19-garmin-chat/README.md)
 - [Changelog](CHANGELOG.md)
 
 ## Project philosophy
