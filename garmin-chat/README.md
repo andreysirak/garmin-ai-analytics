@@ -254,8 +254,10 @@ This lints values, builds/loads React and Spring Boot images into the existing
 kind cluster, upgrades/installs the Helm chart, and waits for workloads and the
 model-pull Job (timeout 30 minutes). A build ID restarts app Pods to pick up newly
 loaded local images. After success, it starts frontend port-forwarding in the
-same terminal. Once “Forwarding from…” appears, open **http://127.0.0.1:5173**.
-Keep that terminal open; Ctrl+C stops forwarding while Pods keep running.
+same terminal. Open the address on the `Forwarding from` line. It normally uses
+**http://127.0.0.1:5173** and uses a free port if the default is occupied. Set
+`CHAT_PORT` to require a specific port. Keep the terminal open. Ctrl+C stops
+forwarding while Pods keep running.
 
 ```sh
 make chat-ui  # Reconnect later without rebuilding or redeploying.
@@ -362,10 +364,10 @@ It uses the existing summary analytics; correlation remains unsupported.
    ```
 
    This also checks the cached model and forwards the frontend. Keep the
-   terminal open and open http://127.0.0.1:5173. Confirm the introduction reads
-   “Ask your Garmin watch”. Existing local values and the reader Secret are
-   reused; no cluster recreation is needed. If only forwarding needs restarting,
-   use `make chat-ui`.
+   terminal open and open the address on the `Forwarding from` line. Confirm
+   the introduction reads “Ask your Garmin watch”. The deployment reuses the
+   local values and reader Secret in the existing cluster. Use `make chat-ui`
+   to restart forwarding on its own.
 
 2. Use a known backfilled week. Replace the example dates below if necessary.
    Each answer should show the requested inclusive range, correct units and

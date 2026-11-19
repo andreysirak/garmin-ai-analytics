@@ -100,9 +100,10 @@ help:
 	@echo "  make kind-load-airflow-image - Load the local Airflow image into kind"
 	@echo "Chat (existing garmin-analytics namespace):"
 	@echo "  make chat-validate          - Offline chat chart lint, render checks and setup-script unit tests"
-	@echo "  make chat-up                - Build/deploy the full chat stack and forward the UI to localhost:$(CHAT_PORT)"
+	@echo "  make chat-up                - Build/deploy the full chat stack and forward the UI"
 	@echo "                                Requires the reader database Secret; CHAT_VALUES is optional"
-	@echo "  make chat-ui                - Reconnect to the deployed UI without rebuilding"
+	@echo "  make chat-ui                - Reconnect to the deployed UI on port 5173 or a free port if busy"
+	@echo "                                Set CHAT_PORT to request a specific local port"
 
 stack-config-check:
 	$(DATABASE_CREDENTIALS) validate --scope analytics --file "$(CREDENTIALS_FILE)"
@@ -375,7 +376,13 @@ chat-up:
 	$(MAKE) chat-ui
 
 chat-ui:
-	@echo "Open http://127.0.0.1:$(CHAT_PORT) once forwarding starts. Keep this terminal open."
-	@echo "Ctrl+C stops forwarding; the chat Pods keep running in Kubernetes."
-	$(KUBECTL) -n $(POSTGRESQL_NAMESPACE) port-forward --address 127.0.0.1 \
-		service/$(CHAT_RELEASE)-frontend $(CHAT_PORT):80
+	@port="$(CHAT_PORT)"; \
+	if [ "$(origin CHAT_PORT)" = file ] && lsof -nP -iTCP:"$$port" -sTCP:LISTEN >/dev/null 2>&1; then \
+		echo "Port $$port is in use. Open the URL shown on the 'Forwarding from' line."; \
+		port=; \
+	else \
+		echo "Open http://127.0.0.1:$$port once forwarding starts."; \
+	fi; \
+	echo "Keep this terminal open. Ctrl+C stops forwarding while the chat Pods stay running."; \
+	exec $(KUBECTL) -n $(POSTGRESQL_NAMESPACE) port-forward --address 127.0.0.1 \
+		service/$(CHAT_RELEASE)-frontend "$$port:80"

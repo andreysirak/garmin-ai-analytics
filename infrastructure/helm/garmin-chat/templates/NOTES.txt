@@ -1,5 +1,6 @@
 Open the generic Garmin chat UI:
   make chat-up starts the frontend port-forward automatically after deployment.
+  Open the address on the 'Forwarding from' line (default port 5173).
   Use make chat-ui to reconnect later, or forward the Service directly:
   kubectl --context kind-garmin-ai-analytics -n {{ .Release.Namespace }} port-forward service/{{ include "garmin-chat.name" . }}-frontend 5173:80
   http://127.0.0.1:5173
