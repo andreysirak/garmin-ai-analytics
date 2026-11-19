@@ -54,10 +54,11 @@ for each box. These additions are not yet implemented. See
 [intent and answer reliability #66](https://github.com/andreysirak/garmin-ai-analytics/issues/66).
 
 The motivating question is **“Do days with more physical activity tend to be
-followed by longer sleep?”** It remains an open goal: answering it requires
-validated overnight sleep data, pairing each activity day with the following
-night, and a supported statistical calculation. Calendar-day sleep totals and
-scalar averages alone cannot establish that relationship.
+followed by better-quality sleep?”** It remains an open goal: answering it requires
+validated overnight sleep data, supported sleep-quality indicators, pairing each
+activity day with the following night, and a supported statistical calculation.
+Longer sleep alone does not establish better quality; calendar-day sleep totals
+and scalar averages alone cannot establish that relationship.
 
 See [Architecture](docs/architecture.md) for component details, storage, and security boundaries.
 
@@ -488,7 +489,7 @@ Dependency vulnerability scanning is currently excluded while the NVD integratio
 - [ ] Overnight sleep staging, activity/sleep statistics and correctly aligned correlations
 - [ ] Automated AI insights and recommendations grounded in validated analytics
 
-**Demo focus:** “Do days with more physical activity tend to be followed by longer sleep?” This original demo question remains an **open goal**, not a capability of the current summary-only chat. It requires validated overnight sleep data and next-day pairing; do not infer correlation from calendar-day sleep totals.
+**Demo focus:** “Do days with more physical activity tend to be followed by better-quality sleep?” This demo question remains an **open goal**, not a capability of the current summary-only chat. It requires validated overnight sleep data, supported sleep-quality indicators and next-night pairing; longer sleep alone does not mean better-quality sleep.
 
 ## Contributions welcome
 
