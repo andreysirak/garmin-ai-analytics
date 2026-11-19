@@ -70,31 +70,17 @@ See [Architecture](docs/architecture.md) for component details, storage, and sec
 | Layer | Technologies |
 | --- | --- |
 | Data ingestion | Java 25, Maven, JDK HTTP Client, Jackson |
-| Orchestration | Apache Airflow 3, Python |
-| Runtime | Kubernetes, kind, Docker |
-| Infrastructure | Helm, Kustomize |
-| Analytics storage | PostgreSQL, full-response JSONB staging |
-| Chat demo | React, Spring Boot, Spring AI, local Ollama |
-| Archive storage | Original JSON files, Kubernetes PV/PVC, local host mount |
-| Security | Kubernetes Secrets, RBAC, ValidatingAdmissionPolicy |
-| Quality | JUnit 5, pytest, Ruff, SpotBugs, PMD |
+| Orchestration | Apache Airflow 3, Python DAGs and custom operators, LocalExecutor, KubernetesPodOperator |
+| Chat backend | Java 25, Spring Boot 3.5, Spring AI 1.1, Spring JDBC, Bean Validation, Actuator |
+| Chat frontend | React 19, JavaScript, Vite, Nginx for serving and API proxying |
+| Local AI inference | Ollama, Qwen 2.5 1.5B Instruct (quantized); structured routing and evidence explanations |
+| Analytics storage | PostgreSQL, JSONB daily-summary staging, parameterized read-only SQL analytics |
+| Archive storage | Original JSON files, success markers, Kubernetes PV/PVC, local host mounts |
+| Runtime | Kubernetes, kind, Docker; Colima or Docker Desktop on macOS |
+| Infrastructure and automation | Helm, Kustomize, Make |
+| Security | Kubernetes Secrets, RBAC, ValidatingAdmissionPolicy, dedicated database roles |
+| Testing and code checks | JUnit 5, Mockito, Spring Boot Test, pytest, Vitest, React Testing Library, Ruff, SpotBugs, PMD |
 | CI | GitHub Actions |
-
-## What's implemented
-
-- Daily Garmin summary and sleep ingestion.
-- Scheduled and manually triggered Airflow workflows.
-- Independent Java ingestion jobs in separate Kubernetes Pods.
-- Bearer-token acquisition, caching, and refresh.
-- Unchanged raw JSON written directly to a caller-supplied final directory, after syntax validation.
-- Task retries and parallel ingestion after an authentication gate.
-- Dedicated authentication namespace, restricted ServiceAccounts, and admission controls.
-- Java, Python, and infrastructure validation in GitHub Actions.
-- Separate local PostgreSQL database with persistent storage, full-response daily-summary staging and deployment rollback.
-- React and Spring AI chat with validated scalar SQL analytics, coverage reporting and local Ollama inference; answer reliability remains under development.
-
-The platform collects and archives data. The local chat demo can aggregate four
-recorded metrics; medical interpretation and AI health advice remain out of scope.
 
 ## Quick start
 
