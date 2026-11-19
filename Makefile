@@ -99,6 +99,8 @@ help:
 	@echo "  make airflow-image          - Build the Airflow image with Garmin operator packages"
 	@echo "  make kind-load-airflow-image - Load the local Airflow image into kind"
 	@echo "Chat (existing garmin-analytics namespace):"
+	@echo "  make chat-eval-test         - Offline AI evaluation case, grader and Java bridge checks"
+	@echo "  make chat-eval-prepare      - Compile the production prompt/validation evaluation adapter"
 	@echo "  make chat-validate          - Offline chat chart lint, render checks and setup-script unit tests"
 	@echo "  make chat-up                - Build/deploy the full chat stack and forward the UI"
 	@echo "                                Requires the reader database Secret; CHAT_VALUES is optional"
@@ -386,3 +388,17 @@ chat-ui:
 	echo "Keep this terminal open. Ctrl+C stops forwarding while the chat Pods stay running."; \
 	exec $(KUBECTL) -n $(POSTGRESQL_NAMESPACE) port-forward --address 127.0.0.1 \
 		service/$(CHAT_RELEASE)-frontend "$$port:80"
+
+# Reusable AI evaluations. No model/DB access in offline checks.
+.PHONY: chat-eval-test chat-eval-prepare chat-eval-sql-test
+chat-eval-test:
+	python3 -m unittest discover -s garmin-chat/evaluation/tests -v
+	mvn -B -ntp -f garmin-chat/backend/pom.xml -Dtest=EvaluationBridgeTest test
+
+chat-eval-prepare:
+	mvn -B -ntp -f garmin-chat/backend/pom.xml test-compile dependency:build-classpath -Dmdep.includeScope=test -Dmdep.outputFile=target/evaluation-classpath.txt
+	python3 garmin-chat/evaluation/run.py prepare
+
+chat-eval-sql-test:
+	@test -n "$$GARMIN_CHAT_TEST_DB_URL" || { echo "Set an isolated PostgreSQL test URL and reader credentials first"; exit 1; }
+	mvn -B -ntp -f garmin-chat/backend/pom.xml -Dtest=PostgresMetricAggregationDatabaseTest test

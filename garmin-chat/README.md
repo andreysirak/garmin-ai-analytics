@@ -451,6 +451,11 @@ implemented by `repository.impl.DailySummaryRepositoryPostgresImpl`.
 
 ## Offline verification
 
+The [AI evaluation suite](evaluation/README.md) provides versioned synthetic
+cases, a test plan, production-prompt export, opt-in Ollama/application checks,
+and baseline comparison. Start with `make chat-eval-test`; live model quality
+is evaluated separately from the offline tests below.
+
 ```sh
 export JAVA_HOME=$(/usr/libexec/java_home -v 25)  # macOS; select Java 25 on other OSes
 mvn -B -ntp -f garmin-chat/backend/pom.xml \

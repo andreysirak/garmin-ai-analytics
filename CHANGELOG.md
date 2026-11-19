@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add a versioned AI evaluation suite (#74): synthetic cases, production Java
+  prompt/validator bridge, opt-in Ollama and application HTTP capture, hash-bound
+  review and baseline comparison, with offline contract checks in CI. No changes
+  to production AI behavior or claimed new live-model baseline.
+
 - Replace the outdated README architecture sketch with the current Airflow DAG
   image and a planned AI workflow diagram; distinguish implemented analytics
   from proposed fact presentation, explanation checks and overnight-sleep analysis.

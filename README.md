@@ -436,6 +436,11 @@ attempts. Response schema and business validation belong downstream.
 
 ## Development and verification
 
+For reusable AI regression cases, production-prompt exports, opt-in model runs
+and baseline comparison, see the [AI evaluation suite](garmin-chat/evaluation/README.md).
+Run `make chat-eval-test` for its offline checks. Model quality and application
+acceptance are separate from mocked unit tests.
+
 Run Java checks with:
 
 ```bash
