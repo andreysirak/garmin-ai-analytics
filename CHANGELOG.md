@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Replace the outdated README architecture sketch with the current Airflow DAG
+  image and a planned AI workflow diagram; distinguish implemented analytics
+  from proposed fact presentation, explanation checks and overnight-sleep analysis.
+
 - Record the 19 November controlled Garmin chat evaluation in PR #68: 45 local
   inference calls, per-stage failures, grading caveats and sanitized per-run
   results. Keep personal evidence and raw traces private; no model comparison
