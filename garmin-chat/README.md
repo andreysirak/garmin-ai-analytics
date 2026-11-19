@@ -453,8 +453,11 @@ implemented by `repository.impl.DailySummaryRepositoryPostgresImpl`.
 
 The [AI evaluation suite](evaluation/README.md) provides versioned synthetic
 cases, a test plan, production-prompt export, opt-in Ollama/application checks,
-and baseline comparison. Start with `make chat-eval-test`; live model quality
-is evaluated separately from the offline tests below.
+and baseline comparison. Read the [test-case catalogue](evaluation/TEST-CASES.md)
+for individual scenarios. Start with `make chat-eval-test`; use
+`make chat-eval-model EVAL_OUTPUT=data/evaluations/NEW-RUN` for live model
+evaluation. The guide also covers `make chat-eval-application` on an isolated
+synthetic deployment. Live quality is evaluated separately from the offline tests below.
 
 ```sh
 export JAVA_HOME=$(/usr/libexec/java_home -v 25)  # macOS; select Java 25 on other OSes
