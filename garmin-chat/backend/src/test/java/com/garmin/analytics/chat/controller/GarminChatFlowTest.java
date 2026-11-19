@@ -85,10 +85,21 @@ class GarminChatFlowTest {
           RowMapper<?> mapper = call.getArgument(2);
           return mapper.mapRow(row, 0);
         });
+    var arguments = ChatTestSupport.arguments("[\"" + field + "\"]",
+        operation, ChatTestSupport.LAST_SEVEN);
     server.expect(requestTo("http://ollama:11434/api/chat")).andExpect(request -> {
       var body = json.readTree(((MockClientHttpRequest) request).getBodyAsString());
       assertThat(body.at("/messages/1/content").asText()).isEqualTo(question);
       assertThat(body.at("/messages/0/content").asText()).contains("2026-11-16", "Europe/Oslo");
+      assertThat(body.at("/format/properties/route").isObject()).isTrue();
+      assertThat(body.at("/format/required")).map(fieldName -> fieldName.asText())
+          .containsExactly("route");
+      assertThat(body.at("/tools").size()).isZero();
+    }).andRespond(withSuccess(modelResponse(ChatTestSupport.analyze(arguments)),
+        MediaType.APPLICATION_JSON));
+    server.expect(requestTo("http://ollama:11434/api/chat")).andExpect(request -> {
+      var body = json.readTree(((MockClientHttpRequest) request).getBodyAsString());
+      assertThat(body.at("/messages/1/content").asText()).isEqualTo(question);
       assertThat(body.hasNonNull("format")).isFalse();
       assertThat(body.at("/tools/0/function/name").asText()).isEqualTo(ChatTestSupport.TOOL_NAME);
       var period = body.at("/tools/0/function/parameters/properties/period");
@@ -96,8 +107,7 @@ class GarminChatFlowTest {
       assertThat(period.get("required")).map(fieldName -> fieldName.asText())
           .containsExactlyInAnyOrder("type", "startDate", "endDate", "days");
       assertThat(body.at("/options/num_predict").asInt()).isEqualTo(1024);
-    }).andRespond(withSuccess(modelToolResponse(ChatTestSupport.arguments("[\"" + field + "\"]",
-        operation, ChatTestSupport.LAST_SEVEN)), MediaType.APPLICATION_JSON));
+    }).andRespond(withSuccess(modelToolResponse(arguments), MediaType.APPLICATION_JSON));
     String explanation = operation + " " + field + ": " + expectedValue + " " + unit
         + ". Coverage is incomplete: 3 of 7 days have numeric readings.";
     server.expect(requestTo("http://ollama:11434/api/chat")).andExpect(request -> {
@@ -133,14 +143,17 @@ class GarminChatFlowTest {
   @ParameterizedTest
   @CsvSource({
       "Do days with more physical activity tend to be followed by longer sleep?, "
-          + "This chat cannot calculate correlations.",
-      "Average resting heart rate?, Please specify a time period.",
-      "How productively did I work yesterday?, Do you mean work or physical activity?"
+          + "Garmin chat can summarize individual metrics over a period. "
+          + "It cannot determine whether activity is related to later sleep.",
+      "Average resting heart rate?, Which time period should I use?",
+      "How productively did I work yesterday?, Do you mean work productivity or physical activity?"
   })
   void answersWithoutDatabaseAccessWhenOllamaDoesNotCallATool(String question, String answer)
       throws Exception {
+    String decision = question.contains("followed by") ? ChatTestSupport.unsupported("RELATIONSHIP")
+        : ChatTestSupport.clarify(question.contains("productively") ? "GOAL" : "PERIOD", answer);
     server.expect(requestTo("http://ollama:11434/api/chat"))
-        .andRespond(withSuccess(modelResponse(answer), MediaType.APPLICATION_JSON));
+        .andRespond(withSuccess(modelResponse(decision), MediaType.APPLICATION_JSON));
     mvc().perform(post("/api/chat").contentType(MediaType.APPLICATION_JSON)
             .content(json.writeValueAsString(Map.of("message", question))))
         .andExpect(status().isOk())

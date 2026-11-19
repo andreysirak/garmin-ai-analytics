@@ -2,6 +2,7 @@ package com.garmin.analytics.chat.analytics;
 
 import com.garmin.analytics.chat.model.PeriodSelection;
 import com.garmin.analytics.chat.model.QueryEvidence;
+import com.garmin.analytics.chat.model.QueryIntent;
 import com.garmin.analytics.chat.model.QueryIntent.Aggregation;
 import java.time.LocalDate;
 import java.util.List;
@@ -10,6 +11,9 @@ import java.util.List;
 public interface GarminAnalyticsService {
 
   LocalDate referenceDate();
+
+  QueryIntent validateRequest(List<String> fields, Aggregation aggregation, PeriodSelection period,
+      LocalDate referenceDate);
 
   QueryEvidence aggregate(List<String> fields, Aggregation aggregation, PeriodSelection period,
       LocalDate referenceDate);

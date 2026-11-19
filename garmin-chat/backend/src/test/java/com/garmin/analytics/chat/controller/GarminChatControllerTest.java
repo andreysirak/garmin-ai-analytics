@@ -96,13 +96,14 @@ class GarminChatControllerTest {
   void returnsClarificationAsTextWithNoSelectedDates() throws Exception {
     var service = ChatTestSupport.service((AggregationLoader) query -> {
       throw new AssertionError("Clarification must not query PostgreSQL");
-    }, prompt -> ChatTestSupport.response("Please specify the sleep measurement and time period."));
+    }, prompt -> ChatTestSupport.response(
+        ChatTestSupport.clarify("METRIC", "Which sleep measurement did you mean?")));
 
     mvc(service).perform(post("/api/chat").contentType(MediaType.APPLICATION_JSON)
             .content("{\"message\":\"How did I sleep?\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.answer").value(
-            org.hamcrest.Matchers.containsString("Please specify")))
+            org.hamcrest.Matchers.containsString("Which sleep measurement")))
         .andExpect(jsonPath("$.startDate").value(org.hamcrest.Matchers.nullValue()))
         .andExpect(jsonPath("$.endDate").value(org.hamcrest.Matchers.nullValue()));
   }

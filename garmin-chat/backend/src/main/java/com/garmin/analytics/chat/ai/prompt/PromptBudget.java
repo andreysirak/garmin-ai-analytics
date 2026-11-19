@@ -6,6 +6,8 @@ import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
+import org.springframework.ai.ollama.api.OllamaChatOptions;
+import org.springframework.ai.util.json.JsonParser;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -30,6 +32,9 @@ public class PromptBudget {
         var tool = callback.getToolDefinition();
         estimate += bytes(tool.name()) + bytes(tool.description()) + bytes(tool.inputSchema());
       }
+    }
+    if (prompt.getOptions() instanceof OllamaChatOptions options && options.getFormat() != null) {
+      estimate += bytes(JsonParser.toJson(options.getFormat()));
     }
     for (var message : prompt.getInstructions()) {
       estimate += bytes(message.getText());

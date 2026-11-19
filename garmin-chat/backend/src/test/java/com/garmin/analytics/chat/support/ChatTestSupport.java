@@ -1,11 +1,15 @@
 package com.garmin.analytics.chat.support;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.garmin.analytics.chat.ai.ChatCompletion;
 import com.garmin.analytics.chat.ai.ChatModelAvailability;
 import com.garmin.analytics.chat.ai.ChatModelTurnAdvisor;
 import com.garmin.analytics.chat.ai.impl.GarminChatConversationSpringAiImpl;
 import com.garmin.analytics.chat.ai.prompt.GarminChatPromptFactory;
 import com.garmin.analytics.chat.ai.prompt.PromptBudget;
+import com.garmin.analytics.chat.ai.routing.GarminRequestRouter;
+import com.garmin.analytics.chat.ai.routing.RoutingDecisionValidator;
+import com.garmin.analytics.chat.ai.tool.GarminAnalysisWorkflow;
 import com.garmin.analytics.chat.ai.tool.GarminAnalyticsToolFactory;
 import com.garmin.analytics.chat.ai.tool.GarminToolArguments;
 import com.garmin.analytics.chat.analytics.GarminAnalyticsService;
@@ -40,6 +44,7 @@ import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.ollama.api.OllamaChatOptions;
 import org.springframework.core.io.ClassPathResource;
 
 public final class ChatTestSupport {
@@ -75,18 +80,47 @@ public final class ChatTestSupport {
     var budget = new PromptBudget(properties);
     var prompts = new GarminChatPromptFactory(properties,
         new ClassPathResource("prompts/garmin-chat-system.txt"),
-        new ClassPathResource("prompts/period-selection-rules.txt"));
-    var tools = new GarminAnalyticsToolFactory(analytics(repository, properties, CLOCK));
+        new ClassPathResource("prompts/period-selection-rules.txt"),
+        new ClassPathResource("prompts/garmin-routing-system.txt"),
+        new ClassPathResource("prompts/garmin-answer-instructions.txt"));
+    var analytics = analytics(repository, properties, CLOCK);
+    var tools = new GarminAnalyticsToolFactory(analytics);
     var modelTurn = new ChatModelTurnAdvisor(budget, properties, new ChatDiagnostics(JSON));
-    var conversation = new GarminChatConversationSpringAiImpl(ChatClient.builder(model), availability, prompts,
-        tools, budget, new GarminToolArguments(JSON), modelTurn);
+    var completion = new ChatCompletion();
+    var router = new GarminRequestRouter(ChatClient.builder(model), modelTurn,
+        new RoutingDecisionValidator(analytics), JSON);
+    var workflow = new GarminAnalysisWorkflow(ChatClient.builder(model), prompts, tools, budget,
+        new GarminToolArguments(JSON), modelTurn, completion);
+    var conversation = new GarminChatConversationSpringAiImpl(availability, prompts, analytics,
+        budget, router, workflow, completion);
     return new GarminChatServiceImpl(new ChatRequestExecutor(new ChatExecutionProperties(timeout)),
         conversation);
   }
 
   public static ChatModel model(String arguments, Function<Prompt, ChatResponse> answer) {
-    return prompt -> prompt.getInstructions().getLast() instanceof ToolResponseMessage
-        ? answer.apply(prompt) : toolCall(arguments);
+    return routed(arguments, prompt -> prompt.getInstructions().getLast()
+        instanceof ToolResponseMessage ? answer.apply(prompt) : toolCall(arguments));
+  }
+
+  public static ChatModel routed(String selection, ChatModel model) {
+    return prompt -> routing(prompt) ? response(analyze(selection)) : model.call(prompt);
+  }
+
+  public static boolean routing(Prompt prompt) {
+    return prompt.getOptions() instanceof OllamaChatOptions options && options.getFormat() != null;
+  }
+
+  public static String analyze(String selection) {
+    return "{\"route\":\"ANALYZE\",\"selection\":" + selection + "}";
+  }
+
+  public static String clarify(String target, String question) {
+    return JSON.createObjectNode().put("route", "CLARIFY").put("target", target)
+        .put("question", question).toString();
+  }
+
+  public static String unsupported(String reason) {
+    return JSON.createObjectNode().put("route", "UNSUPPORTED").put("reason", reason).toString();
   }
 
   public static ChatResponse toolCall(String arguments) {

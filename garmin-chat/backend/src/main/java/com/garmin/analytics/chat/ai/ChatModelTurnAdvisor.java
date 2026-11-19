@@ -6,6 +6,7 @@ import com.garmin.analytics.chat.ai.tool.GarminToolCallAdvisor;
 import com.garmin.analytics.chat.analytics.exception.InvalidAnalyticsRequest;
 import com.garmin.analytics.chat.config.GarminChatProperties;
 import com.garmin.analytics.chat.diagnostics.ChatDiagnostics;
+import com.garmin.analytics.chat.execution.ChatDeadline;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -28,6 +29,8 @@ import org.springframework.stereotype.Component;
 /** Applies model-only checks and diagnostics inside the tool advisor's loop. */
 @Component
 public class ChatModelTurnAdvisor implements CallAdvisor {
+
+  public static final String DEADLINE = "garminChatDeadline";
 
   private static final Logger log = LoggerFactory.getLogger(ChatModelTurnAdvisor.class);
 
@@ -54,13 +57,15 @@ public class ChatModelTurnAdvisor implements CallAdvisor {
 
   @Override
   public ChatClientResponse adviseCall(ChatClientRequest request, CallAdvisorChain chain) {
-    int turn = 1 + (int) request.prompt().getInstructions().stream()
-        .filter(ToolResponseMessage.class::isInstance).count();
-    if (turn > 1 && !budget.fits(request.prompt())) {
+    boolean hasEvidence = request.prompt().getInstructions().stream()
+        .anyMatch(ToolResponseMessage.class::isInstance);
+    if (hasEvidence && !budget.fits(request.prompt())) {
       log.info("chat_rejected reason=tool_result_context_budget");
       throw new InvalidAnalyticsRequest("The complete question and Garmin evidence exceed the "
           + "model context. Please shorten your question or choose fewer metrics.");
     }
+    var deadline = (ChatDeadline) request.context().get(DEADLINE);
+    int turn = deadline.startModelCall();
     long started = System.nanoTime();
     recordRequest(turn, request.prompt());
     try {

@@ -96,41 +96,121 @@ class GarminChatServiceTest {
           "Europe/Oslo", "2026-11-16");
       var options = (ToolCallingChatOptions) prompt.getOptions();
       assertThat(options.getInternalToolExecutionEnabled()).isFalse();
-      assertThat(options.getToolCallbacks()).singleElement().satisfies(callback -> {
-        var tool = callback.getToolDefinition();
-        assertThat(tool.name()).isEqualTo(ChatTestSupport.TOOL_NAME);
-        assertThat(tool.description())
-            .contains("Garmin daily-summary metrics", "values and coverage");
-        assertThat(tool.inputSchema())
-            .contains("metrics", "aggregation", "period", "LAST_N_DAYS", "startDate", "days")
-            .doesNotContain("profileId", "tableName", "jsonPath");
-      });
-      return response("Do you mean work or physical activity?");
+      assertThat(options.getToolCallbacks()).isEmpty();
+      assertThat(ChatTestSupport.routing(prompt)).isTrue();
+      // A schema-valid misroute must not reinterpret work productivity as steps.
+      return response(ChatTestSupport.analyze(WEEK));
     });
-    assertThat(chat.answer("How productively did I work yesterday?").startDate()).isNull();
+    var answer = chat.answer("How productively did I work last week?");
+    assertThat(answer.answer()).isEqualTo("Do you mean work productivity or physical activity?");
+    assertThat(answer.startDate()).isNull();
     verifyNoInteractions(repository);
   }
 
   @ParameterizedTest
   @CsvSource({
-      "Average resting heart rate?, What time period should I use?",
-      "How did I sleep last week?, Which sleep measurement do you mean?",
-      "Do activity and sleep correlate?, This chat cannot calculate correlations.",
-      "Який пульс у спокої?, За який період?"
+      "Average resting heart rate?, PERIOD, What time period should I use?",
+      "How did I sleep last week?, METRIC, Which sleep measurement do you mean?",
+      "Який пульс у спокої?, PERIOD, За який період?"
   })
-  void returnsTheModelsClarificationOrUnsupportedAnswerWithoutData(String question, String text)
+  void returnsFocusedClarificationWithoutData(String question, String target, String text)
       throws IOException {
-    var answer = service(repository, prompt -> response(text)).answer(question);
+    var answer = service(repository, prompt -> response(ChatTestSupport.clarify(target, text)))
+        .answer(question);
     assertThat(answer.answer()).isEqualTo(text);
     assertThat(answer.startDate()).isNull();
     assertThat(answer.endDate()).isNull();
     verifyNoInteractions(repository);
   }
 
+  @Test
+  void rejectsActivityFollowedBySleepEvenIfRouterSelectsAValidScalarQuery() throws IOException {
+    var chat = service(repository, prompt -> response(ChatTestSupport.analyze(WEEK)));
+    assertThat(chat.answer("Is more activity followed by longer sleep?").answer())
+        .contains("cannot determine whether activity is related to later sleep");
+    verifyNoInteractions(repository);
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"{}", "analysis plan", "{\"route\":\"ANALYZE\"}",
+      "{\"route\":\"UNSUPPORTED\",\"reason\":\"OTHER\",\"target\":\"PERIOD\"}",
+      "{\"route\":\"UNSUPPORTED\",\"route\":\"CLARIFY\",\"target\":\"PERIOD\"," +
+          "\"question\":\"Which period?\"}"})
+  void rejectsMalformedOrInconsistentRoutingDecisions(String output) throws IOException {
+    var answer = service(repository, prompt -> response(output)).answer("Total steps yesterday?");
+    assertThat(answer.answer()).contains("couldn't interpret");
+    assertThat(answer.startDate()).isNull();
+    verifyNoInteractions(repository);
+  }
+
+  @Test
+  void doesNotRelabelLastWeekAsMissingOrCurrentWeek() throws IOException {
+    for (String invalid : List.of(ChatTestSupport.clarify("PERIOD", "Which period?"),
+        ChatTestSupport.analyze(WEEK.replace("LAST_WEEK", "THIS_WEEK")))) {
+      var answer = service(repository, prompt -> response(invalid)).answer("Total steps last week?");
+      assertThat(answer.answer()).contains("last week reliably").doesNotContain("Which period?");
+    }
+    verifyNoInteractions(repository);
+  }
+
+  @Test
+  void analyzesStepsYesterdayUsingExecutedEvidence() throws IOException {
+    when(repository.aggregate(any())).thenAnswer(call ->
+        List.of(ChatTestSupport.result(call.getArgument(0), "4200")));
+    var yesterday = WEEK.replace("LAST_WEEK", "YESTERDAY");
+    var chat = service(repository, ChatTestSupport.model(yesterday, prompt -> {
+      assertThat(evidence(prompt).at("/metrics/0/value").asInt()).isEqualTo(4200);
+      return response("You took 4,200 steps yesterday.");
+    }));
+    var answer = chat.answer("How many steps yesterday?");
+    assertThat(answer.answer()).isEqualTo("You took 4,200 steps yesterday.");
+    assertThat(answer.startDate()).isEqualTo("2026-11-15");
+    assertThat(answer.endDate()).isEqualTo("2026-11-15");
+  }
+
+  @Test
+  void noDataCompletionUsesCoverageInsteadOfInventedModelReadings() throws IOException {
+    when(repository.aggregate(any())).thenAnswer(call -> {
+      QueryIntent intent = call.getArgument(0);
+      return List.of(new MetricAggregation(Metric.TOTAL_STEPS, Aggregation.SUM, null,
+          "steps", intent.range(), new DataCoverage(7, 1, 2, 3, 1, 0, 0)));
+    });
+    var chat = service(repository, ChatTestSupport.model(WEEK, prompt ->
+        response("You took 5000 steps.")));
+    var answer = chat.answer("How many steps last week?");
+    assertThat(answer.answer()).contains("none contain a numeric reading", "0 of 7 days")
+        .doesNotContain("5000");
+    assertThat(answer.startDate()).isEqualTo("2026-11-09");
+  }
+
+  @Test
+  void analyticalPlanWithoutToolEvidenceIsIncomplete() throws IOException {
+    var yesterday = WEEK.replace("LAST_WEEK", "YESTERDAY");
+    var chat = service(repository, ChatTestSupport.routed(yesterday,
+        prompt -> response("We need to calculate your total steps now.")));
+    var answer = chat.answer("How many steps yesterday?");
+    assertThat(answer.answer()).contains("couldn't complete").doesNotContain("We need");
+    assertThat(answer.startDate()).isNull();
+    verifyNoInteractions(repository);
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"activeKilocalories", "AVG", "THIS_WEEK"})
+  void rejectsSchemaValidToolArgumentsThatContradictRouting(String changed) throws IOException {
+    String arguments = switch (changed) {
+      case "AVG" -> WEEK.replace("SUM", changed);
+      case "THIS_WEEK" -> WEEK.replace("LAST_WEEK", changed);
+      default -> WEEK.replace("totalSteps", changed);
+    };
+    var chat = service(repository, ChatTestSupport.routed(WEEK, prompt -> toolCall(arguments)));
+    assertThat(chat.answer("How many steps last week?").answer()).contains("did not match");
+    verifyNoInteractions(repository);
+  }
+
   @ParameterizedTest
   @MethodSource("invalidArguments")
   void rejectsInvalidToolArgumentsBeforeLoadingData(String arguments) throws IOException {
-    var chat = service(repository, prompt -> toolCall(arguments));
+    var chat = service(repository, ChatTestSupport.routed(WEEK, prompt -> toolCall(arguments)));
     var answer = chat.answer("Synthetic question");
 
     assertThat(answer.answer()).isNotBlank();
@@ -192,7 +272,8 @@ class GarminChatServiceTest {
   void rejectsAToolBatchBeforeExecutingAnyCall() throws IOException {
     var first = new AssistantMessage.ToolCall("1", "function", ChatTestSupport.TOOL_NAME, WEEK);
     var second = new AssistantMessage.ToolCall("2", "function", ChatTestSupport.TOOL_NAME, WEEK);
-    var chat = service(repository, prompt -> ChatTestSupport.toolCalls(first, second));
+    var chat = service(repository, ChatTestSupport.routed(WEEK,
+        prompt -> ChatTestSupport.toolCalls(first, second)));
 
     assertThat(chat.answer("Synthetic question").answer()).contains("one calculation");
     verifyNoInteractions(repository);
@@ -201,7 +282,8 @@ class GarminChatServiceTest {
   @Test
   void rejectsAnUnknownToolWithoutResolvingOrExecutingIt() throws IOException {
     var call = new AssistantMessage.ToolCall("1", "function", "execute_sql", WEEK);
-    var chat = service(repository, prompt -> ChatTestSupport.toolCalls(call));
+    var chat = service(repository, ChatTestSupport.routed(WEEK,
+        prompt -> ChatTestSupport.toolCalls(call)));
 
     assertThat(chat.answer("Synthetic question").startDate()).isNull();
     verifyNoInteractions(repository);
@@ -212,10 +294,10 @@ class GarminChatServiceTest {
     when(repository.aggregate(any())).thenAnswer(call ->
         List.of(ChatTestSupport.result(call.getArgument(0), null)));
     var calls = new AtomicInteger();
-    var chat = service(repository, prompt -> {
+    var chat = service(repository, ChatTestSupport.routed(WEEK, prompt -> {
       calls.incrementAndGet();
       return toolCall(WEEK);
-    });
+    }));
 
     assertThat(chat.answer("Synthetic question").answer()).contains("one calculation");
     assertThat(calls.get()).isEqualTo(2);
@@ -270,9 +352,12 @@ class GarminChatServiceTest {
     var evidenceReady = new CountDownLatch(2);
     var chat = service(repository, prompt -> {
       String question = prompt.getUserMessage().getText();
+      var selection = question.equals("Yesterday") ? WEEK.replace("LAST_WEEK", "YESTERDAY") : WEEK;
+      if (ChatTestSupport.routing(prompt)) {
+        return response(ChatTestSupport.analyze(selection));
+      }
       if (prompt.getInstructions().size() == 2) {
-        return toolCall(question.equals("Yesterday") ? WEEK.replace("LAST_WEEK", "YESTERDAY")
-            : WEEK);
+        return toolCall(selection);
       }
       evidenceReady.countDown();
       try {
@@ -308,7 +393,7 @@ class GarminChatServiceTest {
   @Test
   void neverTruncatesOversizedToolEvidence() throws IOException {
     when(repository.aggregate(any())).thenAnswer(call ->
-        List.of(ChatTestSupport.result(call.getArgument(0), "9".repeat(4000))));
+        List.of(ChatTestSupport.result(call.getArgument(0), "9".repeat(6500))));
     var chat = service(repository, ChatTestSupport.model(WEEK, prompt -> {
       throw new AssertionError("Partial evidence must not reach the model");
     }));

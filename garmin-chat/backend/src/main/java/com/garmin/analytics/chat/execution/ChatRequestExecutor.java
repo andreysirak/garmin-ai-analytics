@@ -46,11 +46,12 @@ public class ChatRequestExecutor {
       });
       Thread.startVirtualThread(task);
       T result = await(task, deadline);
-      log.info("chat_completed elapsed_ms={}", elapsedMillis(started));
+      log.info("chat_completed model_calls={} elapsed_ms={}",
+          deadline.modelCalls(), elapsedMillis(started));
       return result;
     } catch (RuntimeException failure) {
-      log.warn("chat_failed error_type={} elapsed_ms={}", failure.getClass().getSimpleName(),
-          elapsedMillis(started));
+      log.warn("chat_failed error_type={} model_calls={} elapsed_ms={}",
+          failure.getClass().getSimpleName(), deadline.modelCalls(), elapsedMillis(started));
       throw failure;
     } finally {
       if (previousId == null) {

@@ -7,18 +7,21 @@ The backend uses the existing analytics PostgreSQL Service and internal Ollama
 Service on 11434. No cluster recreation or existing Airflow/database changes
 are required.
 
-Spring AI's `ChatClient` sends the question, system instructions, metric
-catalog and one analytical tool definition to Ollama. For a supported question,
-Ollama requests the tool with structured arguments. Java validates the call and
-resolves the dates with the configured timezone and an injected Clock. The
-existing fixed, parameterized SQL returns values and coverage for the configured
-server profile. Spring AI sends this compact evidence back as a tool result so
-Ollama can answer in the user's language.
+The first Spring AI call sends Ollama the question, the metric catalog and the
+server's reference date and timezone. Ollama returns a schema-constrained
+`ANALYZE`, `CLARIFY`, or `UNSUPPORTED` decision. Java validates the decision.
+Clarification and unsupported requests finish without a tool call or database
+access.
 
-Clarifications and unsupported requests can be answered on the first turn,
-without any database access. A successful query with no readings still produces
-coverage evidence. Questions are independent and users resend the full question
-after a clarification. Raw daily summaries and profile IDs stay on the server.
+For `ANALYZE`, the existing Spring AI tool loop receives the original question
+and the selected metric, calculation and period. The tool accepts only matching
+arguments. The existing fixed SQL returns values and coverage for the server
+profile. A completed analysis requires valid tool evidence. Text that only
+proposes a calculation yields application-authored incomplete guidance.
+A successful query with no numeric data yields an explicit no-data response.
+
+Questions are independent. Resend the full question after a clarification.
+Raw daily summaries and profile IDs stay on the server.
 
 See [request diagnostics and the repeatable model evaluation](docs/chat-diagnostics.md)
 for the opt-in local trace mode and the #66 verification checklist.
@@ -62,15 +65,15 @@ The installed model must advertise `tools` through `/api/show`. The library
 template and capability check establish support for the protocol. Accuracy of
 tool selection, arguments and the final answer still needs live verification.
 
-CPU inference can take time even with compact evidence. A supported question
-can require two inference turns. The total backend deadline includes both
-turns, the model capability check and database work. Helm sets the frontend
+CPU inference can take time even with compact evidence. A supported question can
+require three inference turns, including the new routing call. These calls, the
+capability check and database work share the existing backend deadline. Helm sets the frontend
 proxy timeout 30 seconds above that deadline.
 
 Direct backend runs configure the HTTP read timeout with
 `OLLAMA_REQUEST_TIMEOUT` (default `300s`) and the independent application
 deadline with `GARMIN_CHAT_EXECUTION_TIMEOUT` (default `660s`). If you override
-the transport timeout, allow time for two turns, capability checks and SQL in
+the transport timeout, allow time for up to three turns, capability checks and SQL in
 the application deadline. Set any external proxy timeout above the application
 deadline. Timeouts return HTTP 503 with a retry hint.
 
@@ -286,8 +289,9 @@ active download. Interrupt an unsuccessful wait, fix resources and rerun
 Spring AI 1.1.8's `ToolCallAdvisor` disables the Ollama chat model's internal
 tool loop. The application checks the entire batch before Spring AI dispatches
 it and allows one tool call per request. Each call can include several metrics.
-The advisor checks the JSON shape and the analytics service validates the
-allowlists, compatibility, period and query range before PostgreSQL. The
+The advisor checks the JSON shape. The tool verifies that its arguments match
+the validated route. The analytics service checks the allowlists, compatibility,
+period and query range before PostgreSQL. The
 analytics service also validates returned metrics, operation, units, dates and
 coverage. Repository errors exit the tool loop as database failures.
 
@@ -317,12 +321,12 @@ The tool returns `QueryEvidence`, for example (synthetic):
 }
 ```
 
-The model gets the original question, its structured call, and the complete
-tool result. It is instructed to use supplied values, identify partial totals
+The analytical model gets the original question, the validated selection, its
+structured call, and the complete tool result. It is instructed to use supplied values, identify partial totals
 and explain coverage, including missing readings and valid zeros.
 
 Before each inference turn, `PromptBudget` counts UTF-8 bytes for the messages,
-tool definition, arguments and result, using one estimated token per byte.
+routing schema, tool definition, arguments and result, using one estimated token per byte.
 It also reserves 512 tokens for template overhead and `chat.responseTokens`
 for output. Oversized questions stop before Ollama and SQL. If the conversation
 including evidence exceeds the budget, the backend requests a shorter question
@@ -420,6 +424,7 @@ The backend uses packages under `com.garmin.analytics.chat`.
 | `service` | Chat use-case entry point |
 | `execution` | Request correlation, deadline and cancellation |
 | `ai` | ChatClient conversation, model transport, availability and per-turn checks |
+| `ai.routing` | Structured decision decoding and validation |
 | `ai.prompt` | Prompt assembly from resources and context budgeting |
 | `ai.tool` | Request-scoped analytics tool, argument checks and Spring AI tool lifecycle |
 | `analytics` | Business validation, date resolution and evidence assembly |

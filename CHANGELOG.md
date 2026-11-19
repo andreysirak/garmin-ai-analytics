@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Route Garmin questions with structured output and require successful tool
+  evidence before completing analytical answers. Log routing and completion
+  outcomes under the same request ID.
+
 - Split Garmin chat request execution, prompt assembly, tool lifecycle and
   model-turn diagnostics into dedicated components. Configure the total chat
   deadline independently of Ollama's HTTP timeout.

@@ -9,7 +9,10 @@ Each request gets a generated `request_id` in logging MDC, shared across
 the HTTP thread and the conversation worker. Follow it through `chat_started`,
 `model_started` and `model_completed` for each turn, `sql_completed`,
 `tool_execution` and `chat_completed`. Tool events report the registered name,
-outcome and duration. Failure events report exception types and latencies.
+outcome and duration. `chat_routing` logs the proposed route, validation
+outcome and routing duration. `chat_route_selected` logs the effective route.
+`chat_completion` records the final outcome and evidence availability, and
+the request summary records total latency and model-call count.
 
 Normal logs include prompt character counts, context and response budgets, a
 SHA-256 fingerprint of system instructions, the SQL query name, catalog metric
@@ -101,7 +104,7 @@ invented below: establish them independently from PostgreSQL.
 | 18 | Total steps from 2026-02-30 to 2026-03-01? | Invalid date rejected before SQL |
 | 19 | Do days with more physical activity tend to be followed by longer sleep? | Unsupported correlation, with no fabricated finding |
 | 20 | Is my resting heart rate healthy last week? | Unsupported health assessment |
-| 21 | How productively did I work yesterday? | Clarify work versus physical activity without a tool call |
+| 21 | How productively did I work last week? | Clarify work versus physical activity without a tool call |
 
 Cases 1–15 cover all currently permitted metric/aggregation combinations. Case 16
 is the exact reported failure, not a disguised steps-only question. The current
@@ -116,10 +119,24 @@ curl --fail-with-body --max-time 690 http://127.0.0.1:5173/api/chat \
   -d '{"message":"How active have I been over the past week?"}'
 ```
 
-For each case inspect the first `model_response` for the tool call or direct
-reply. Match accepted arguments to `sql_request`, then match the final response's
-numbers, units and coverage to `sql_evidence`. Use `tool_execution` to tell
-whether an attempted call executed, failed or was rejected.
+Inspect the first `model_response` for the structured route. On `ANALYZE`, inspect
+the next response for matching tool arguments. Compare `sql_request` and
+`sql_evidence` with the final answer. Use `tool_execution` to distinguish
+executed, rejected and failed calls.
+
+For the short routing regression check, use cases 17, 19 and 21 above, then ask
+“How many steps yesterday?” and “How many steps last week?”. Confirm one route
+turn with zero SQL for clarification and unsupported requests. Confirm a matching
+tool call for the step questions, with yesterday resolved in the configured
+timezone and last week resolved as the previous Monday through Sunday. Use one
+known empty period and one partially covered period to verify that missing
+readings and recorded zeros stay distinct.
+
+Check malformed routing, plan-only output, mismatched tool arguments, database
+failure and timeout with the offline mocked cases. Model behavior on the live
+cluster is **pending**. Record routing latency separately and compare total
+latency and model-call count with the previous flow. Analytical requests now
+make up to three model calls under the same request deadline.
 
 Independently check accepted ranges in PostgreSQL using the configured reader
 and the resolved dates. Reproduce SUM/AVG/MIN/MAX and numeric-only coverage from

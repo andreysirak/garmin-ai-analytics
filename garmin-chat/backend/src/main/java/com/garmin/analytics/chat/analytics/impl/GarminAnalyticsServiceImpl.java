@@ -79,7 +79,8 @@ public class GarminAnalyticsServiceImpl implements GarminAnalyticsService {
     }
   }
 
-  private QueryIntent validateRequest(List<String> fields, Aggregation aggregation,
+  @Override
+  public QueryIntent validateRequest(List<String> fields, Aggregation aggregation,
       PeriodSelection period, LocalDate referenceDate) {
     if (fields == null || fields.isEmpty() || fields.size() > Metric.values().length
         || aggregation == null) {
