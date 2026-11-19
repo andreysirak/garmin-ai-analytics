@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+- Record the 19 November controlled Garmin chat evaluation in PR #68: 45 local
+  inference calls, per-stage failures, grading caveats and sanitized per-run
+  results. Keep personal evidence and raw traces private; no model comparison
+  or application fix is claimed.
+
+- Execute accepted Garmin scalar selections in Java before the explanation call,
+  removing the redundant model-generated tool call. Use compact period schemas,
+  constrain routing fields to the metric catalog, log validation rejection reasons,
+  and clarify unsupported relationships and ambiguous goals in the routing prompt.
+  Live routing quality on the configured local model still requires verification.
+
+- Route Garmin questions with structured output and require successful tool
+  evidence before completing analytical answers. Log routing and completion
+  outcomes under the same request ID.
+
+- Split Garmin chat request execution, prompt assembly, tool lifecycle and
+  model-turn diagnostics into dedicated components. Configure the total chat
+  deadline independently of Ollama's HTTP timeout.
+
+- Use Spring AI tool calling for Garmin scalar analytics. Send the metric catalog
+  before tool selection and return structured SQL evidence with dates, units and
+  coverage. Cap each request at one tool call and require Ollama tool capability.
+
+- Add per-request AI chat stage timings, intent validation diagnostics and opt-in
+  rotating local prompt/response traces; document a repeatable model evaluation (#66).
+
 - Preserve Airflow metadata and Garmin analytics PostgreSQL files on separate
   host-backed kind mounts; check identities, majors, and UID write permissions
   before server startup. Recreate missing database and Airflow Secrets from the

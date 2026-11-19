@@ -1,4 +1,4 @@
-package com.garmin.analytics.chat.ai;
+package com.garmin.analytics.chat.ai.prompt;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;

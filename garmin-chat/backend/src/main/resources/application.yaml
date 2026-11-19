@@ -45,6 +45,8 @@ garmin:
     context-tokens: ${spring.ai.ollama.chat.options.num-ctx}
     response-tokens: ${GARMIN_CHAT_RESPONSE_TOKENS:1024}
     max-query-days: ${GARMIN_CHAT_MAX_QUERY_DAYS:31}
+    execution:
+      timeout: ${GARMIN_CHAT_EXECUTION_TIMEOUT:660s}
 
 management:
   endpoints:
@@ -61,3 +63,7 @@ management:
           include: readinessState
         liveness:
           include: livenessState
+
+logging:
+  pattern:
+    level: "%5p request_id=%X{chatRequestId:-none}"

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+  <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+  <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+  <root level="INFO">
+    <appender-ref ref="CONSOLE"/>
+  </root>
+  <springProfile name="!chat-diagnostics">
+    <logger name="garmin.chat.diagnostics" level="OFF" additivity="false"/>
+  </springProfile>
+  <springProfile name="chat-diagnostics">
+    <springProperty name="diagnosticDirectory" source="garmin.chat.diagnostic-directory"
+                    defaultValue="data/chat-diagnostics"/>
+    <appender name="CHAT_DIAGNOSTICS" class="ch.qos.logback.core.rolling.RollingFileAppender">
+      <file>${diagnosticDirectory}/chat.log</file>
+      <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+        <fileNamePattern>${diagnosticDirectory}/chat.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+        <maxFileSize>5MB</maxFileSize>
+        <maxHistory>2</maxHistory>
+        <totalSizeCap>20MB</totalSizeCap>
+        <cleanHistoryOnStart>true</cleanHistoryOnStart>
+      </rollingPolicy>
+      <encoder>
+        <pattern>%date request_id=%X{chatRequestId} %msg%n</pattern>
+      </encoder>
+    </appender>
+    <logger name="garmin.chat.diagnostics" level="DEBUG" additivity="false">
+      <appender-ref ref="CHAT_DIAGNOSTICS"/>
+    </logger>
+  </springProfile>
+</configuration>

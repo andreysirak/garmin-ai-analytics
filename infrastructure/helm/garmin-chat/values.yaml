@@ -9,11 +9,14 @@ database:
   profileIdKey: profile-id
 
 chat:
+  # Local opt-in only: captures personal questions, evidence and model text in files.
+  diagnosticsEnabled: false
   timezone: Europe/Oslo
   responseTokens: 1024
   maxQueryDays: 31
   # Per model call. The frontend allows two calls plus 30 seconds of overhead.
   modelTimeoutSeconds: 300
+  # executionTimeoutSeconds: 660  # Defaults to two model timeouts plus 60 seconds.
 
 frontend:
   image: garmin-chat-frontend:local

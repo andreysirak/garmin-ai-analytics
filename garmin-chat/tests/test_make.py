@@ -21,21 +21,29 @@ sys.exit(1 if fail == tool or (fail == 'helm-upgrade' and tool == 'helm' and 'up
 
 
 class ChatMakeTest(unittest.TestCase):
-    def invoke(self, missing_values=False, fail="", use_defaults=False, goal="chat-up"):
+    def invoke(self, missing_values=False, fail="", use_defaults=False, goal="chat-up",
+               port_in_use=False, chat_port=None):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             for tool in ("helm", "docker", "kind", "kubectl"):
                 executable = root / tool
                 executable.write_text(f"#!{sys.executable}\n" + FAKE_CLI)
                 executable.chmod(0o700)
+            lsof = root / "lsof"
+            lsof.write_text(f"#!/bin/sh\nexit {0 if port_in_use else 1}\n")
+            lsof.chmod(0o700)
             values = root / "values.yaml"
             if not missing_values:
                 values.write_text("ollama: {contextLength: 16384}\n")
             calls = root / "calls.jsonl"
             env = {**os.environ, "PATH": f"{root}:{os.environ['PATH']}", "CHAT_TEST_CALLS": str(calls),
                    "CHAT_TEST_FAIL": fail}
+            env.pop("CHAT_PORT", None)
             override = "CHAT_VALUES=" if use_defaults else f"CHAT_VALUES={values}"
-            result = subprocess.run(["make", "-j4", goal, override], cwd=ROOT,
+            command = ["make", "-j4", goal, override]
+            if chat_port is not None:
+                command.append(f"CHAT_PORT={chat_port}")
+            result = subprocess.run(command, cwd=ROOT,
                                     env=env, text=True, capture_output=True, check=False)
             return result, [json.loads(line) for line in calls.read_text().splitlines()] if calls.exists() else []
 
@@ -82,6 +90,20 @@ class ChatMakeTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual([call["tool"] for call in calls], ["kubectl"])
         self.assertIn("port-forward", calls[0]["args"])
+
+    def test_occupied_default_port_uses_a_free_port_after_deployment(self):
+        result, calls = self.invoke(port_in_use=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(calls[-1]["args"][-1], ":80")
+        self.assertIn("Port 5173 is in use", result.stdout)
+        self.assertIn("Forwarding from", result.stdout)
+
+    def test_explicit_port_is_forwarded_as_requested(self):
+        for port in (5173, 5174):
+            with self.subTest(port=port):
+                result, calls = self.invoke(port_in_use=True, chat_port=port)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(calls[-1]["args"][-1], f"{port}:80")
 
     def test_lint_build_and_load_failures_stop_before_deployment(self):
         for fail, expected in [("helm", ["helm"]), ("docker", ["helm", "docker"]),

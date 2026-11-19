@@ -1,0 +1,1157 @@
+{
+  "evaluation_date": "2026-11-19",
+  "pull_request": 68,
+  "issue": 66,
+  "workspace_commit": "e860bfa5dce29fc839963c56a5c48169ea9ef908",
+  "deployed_commit_verified": false,
+  "inference_started_at": "2026-11-19T11:46:24.158555+00:00",
+  "inference_finished_at": "2026-11-19T11:48:52.056505+00:00",
+  "model": "qwen2.5:1.5b-instruct-q4_K_M",
+  "model_digest": "65ec06548149b04c096a120e4a6da9d4017ea809c91734ea5631e89f96ddc57b",
+  "ollama_version": "0.40.16",
+  "generation_options": {
+    "temperature": 0.0,
+    "num_gpu": 0,
+    "num_ctx": 32768,
+    "num_predict": 1024
+  },
+  "repetitions_per_case": 3,
+  "larger_candidate_evaluated": false,
+  "provenance": "Owner-supplied local inference records; no inference or database access during repository review.",
+  "privacy": "Raw health evidence, generated explanations, request IDs and deployment identifiers omitted. No synthetic rerun has been performed.",
+  "source_files_sha256": {
+    "manifest.json": "bcebb004316673dfb8ff3a590d724d33b630f9f5bf59cbe8e607d72a09cb677c",
+    "summary.md": "9e2f001f48769a6c6a924407bd27108eb28862b15959424397fd466ed1fd9391",
+    "routing-results.jsonl": "2c56d2c0afc266b4bb3498e56fffc93b23da1e53c8d24bcf925fcc6893f4377d",
+    "explanation-results.jsonl": "a57541f13e8f44e8794559f087c654f266bc4419dba4cf5799b43e306dbd6660"
+  },
+  "stages": {
+    "routing": {
+      "calls": 27,
+      "reported_pass": 6,
+      "reported_fail": 21,
+      "latency": {
+        "median_seconds": 1.495765,
+        "p95_nearest_rank_seconds": 3.201136,
+        "min_seconds": 1.178521,
+        "max_seconds": 24.017875
+      }
+    },
+    "explanation": {
+      "calls": 18,
+      "reported_pass": 0,
+      "reported_fail": 18,
+      "latency": {
+        "median_seconds": 3.8481369999999995,
+        "p95_nearest_rank_seconds": 13.285477,
+        "min_seconds": 0.802991,
+        "max_seconds": 13.285477
+      }
+    }
+  },
+  "routing_expectations": [
+    {
+      "case_id": "R01",
+      "question": "how productive i was last week ?",
+      "expected": {
+        "route": "CLARIFY",
+        "target": "GOAL"
+      },
+      "basis": "Work output and physical activity are distinct goals."
+    },
+    {
+      "case_id": "R02",
+      "question": "Was I productive last week?",
+      "expected": {
+        "route": "CLARIFY",
+        "target": "GOAL"
+      },
+      "basis": "Productivity is ambiguous and Garmin activity is not a proxy for work."
+    },
+    {
+      "case_id": "R03",
+      "question": "How did I perform yesterday?",
+      "expected": {
+        "route": "CLARIFY",
+        "target": "GOAL"
+      },
+      "basis": "Performance and requested measurement are unspecified."
+    },
+    {
+      "case_id": "R04",
+      "question": "Do days with more physical activity tend to be followed by longer sleep?",
+      "expected": {
+        "route": "UNSUPPORTED",
+        "reason": "RELATIONSHIP"
+      },
+      "basis": "Scalar summaries cannot test a lagged relationship."
+    },
+    {
+      "case_id": "R05",
+      "question": "Does walking more lead to more sleep the following night?",
+      "expected": {
+        "route": "UNSUPPORTED",
+        "reason": "RELATIONSHIP"
+      },
+      "basis": "Scalar summaries cannot test a lagged causal relationship."
+    },
+    {
+      "case_id": "R06",
+      "question": "How many steps did I take last week?",
+      "expected": {
+        "route": "ANALYZE",
+        "selection": {
+          "metrics": [
+            "totalSteps"
+          ],
+          "aggregation": "SUM",
+          "period": {
+            "type": "LAST_WEEK"
+          }
+        }
+      },
+      "basis": "Requested total and previous calendar week are explicit."
+    },
+    {
+      "case_id": "R07",
+      "question": "What was my average resting heart rate last week?",
+      "expected": {
+        "route": "ANALYZE",
+        "selection": {
+          "metrics": [
+            "restingHeartRate"
+          ],
+          "aggregation": "AVG",
+          "period": {
+            "type": "LAST_WEEK"
+          }
+        }
+      },
+      "basis": "Daily resting heart rate AVG and previous calendar week are supported."
+    },
+    {
+      "case_id": "R08",
+      "question": "Average resting heart rate?",
+      "expected": {
+        "route": "CLARIFY",
+        "target": "PERIOD"
+      },
+      "basis": "Metric and operation are stated; time period is absent."
+    },
+    {
+      "case_id": "R09",
+      "question": "What was my sleep quality last week?",
+      "expected": {
+        "route": "UNSUPPORTED",
+        "reason": "UNSUPPORTED_METRIC"
+      },
+      "basis": "Recorded daily-summary sleep duration does not measure quality."
+    }
+  ],
+  "routing_results": [
+    {
+      "case_id": "R01",
+      "repetition": 1,
+      "http_status": 200,
+      "wall_seconds": 24.017875,
+      "parsed_decision": {
+        "route": "ANALYZE",
+        "selection": {
+          "aggregation": "AVG",
+          "metrics": [
+            "totalSteps"
+          ],
+          "period": {
+            "type": "LAST_WEEK"
+          }
+        }
+      },
+      "reported_grade": "FAIL",
+      "failure_class": "semantic_mismatch"
+    },
+    {
+      "case_id": "R01",
+      "repetition": 2,
+      "http_status": 200,
+      "wall_seconds": 1.178521,
+      "parsed_decision": {
+        "route": "ANALYZE",
+        "selection": {
+          "aggregation": "AVG",
+          "metrics": [
+            "totalSteps"
+          ],
+          "period": {
+            "type": "LAST_WEEK"
+          }
+        }
+      },
+      "reported_grade": "FAIL",
+      "failure_class": "semantic_mismatch"
+    },
+    {
+      "case_id": "R01",
+      "repetition": 3,
+      "http_status": 200,
+      "wall_seconds": 1.400226,
+      "parsed_decision": {
+        "route": "ANALYZE",
+        "selection": {
+          "aggregation": "AVG",
+          "metrics": [
+            "totalSteps"
+          ],
+          "period": {
+            "type": "LAST_WEEK"
+          }
+        }
+      },
+      "reported_grade": "FAIL",
+      "failure_class": "semantic_mismatch"
+    },
+    {
+      "case_id": "R02",
+      "repetition": 1,
+      "http_status": 200,
+      "wall_seconds": 1.495765,
+      "parsed_decision": {
+        "route": "ANALYZE",
+        "selection": {
+          "aggregation": "SUM",
+          "metrics": [
+            "totalSteps"
+          ],
+          "period": {
+            "type": "LAST_WEEK"
+          }
+        }
+      },
+      "reported_grade": "FAIL",
+      "failure_class": "semantic_mismatch"
+    },
+    {
+      "case_id": "R02",
+      "repetition": 2,
+      "http_status": 200,
+      "wall_seconds": 1.219741,
+      "parsed_decision": {
+        "route": "ANALYZE",
+        "selection": {
+          "aggregation": "SUM",
+          "metrics": [
+            "totalSteps"
+          ],
+          "period": {
+            "type": "LAST_WEEK"
+          }
+        }
+      },
+      "reported_grade": "FAIL",
+      "failure_class": "semantic_mismatch"
+    },
+    {
+      "case_id": "R02",
+      "repetition": 3,
+      "http_status": 200,
+      "wall_seconds": 1.292524,
+      "parsed_decision": {
+        "route": "ANALYZE",
+        "selection": {
+          "aggregation": "SUM",
+          "metrics": [
+            "totalSteps"
+          ],
+          "period": {
+            "type": "LAST_WEEK"
+          }
+        }
+      },
+      "reported_grade": "FAIL",
+      "failure_class": "semantic_mismatch"
+    },
+    {
+      "case_id": "R03",
+      "repetition": 1,
+      "http_status": 200,
+      "wall_seconds": 1.383465,
+      "parsed_decision": {
+        "route": "ANALYZE",
+        "selection": {
+          "aggregation": "SUM",
+          "metrics": [
+            "totalSteps"
+          ],
+          "period": {
+            "type": "YESTERDAY"
+          }
+        }
+      },
+      "reported_grade": "FAIL",
+      "failure_class": "semantic_mismatch"
+    },
+    {
+      "case_id": "R03",
+      "repetition": 2,
+      "http_status": 200,
+      "wall_seconds": 1.307427,
+      "parsed_decision": {
+        "route": "ANALYZE",
+        "selection": {
+          "aggregation": "SUM",
+          "metrics": [
+            "totalSteps"
+          ],
+          "period": {
+            "type": "YESTERDAY"
+          }
+        }
+      },
+      "reported_grade": "FAIL",
+      "failure_class": "semantic_mismatch"
+    },
+    {
+      "case_id": "R03",
+      "repetition": 3,
+      "http_status": 200,
+      "wall_seconds": 3.091676,
+      "parsed_decision": {
+        "route": "ANALYZE",
+        "selection": {
+          "aggregation": "SUM",
+          "metrics": [
+            "totalSteps"
+          ],
+          "period": {
+            "type": "YESTERDAY"
+          }
+        }
+      },
+      "reported_grade": "FAIL",
+      "failure_class": "semantic_mismatch"
+    },
+    {
+      "case_id": "R04",
+      "repetition": 1,
+      "http_status": 200,
+      "wall_seconds": 1.989441,
+      "parsed_decision": {
+        "route": "ANALYZE",
+        "selection": {
+          "aggregation": "AVG",
+          "metrics": [
+            "sleepingSeconds"
+          ],
+          "period": {
+            "type": "LAST_N_DAYS",
+            "days": 31
+          }
+        }
+      },
+      "reported_grade": "FAIL",
+      "failure_class": "semantic_mismatch"
+    },
+    {
+      "case_id": "R04",
+      "repetition": 2,
+      "http_status": 200,
+      "wall_seconds": 1.729479,
+      "parsed_decision": {
+        "route": "ANALYZE",
+        "selection": {
+          "aggregation": "AVG",
+          "metrics": [
+            "sleepingSeconds"
+          ],
+          "period": {
+            "type": "LAST_N_DAYS",
+            "days": 31
+          }
+        }
+      },
+      "reported_grade": "FAIL",
+      "failure_class": "semantic_mismatch"
+    },
+    {
+      "case_id": "R04",
+      "repetition": 3,
+      "http_status": 200,
+      "wall_seconds": 1.58571,
+      "parsed_decision": {
+        "route": "ANALYZE",
+        "selection": {
+          "aggregation": "AVG",
+          "metrics": [
+            "sleepingSeconds"
+          ],
+          "period": {
+            "type": "LAST_N_DAYS",
+            "days": 31
+          }
+        }
+      },
+      "reported_grade": "FAIL",
+      "failure_class": "semantic_mismatch"
+    },
+    {
+      "case_id": "R05",
+      "repetition": 1,
+      "http_status": 200,
+      "wall_seconds": 1.689084,
+      "parsed_decision": {
+        "route": "ANALYZE",
+        "selection": {
+          "aggregation": "AVG",
+          "metrics": [
+            "sleepingSeconds"
+          ],
+          "period": {
+            "type": "YESTERDAY"
+          }
+        }
+      },
+      "reported_grade": "FAIL",
+      "failure_class": "semantic_mismatch"
+    },
+    {
+      "case_id": "R05",
+      "repetition": 2,
+      "http_status": 200,
+      "wall_seconds": 1.202433,
+      "parsed_decision": {
+        "route": "ANALYZE",
+        "selection": {
+          "aggregation": "SUM",
+          "metrics": [
+            "totalSteps"
+          ],
+          "period": {
+            "type": "YESTERDAY"
+          }
+        }
+      },
+      "reported_grade": "FAIL",
+      "failure_class": "semantic_mismatch"
+    },
+    {
+      "case_id": "R05",
+      "repetition": 3,
+      "http_status": 200,
+      "wall_seconds": 1.394407,
+      "parsed_decision": {
+        "route": "ANALYZE",
+        "selection": {
+          "aggregation": "SUM",
+          "metrics": [
+            "totalSteps"
+          ],
+          "period": {
+            "type": "YESTERDAY"
+          }
+        }
+      },
+      "reported_grade": "FAIL",
+      "failure_class": "semantic_mismatch"
+    },
+    {
+      "case_id": "R06",
+      "repetition": 1,
+      "http_status": 200,
+      "wall_seconds": 1.322388,
+      "parsed_decision": {
+        "route": "ANALYZE",
+        "selection": {
+          "aggregation": "SUM",
+          "metrics": [
+            "totalSteps"
+          ],
+          "period": {
+            "type": "LAST_WEEK"
+          }
+        }
+      },
+      "reported_grade": "PASS",
+      "failure_class": null
+    },
+    {
+      "case_id": "R06",
+      "repetition": 2,
+      "http_status": 200,
+      "wall_seconds": 1.68324,
+      "parsed_decision": {
+        "route": "ANALYZE",
+        "selection": {
+          "aggregation": "SUM",
+          "metrics": [
+            "totalSteps"
+          ],
+          "period": {
+            "type": "LAST_WEEK"
+          }
+        }
+      },
+      "reported_grade": "PASS",
+      "failure_class": null
+    },
+    {
+      "case_id": "R06",
+      "repetition": 3,
+      "http_status": 200,
+      "wall_seconds": 1.391474,
+      "parsed_decision": {
+        "route": "ANALYZE",
+        "selection": {
+          "aggregation": "SUM",
+          "metrics": [
+            "totalSteps"
+          ],
+          "period": {
+            "type": "LAST_WEEK"
+          }
+        }
+      },
+      "reported_grade": "PASS",
+      "failure_class": null
+    },
+    {
+      "case_id": "R07",
+      "repetition": 1,
+      "http_status": 200,
+      "wall_seconds": 1.736283,
+      "parsed_decision": {
+        "route": "ANALYZE",
+        "selection": {
+          "aggregation": "AVG",
+          "metrics": [
+            "restingHeartRate"
+          ],
+          "period": {
+            "type": "LAST_WEEK"
+          }
+        }
+      },
+      "reported_grade": "PASS",
+      "failure_class": null
+    },
+    {
+      "case_id": "R07",
+      "repetition": 2,
+      "http_status": 200,
+      "wall_seconds": 1.371091,
+      "parsed_decision": {
+        "route": "ANALYZE",
+        "selection": {
+          "aggregation": "AVG",
+          "metrics": [
+            "restingHeartRate"
+          ],
+          "period": {
+            "type": "LAST_WEEK"
+          }
+        }
+      },
+      "reported_grade": "PASS",
+      "failure_class": null
+    },
+    {
+      "case_id": "R07",
+      "repetition": 3,
+      "http_status": 200,
+      "wall_seconds": 3.201136,
+      "parsed_decision": {
+        "route": "ANALYZE",
+        "selection": {
+          "aggregation": "AVG",
+          "metrics": [
+            "restingHeartRate"
+          ],
+          "period": {
+            "type": "LAST_WEEK"
+          }
+        }
+      },
+      "reported_grade": "PASS",
+      "failure_class": null
+    },
+    {
+      "case_id": "R08",
+      "repetition": 1,
+      "http_status": 200,
+      "wall_seconds": 1.926103,
+      "parsed_decision": {
+        "route": "ANALYZE",
+        "selection": {
+          "aggregation": "AVG",
+          "metrics": [
+            "restingHeartRate"
+          ],
+          "period": {
+            "type": "LAST_N_DAYS",
+            "days": 30
+          }
+        }
+      },
+      "reported_grade": "FAIL",
+      "failure_class": "semantic_mismatch"
+    },
+    {
+      "case_id": "R08",
+      "repetition": 2,
+      "http_status": 200,
+      "wall_seconds": 1.593615,
+      "parsed_decision": {
+        "route": "ANALYZE",
+        "selection": {
+          "aggregation": "AVG",
+          "metrics": [
+            "restingHeartRate"
+          ],
+          "period": {
+            "type": "LAST_N_DAYS",
+            "days": 31
+          }
+        }
+      },
+      "reported_grade": "FAIL",
+      "failure_class": "semantic_mismatch"
+    },
+    {
+      "case_id": "R08",
+      "repetition": 3,
+      "http_status": 200,
+      "wall_seconds": 1.656432,
+      "parsed_decision": {
+        "route": "ANALYZE",
+        "selection": {
+          "aggregation": "AVG",
+          "metrics": [
+            "restingHeartRate"
+          ],
+          "period": {
+            "type": "LAST_N_DAYS",
+            "days": 31
+          }
+        }
+      },
+      "reported_grade": "FAIL",
+      "failure_class": "semantic_mismatch"
+    },
+    {
+      "case_id": "R09",
+      "repetition": 1,
+      "http_status": 200,
+      "wall_seconds": 1.546146,
+      "parsed_decision": {
+        "route": "ANALYZE",
+        "selection": {
+          "aggregation": "AVG",
+          "metrics": [
+            "sleepingSeconds"
+          ],
+          "period": {
+            "type": "LAST_WEEK"
+          }
+        }
+      },
+      "reported_grade": "FAIL",
+      "failure_class": "semantic_mismatch"
+    },
+    {
+      "case_id": "R09",
+      "repetition": 2,
+      "http_status": 200,
+      "wall_seconds": 1.294271,
+      "parsed_decision": {
+        "route": "ANALYZE",
+        "selection": {
+          "aggregation": "AVG",
+          "metrics": [
+            "sleepingSeconds"
+          ],
+          "period": {
+            "type": "LAST_WEEK"
+          }
+        }
+      },
+      "reported_grade": "FAIL",
+      "failure_class": "semantic_mismatch"
+    },
+    {
+      "case_id": "R09",
+      "repetition": 3,
+      "http_status": 200,
+      "wall_seconds": 1.485659,
+      "parsed_decision": {
+        "route": "ANALYZE",
+        "selection": {
+          "aggregation": "AVG",
+          "metrics": [
+            "sleepingSeconds"
+          ],
+          "period": {
+            "type": "LAST_WEEK"
+          }
+        }
+      },
+      "reported_grade": "FAIL",
+      "failure_class": "semantic_mismatch"
+    }
+  ],
+  "explanation_results": [
+    {
+      "case_id": "E01-original",
+      "evidence_id": "E01",
+      "question_kind": "original",
+      "repetition": 1,
+      "http_status": 200,
+      "wall_seconds": 10.708383,
+      "reported_grade": "FAIL",
+      "reported_checks": {
+        "response_complete": "PASS",
+        "no_tool_calls": "PASS",
+        "dates": "FAIL",
+        "value_and_unit": "NEEDS_REVIEW",
+        "aggregation": "PASS",
+        "numeric_reading_coverage": "FAIL",
+        "missingSummaryDays": "NEEDS_REVIEW",
+        "missingMetricDays": "NOT_APPLICABLE",
+        "nullMetricDays": "FAIL",
+        "invalidTypeDays": "FAIL",
+        "partial_sum": "NOT_APPLICABLE",
+        "original_question_limitation": "PASS",
+        "invented_numbers": "NEEDS_REVIEW",
+        "invented_targets_groups_or_claims": "FAIL"
+      }
+    },
+    {
+      "case_id": "E01-original",
+      "evidence_id": "E01",
+      "question_kind": "original",
+      "repetition": 2,
+      "http_status": 200,
+      "wall_seconds": 4.479097,
+      "reported_grade": "FAIL",
+      "reported_checks": {
+        "response_complete": "PASS",
+        "no_tool_calls": "PASS",
+        "dates": "FAIL",
+        "value_and_unit": "PASS",
+        "aggregation": "PASS",
+        "numeric_reading_coverage": "NEEDS_REVIEW",
+        "missingSummaryDays": "FAIL",
+        "missingMetricDays": "NOT_APPLICABLE",
+        "nullMetricDays": "FAIL",
+        "invalidTypeDays": "NOT_APPLICABLE",
+        "partial_sum": "NOT_APPLICABLE",
+        "original_question_limitation": "FAIL",
+        "invented_numbers": "PASS",
+        "invented_targets_groups_or_claims": "FAIL"
+      }
+    },
+    {
+      "case_id": "E01-original",
+      "evidence_id": "E01",
+      "question_kind": "original",
+      "repetition": 3,
+      "http_status": 200,
+      "wall_seconds": 2.696999,
+      "reported_grade": "FAIL",
+      "reported_checks": {
+        "response_complete": "PASS",
+        "no_tool_calls": "PASS",
+        "dates": "FAIL",
+        "value_and_unit": "PASS",
+        "aggregation": "PASS",
+        "numeric_reading_coverage": "NEEDS_REVIEW",
+        "missingSummaryDays": "FAIL",
+        "missingMetricDays": "NOT_APPLICABLE",
+        "nullMetricDays": "FAIL",
+        "invalidTypeDays": "NOT_APPLICABLE",
+        "partial_sum": "NOT_APPLICABLE",
+        "original_question_limitation": "FAIL",
+        "invented_numbers": "PASS",
+        "invented_targets_groups_or_claims": "FAIL"
+      }
+    },
+    {
+      "case_id": "E01-matching",
+      "evidence_id": "E01",
+      "question_kind": "matching",
+      "repetition": 1,
+      "http_status": 200,
+      "wall_seconds": 2.014781,
+      "reported_grade": "FAIL",
+      "reported_checks": {
+        "response_complete": "PASS",
+        "no_tool_calls": "PASS",
+        "dates": "PASS",
+        "value_and_unit": "PASS",
+        "aggregation": "PASS",
+        "numeric_reading_coverage": "NEEDS_REVIEW",
+        "missingSummaryDays": "FAIL",
+        "missingMetricDays": "NOT_APPLICABLE",
+        "nullMetricDays": "FAIL",
+        "invalidTypeDays": "NOT_APPLICABLE",
+        "partial_sum": "NOT_APPLICABLE",
+        "original_question_limitation": "NOT_APPLICABLE",
+        "invented_numbers": "PASS",
+        "invented_targets_groups_or_claims": "PASS"
+      }
+    },
+    {
+      "case_id": "E01-matching",
+      "evidence_id": "E01",
+      "question_kind": "matching",
+      "repetition": 2,
+      "http_status": 200,
+      "wall_seconds": 13.285477,
+      "reported_grade": "FAIL",
+      "reported_checks": {
+        "response_complete": "PASS",
+        "no_tool_calls": "PASS",
+        "dates": "PASS",
+        "value_and_unit": "PASS",
+        "aggregation": "PASS",
+        "numeric_reading_coverage": "NEEDS_REVIEW",
+        "missingSummaryDays": "NEEDS_REVIEW",
+        "missingMetricDays": "NOT_APPLICABLE",
+        "nullMetricDays": "FAIL",
+        "invalidTypeDays": "NOT_APPLICABLE",
+        "partial_sum": "NOT_APPLICABLE",
+        "original_question_limitation": "NOT_APPLICABLE",
+        "invented_numbers": "PASS",
+        "invented_targets_groups_or_claims": "PASS"
+      }
+    },
+    {
+      "case_id": "E01-matching",
+      "evidence_id": "E01",
+      "question_kind": "matching",
+      "repetition": 3,
+      "http_status": 200,
+      "wall_seconds": 5.236222,
+      "reported_grade": "FAIL",
+      "reported_checks": {
+        "response_complete": "PASS",
+        "no_tool_calls": "PASS",
+        "dates": "PASS",
+        "value_and_unit": "PASS",
+        "aggregation": "PASS",
+        "numeric_reading_coverage": "NEEDS_REVIEW",
+        "missingSummaryDays": "NEEDS_REVIEW",
+        "missingMetricDays": "NOT_APPLICABLE",
+        "nullMetricDays": "FAIL",
+        "invalidTypeDays": "NOT_APPLICABLE",
+        "partial_sum": "NOT_APPLICABLE",
+        "original_question_limitation": "NOT_APPLICABLE",
+        "invented_numbers": "PASS",
+        "invented_targets_groups_or_claims": "PASS"
+      }
+    },
+    {
+      "case_id": "E02-original",
+      "evidence_id": "E02",
+      "question_kind": "original",
+      "repetition": 1,
+      "http_status": 200,
+      "wall_seconds": 6.692553,
+      "reported_grade": "FAIL",
+      "reported_checks": {
+        "response_complete": "PASS",
+        "no_tool_calls": "PASS",
+        "dates": "FAIL",
+        "value_and_unit": "FAIL",
+        "aggregation": "PASS",
+        "numeric_reading_coverage": "NEEDS_REVIEW",
+        "missingSummaryDays": "FAIL",
+        "missingMetricDays": "NOT_APPLICABLE",
+        "nullMetricDays": "FAIL",
+        "invalidTypeDays": "NOT_APPLICABLE",
+        "partial_sum": "NOT_APPLICABLE",
+        "original_question_limitation": "FAIL",
+        "invented_numbers": "FAIL",
+        "invented_targets_groups_or_claims": "FAIL"
+      }
+    },
+    {
+      "case_id": "E02-original",
+      "evidence_id": "E02",
+      "question_kind": "original",
+      "repetition": 2,
+      "http_status": 200,
+      "wall_seconds": 5.681213,
+      "reported_grade": "FAIL",
+      "reported_checks": {
+        "response_complete": "PASS",
+        "no_tool_calls": "PASS",
+        "dates": "FAIL",
+        "value_and_unit": "FAIL",
+        "aggregation": "PASS",
+        "numeric_reading_coverage": "NEEDS_REVIEW",
+        "missingSummaryDays": "FAIL",
+        "missingMetricDays": "NOT_APPLICABLE",
+        "nullMetricDays": "FAIL",
+        "invalidTypeDays": "NOT_APPLICABLE",
+        "partial_sum": "NOT_APPLICABLE",
+        "original_question_limitation": "FAIL",
+        "invented_numbers": "NEEDS_REVIEW",
+        "invented_targets_groups_or_claims": "FAIL"
+      }
+    },
+    {
+      "case_id": "E02-original",
+      "evidence_id": "E02",
+      "question_kind": "original",
+      "repetition": 3,
+      "http_status": 200,
+      "wall_seconds": 3.586343,
+      "reported_grade": "FAIL",
+      "reported_checks": {
+        "response_complete": "PASS",
+        "no_tool_calls": "PASS",
+        "dates": "FAIL",
+        "value_and_unit": "FAIL",
+        "aggregation": "PASS",
+        "numeric_reading_coverage": "NEEDS_REVIEW",
+        "missingSummaryDays": "FAIL",
+        "missingMetricDays": "NOT_APPLICABLE",
+        "nullMetricDays": "FAIL",
+        "invalidTypeDays": "NOT_APPLICABLE",
+        "partial_sum": "NOT_APPLICABLE",
+        "original_question_limitation": "FAIL",
+        "invented_numbers": "NEEDS_REVIEW",
+        "invented_targets_groups_or_claims": "FAIL"
+      }
+    },
+    {
+      "case_id": "E02-matching",
+      "evidence_id": "E02",
+      "question_kind": "matching",
+      "repetition": 1,
+      "http_status": 200,
+      "wall_seconds": 4.109931,
+      "reported_grade": "FAIL",
+      "reported_checks": {
+        "response_complete": "PASS",
+        "no_tool_calls": "PASS",
+        "dates": "PASS",
+        "value_and_unit": "FAIL",
+        "aggregation": "PASS",
+        "numeric_reading_coverage": "NEEDS_REVIEW",
+        "missingSummaryDays": "FAIL",
+        "missingMetricDays": "NOT_APPLICABLE",
+        "nullMetricDays": "FAIL",
+        "invalidTypeDays": "NEEDS_REVIEW",
+        "partial_sum": "NOT_APPLICABLE",
+        "original_question_limitation": "NOT_APPLICABLE",
+        "invented_numbers": "NEEDS_REVIEW",
+        "invented_targets_groups_or_claims": "PASS"
+      }
+    },
+    {
+      "case_id": "E02-matching",
+      "evidence_id": "E02",
+      "question_kind": "matching",
+      "repetition": 2,
+      "http_status": 200,
+      "wall_seconds": 5.317562,
+      "reported_grade": "FAIL",
+      "reported_checks": {
+        "response_complete": "PASS",
+        "no_tool_calls": "PASS",
+        "dates": "PASS",
+        "value_and_unit": "FAIL",
+        "aggregation": "PASS",
+        "numeric_reading_coverage": "NEEDS_REVIEW",
+        "missingSummaryDays": "FAIL",
+        "missingMetricDays": "NOT_APPLICABLE",
+        "nullMetricDays": "FAIL",
+        "invalidTypeDays": "NEEDS_REVIEW",
+        "partial_sum": "NOT_APPLICABLE",
+        "original_question_limitation": "NOT_APPLICABLE",
+        "invented_numbers": "FAIL",
+        "invented_targets_groups_or_claims": "PASS"
+      }
+    },
+    {
+      "case_id": "E02-matching",
+      "evidence_id": "E02",
+      "question_kind": "matching",
+      "repetition": 3,
+      "http_status": 200,
+      "wall_seconds": 6.288818,
+      "reported_grade": "FAIL",
+      "reported_checks": {
+        "response_complete": "PASS",
+        "no_tool_calls": "PASS",
+        "dates": "PASS",
+        "value_and_unit": "FAIL",
+        "aggregation": "PASS",
+        "numeric_reading_coverage": "NEEDS_REVIEW",
+        "missingSummaryDays": "FAIL",
+        "missingMetricDays": "NOT_APPLICABLE",
+        "nullMetricDays": "FAIL",
+        "invalidTypeDays": "NEEDS_REVIEW",
+        "partial_sum": "NOT_APPLICABLE",
+        "original_question_limitation": "NOT_APPLICABLE",
+        "invented_numbers": "FAIL",
+        "invented_targets_groups_or_claims": "PASS"
+      }
+    },
+    {
+      "case_id": "E03-original",
+      "evidence_id": "E03",
+      "question_kind": "original",
+      "repetition": 1,
+      "http_status": 200,
+      "wall_seconds": 3.518092,
+      "reported_grade": "FAIL",
+      "reported_checks": {
+        "response_complete": "PASS",
+        "no_tool_calls": "PASS",
+        "dates": "FAIL",
+        "value_and_unit": "PASS",
+        "aggregation": "NEEDS_REVIEW",
+        "numeric_reading_coverage": "NEEDS_REVIEW",
+        "missingSummaryDays": "FAIL",
+        "missingMetricDays": "NOT_APPLICABLE",
+        "nullMetricDays": "FAIL",
+        "invalidTypeDays": "NOT_APPLICABLE",
+        "partial_sum": "FAIL",
+        "original_question_limitation": "NOT_APPLICABLE",
+        "invented_numbers": "PASS",
+        "invented_targets_groups_or_claims": "PASS"
+      }
+    },
+    {
+      "case_id": "E03-original",
+      "evidence_id": "E03",
+      "question_kind": "original",
+      "repetition": 2,
+      "http_status": 200,
+      "wall_seconds": 0.948622,
+      "reported_grade": "FAIL",
+      "reported_checks": {
+        "response_complete": "PASS",
+        "no_tool_calls": "PASS",
+        "dates": "FAIL",
+        "value_and_unit": "PASS",
+        "aggregation": "NEEDS_REVIEW",
+        "numeric_reading_coverage": "NEEDS_REVIEW",
+        "missingSummaryDays": "FAIL",
+        "missingMetricDays": "NOT_APPLICABLE",
+        "nullMetricDays": "FAIL",
+        "invalidTypeDays": "NOT_APPLICABLE",
+        "partial_sum": "FAIL",
+        "original_question_limitation": "NOT_APPLICABLE",
+        "invented_numbers": "PASS",
+        "invented_targets_groups_or_claims": "PASS"
+      }
+    },
+    {
+      "case_id": "E03-original",
+      "evidence_id": "E03",
+      "question_kind": "original",
+      "repetition": 3,
+      "http_status": 200,
+      "wall_seconds": 0.802991,
+      "reported_grade": "FAIL",
+      "reported_checks": {
+        "response_complete": "PASS",
+        "no_tool_calls": "PASS",
+        "dates": "FAIL",
+        "value_and_unit": "PASS",
+        "aggregation": "NEEDS_REVIEW",
+        "numeric_reading_coverage": "NEEDS_REVIEW",
+        "missingSummaryDays": "FAIL",
+        "missingMetricDays": "NOT_APPLICABLE",
+        "nullMetricDays": "FAIL",
+        "invalidTypeDays": "NOT_APPLICABLE",
+        "partial_sum": "FAIL",
+        "original_question_limitation": "NOT_APPLICABLE",
+        "invented_numbers": "PASS",
+        "invented_targets_groups_or_claims": "PASS"
+      }
+    },
+    {
+      "case_id": "E03-matching",
+      "evidence_id": "E03",
+      "question_kind": "matching",
+      "repetition": 1,
+      "http_status": 200,
+      "wall_seconds": 2.524943,
+      "reported_grade": "FAIL",
+      "reported_checks": {
+        "response_complete": "PASS",
+        "no_tool_calls": "PASS",
+        "dates": "PASS",
+        "value_and_unit": "PASS",
+        "aggregation": "PASS",
+        "numeric_reading_coverage": "NEEDS_REVIEW",
+        "missingSummaryDays": "FAIL",
+        "missingMetricDays": "NOT_APPLICABLE",
+        "nullMetricDays": "FAIL",
+        "invalidTypeDays": "NOT_APPLICABLE",
+        "partial_sum": "FAIL",
+        "original_question_limitation": "NOT_APPLICABLE",
+        "invented_numbers": "PASS",
+        "invented_targets_groups_or_claims": "PASS"
+      }
+    },
+    {
+      "case_id": "E03-matching",
+      "evidence_id": "E03",
+      "question_kind": "matching",
+      "repetition": 2,
+      "http_status": 200,
+      "wall_seconds": 1.796822,
+      "reported_grade": "FAIL",
+      "reported_checks": {
+        "response_complete": "PASS",
+        "no_tool_calls": "PASS",
+        "dates": "PASS",
+        "value_and_unit": "PASS",
+        "aggregation": "PASS",
+        "numeric_reading_coverage": "NEEDS_REVIEW",
+        "missingSummaryDays": "FAIL",
+        "missingMetricDays": "NOT_APPLICABLE",
+        "nullMetricDays": "FAIL",
+        "invalidTypeDays": "NOT_APPLICABLE",
+        "partial_sum": "FAIL",
+        "original_question_limitation": "NOT_APPLICABLE",
+        "invented_numbers": "PASS",
+        "invented_targets_groups_or_claims": "PASS"
+      }
+    },
+    {
+      "case_id": "E03-matching",
+      "evidence_id": "E03",
+      "question_kind": "matching",
+      "repetition": 3,
+      "http_status": 200,
+      "wall_seconds": 1.682151,
+      "reported_grade": "FAIL",
+      "reported_checks": {
+        "response_complete": "PASS",
+        "no_tool_calls": "PASS",
+        "dates": "PASS",
+        "value_and_unit": "PASS",
+        "aggregation": "PASS",
+        "numeric_reading_coverage": "NEEDS_REVIEW",
+        "missingSummaryDays": "FAIL",
+        "missingMetricDays": "NOT_APPLICABLE",
+        "nullMetricDays": "FAIL",
+        "invalidTypeDays": "NOT_APPLICABLE",
+        "partial_sum": "FAIL",
+        "original_question_limitation": "NOT_APPLICABLE",
+        "invented_numbers": "PASS",
+        "invented_targets_groups_or_claims": "PASS"
+      }
+    }
+  ],
+  "grading_caveats": [
+    "Reported checks are collector annotations, not independently validated ground truth.",
+    "At least one productivity response incorrectly received PASS for acknowledging an unsupported question.",
+    "Exact-number and date-presence requirements contribute to failures; omission or rounding alone is not fabricated evidence.",
+    "Three repeated runs of each question do not represent three independent semantic cases."
+  ]
+}

@@ -1,10 +1,11 @@
-package com.garmin.analytics.chat.repository;
+package com.garmin.analytics.chat.repository.impl;
 
 import com.garmin.analytics.chat.config.GarminChatProperties;
-import com.garmin.analytics.chat.model.DataCoverage;
 import com.garmin.analytics.chat.model.DailySummary;
+import com.garmin.analytics.chat.model.DataCoverage;
 import com.garmin.analytics.chat.model.MetricAggregation;
 import com.garmin.analytics.chat.model.QueryIntent;
+import com.garmin.analytics.chat.repository.DailySummaryRepository;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.sql.Date;
@@ -20,14 +21,14 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 @Repository
-public class PostgresDailySummaryRepository implements DailySummaryRepository {
+public class DailySummaryRepositoryPostgresImpl implements DailySummaryRepository {
 
   private final NamedParameterJdbcTemplate jdbc;
   private final String query;
   private final String aggregationQuery;
   private final GarminChatProperties properties;
 
-  public PostgresDailySummaryRepository(
+  public DailySummaryRepositoryPostgresImpl(
       NamedParameterJdbcTemplate jdbc,
       @Value("classpath:sql/daily-summaries.sql") Resource query,
       @Value("classpath:sql/metric-aggregation.sql") Resource aggregationQuery,

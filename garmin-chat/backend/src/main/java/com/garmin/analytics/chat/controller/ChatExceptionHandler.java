@@ -1,6 +1,8 @@
 package com.garmin.analytics.chat.controller;
 
-import com.garmin.analytics.chat.ai.ChatModelUnavailableException;
+import com.garmin.analytics.chat.ai.exception.ChatModelUnavailableException;
+import com.garmin.analytics.chat.execution.exception.ChatRequestInterruptedException;
+import com.garmin.analytics.chat.execution.exception.ChatRequestTimeoutException;
 import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
@@ -10,7 +12,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
-@RestControllerAdvice
+@RestControllerAdvice(assignableTypes = GarminChatController.class)
 public class ChatExceptionHandler {
 
   @ExceptionHandler({MethodArgumentNotValidException.class, HttpMessageNotReadableException.class})
@@ -19,11 +21,18 @@ public class ChatExceptionHandler {
         HttpStatus.BAD_REQUEST, "Provide a nonblank message in a JSON object.");
   }
 
-  @ExceptionHandler(ChatModelUnavailableException.class)
-  public ResponseEntity<ProblemDetail> modelUnavailable(ChatModelUnavailableException failure) {
+  @ExceptionHandler({ChatModelUnavailableException.class, ChatRequestTimeoutException.class,
+      ChatRequestInterruptedException.class})
+  public ResponseEntity<ProblemDetail> chatUnavailable(RuntimeException failure) {
     return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).header("Retry-After", "10")
         .body(ProblemDetail.forStatusAndDetail(
             HttpStatus.SERVICE_UNAVAILABLE, failure.getMessage()));
+  }
+
+  @ExceptionHandler(RuntimeException.class)
+  public ProblemDetail unexpectedError(RuntimeException failure) {
+    return ProblemDetail.forStatusAndDetail(HttpStatus.INTERNAL_SERVER_ERROR,
+        "The chat request could not be completed.");
   }
 
   @ExceptionHandler(DataAccessException.class)

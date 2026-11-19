@@ -88,7 +88,8 @@ recorded metrics; medical interpretation and AI health advice remain out of scop
 For the Spring Boot + Spring AI + Ollama + React text demo in the existing kind
 cluster, see [Garmin chat](garmin-chat/README.md). `make chat-up` builds and loads
 the app images, deploys the chat Helm chart, initializes its model cache, and
-forwards the frontend to http://127.0.0.1:5173 in the same terminal.
+forwards the frontend to http://127.0.0.1:5173 in the same terminal. If the default
+port is occupied, open the address printed by `kubectl` on the `Forwarding from` line.
 The demo interprets supported metrics, aggregations and dates from natural
 questions. PostgreSQL calculates results through a read-only account for the
 server-selected profile; Ollama explains compact evidence without raw summaries.
@@ -505,6 +506,7 @@ Interested in Java, Python, Airflow, Kubernetes, or data engineering? Contributi
 - [Contributing, Story/Task workflow and PR review standards](CONTRIBUTING.md)
 - [Garmin API integration retrospective](docs/retrospectives/0001-garmin-api-integration.md)
 - [AI chat integration retrospective (PR #57)](docs/retrospectives/0002-ai-chat-integration.md)
+- [Garmin chat controlled evaluation — 19 November 2026 (PR #68)](docs/evaluations/2026-11-19-garmin-chat/README.md)
 - [Changelog](CHANGELOG.md)
 
 ## Project philosophy

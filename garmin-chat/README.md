@@ -7,21 +7,29 @@ The backend uses the existing analytics PostgreSQL Service and internal Ollama
 Service on 11434. No cluster recreation or existing Airflow/database changes
 are required.
 
-A normal question follows this flow:
+The first Spring AI call sends Ollama the question, the metric catalog and the
+server's reference date and timezone. Ollama returns a schema-constrained
+`ANALYZE`, `CLARIFY`, or `UNSUPPORTED` decision. Java validates the decision.
+Clarification and unsupported requests finish without a tool call or database
+access.
 
-1. Ollama interprets the question as metrics, an aggregation and a period.
-2. Java validates the intent and resolves dates using an injected Clock/timezone.
-3. Fixed parameterized SQL calculates values and coverage for the server profile.
-4. A conservative check verifies the complete explanation request fits its context.
-5. The same Ollama model explains compact evidence alongside the original question.
+For `ANALYZE`, Java executes the validated metric, calculation and period once
+through the analytics service. The fixed SQL returns compact values and coverage
+for the server profile. Only then does Spring AI ask the model to explain the
+verified evidence. The model cannot skip the query or change its parameters in
+a second tool call. A successful query with no numeric data yields an explicit
+no-data response without another inference call.
 
-Raw daily summaries and profile identifiers are never sent to either model call.
-Clarification, unsupported questions and periods without numeric data return
-application-authored messages without an explanation call.
+Routing is still model-generated: schema-valid JSON does not prove the selected
+calculation answers the question. Verify routing quality with the configured
+model before considering a demo ready. The prompt includes examples of ambiguous
+goals and unsupported relationships; there are no question-specific Java rules.
 
-Questions are independent. Memory, charts, model-generated SQL, tools, MCP and
-RAG remain deferred. Dates come from the question; a week is a demo example,
-not a fixed query window. Missing dates trigger clarification before any query.
+Questions are independent. Resend the full question after a clarification.
+Raw daily summaries and profile IDs stay on the server.
+
+See [request diagnostics and the repeatable model evaluation](docs/chat-diagnostics.md)
+for the opt-in local trace mode and the #66 verification checklist.
 
 ## Configuration and prerequisites
 
@@ -43,7 +51,8 @@ Local backend development supplies that environment variable directly.
 | `chat.timezone` | `Europe/Oslo`; IANA timezone for relative dates |
 | `chat.responseTokens` | 1024; answer token limit and reserved context space |
 | `chat.maxQueryDays` | 31 inclusive calendar days; rejects larger ranges before PostgreSQL |
-| `chat.modelTimeoutSeconds` | 300 per Ollama call; proxy allows both calls plus 30 seconds |
+| `chat.modelTimeoutSeconds` | 300 seconds per Ollama HTTP call |
+| `chat.executionTimeoutSeconds` | Total backend deadline. Defaults to two model timeouts plus 60 seconds (660 seconds with default settings). |
 | `ollama.contextLength` | 8192; used by both Spring AI and Ollama |
 | `ollama.model` | `qwen2.5:1.5b-instruct-q4_K_M` |
 | `ollama.resources` | CPU request 250m / limit 2; memory request 1536Mi / limit 3Gi |
@@ -56,14 +65,22 @@ Inference uses CPU, one loaded model, one concurrent inference and one queued
 request. Requests/limits/model are configurable. Keep the configured context
 within the selected model's supported window and available memory.
 
-CPU inference can take time even with compact evidence. The non-streaming
-request includes intent interpretation followed by an explanation call; the
-frontend waits for both. Set `chat.modelTimeoutSeconds` higher on a slower
-machine. Helm adjusts the proxy timeout to twice that value plus 30 seconds, so the backend can return
-a useful timeout error before Nginx closes the request. Direct backend runs use
-`OLLAMA_REQUEST_TIMEOUT` (a duration such as `300s`). A timeout returns HTTP 503
-with a retry hint and asks for a shorter period; evidence is never truncated.
-The browser stays on “Preparing your answer…” while waiting.
+Ollama publishes a [tool-enabled template for this exact tag](https://ollama.com/library/qwen2.5:1.5b-instruct-q4_K_M/blobs/eb4402837c78).
+The installed model must advertise `tools` through `/api/show`. The library
+template and capability check establish support for the protocol. Accuracy of
+tool selection, arguments and the final answer still needs live verification.
+
+CPU inference can take time even with compact evidence. A supported question can
+require two inference turns: routing and evidence explanation. These calls, the
+capability check and database work share the existing backend deadline. Helm sets the frontend
+proxy timeout 30 seconds above that deadline.
+
+Direct backend runs configure the HTTP read timeout with
+`OLLAMA_REQUEST_TIMEOUT` (default `300s`) and the independent application
+deadline with `GARMIN_CHAT_EXECUTION_TIMEOUT` (default `660s`). If you override
+the transport timeout, allow time for up to two turns, capability checks and SQL in
+the application deadline. Set any external proxy timeout above the application
+deadline. Timeouts return HTTP 503 with a retry hint.
 
 Optional deployment overrides:
 
@@ -75,19 +92,15 @@ The local file is ignored by Git and optional. It can change model, context,
 resources, timezone and response reserve. It contains no fixed dates or personal
 profile ID. Existing overrides are preserved; no deployment happens during tests.
 
-## Structured analytics review checkpoints
+## Analytics selection contract
 
-`QuestionDateResolver.intentPrompt` and `resolveIntent` define the interpretation
-contract below. `GarminChatService` connects validated intent to repository
-aggregation and compact evidence. The Step 1 unsupported-question UX changes
-are local and require approved deployment before live verification.
+The router selects these parameters; Java executes them through the analytics service:
 
 ```json
 {
-  "status": "OK",
   "metrics": ["restingHeartRate"],
   "aggregation": "AVG",
-  "period": {"type": "LAST_WEEK", "days": 0, "startDate": "", "endDate": ""}
+  "period": {"type": "LAST_WEEK"}
 }
 ```
 
@@ -101,19 +114,17 @@ are local and require approved deployment before live verification.
 One operation applies independently to one to four distinct metrics. Profile,
 field metadata, units and conversion divisors come from server configuration
 and the Java catalog, never the model. Unknown properties, fields and operations,
-duplicate metrics/JSON keys, coercible-but-wrong JSON types, contradictory periods
+duplicate metrics, incorrect JSON types, contradictory periods
 and invalid/future dates are rejected. The reference date and timezone stay in
 the system message; the question is passed verbatim as the user message.
 
-The other statuses are `CLARIFICATION` and `UNSUPPORTED`; each requires an empty
-metrics array, aggregation `NONE` and the canonical `CLARIFICATION` period with
-days 0 and empty date strings. Neither produces executable parameters. Missing
-metric/operation/period needs clarification. The interpretation prompt rejects
-sleep quality/stages/scores, medical conclusions, advice, causal findings,
-comparisons, trends, rankings, thresholds and correlation. It must reject an
-unsupported part of a question rather than silently answering a supported part.
-The explanation prompt repeats these restrictions. Live evaluation of the new
-interpretation and explanation prompts remains a review checkpoint.
+The Java metric catalog generates the system context before routing.
+It lists field meaning, units, synonyms, allowed aggregations and limitations
+for the four supported fields. The model should clarify ambiguity without
+querying the database, including questions about work productivity. The service covers
+scalar aggregations over a single period. Sleep quality, medical conclusions,
+correlation, period comparisons, trends, rankings and thresholds are outside
+that scope.
 
 `garmin.chat.max-query-days` / `GARMIN_CHAT_MAX_QUERY_DAYS` is a positive server
 setting, default 31; Helm exposes `chat.maxQueryDays`. Count both boundary dates.
@@ -139,7 +150,7 @@ invalid types. Consequently `expectedDays = daysWithData + missingDays + invalid
 numeric readings only; all-unavailable values stay null, including SUM. AVG
 divides by numeric readings, not expected days. `complete()` is true only when
 every expected day has a numeric reading. Partial totals must be labelled
-incomplete by the explanation model. No missing reading is replaced with zero.
+incomplete in the final answer. No missing reading is replaced with zero.
 
 ### PostgreSQL aggregation
 
@@ -243,8 +254,10 @@ This lints values, builds/loads React and Spring Boot images into the existing
 kind cluster, upgrades/installs the Helm chart, and waits for workloads and the
 model-pull Job (timeout 30 minutes). A build ID restarts app Pods to pick up newly
 loaded local images. After success, it starts frontend port-forwarding in the
-same terminal. Once “Forwarding from…” appears, open **http://127.0.0.1:5173**.
-Keep that terminal open; Ctrl+C stops forwarding while Pods keep running.
+same terminal. Open the address on the `Forwarding from` line. It normally uses
+**http://127.0.0.1:5173** and uses a free port if the default is occupied. Set
+`CHAT_PORT` to require a specific port. Keep the terminal open. Ctrl+C stops
+forwarding while Pods keep running.
 
 ```sh
 make chat-ui  # Reconnect later without rebuilding or redeploying.
@@ -270,31 +283,42 @@ kubectl --context kind-garmin-ai-analytics -n garmin-analytics \
 
 The backend exposes `/actuator/health/ollamaModel` via its internal Service
 (port-forward backend 8081 for direct inspection). It reports available when
-Ollama can show the selected model; this does not prove answer correctness.
-Until then, chat returns HTTP 503 with `Retry-After: 10`. Database failures have
-a separate safe error. Kubernetes probes keep the backend able to explain model
+Ollama shows the selected model and declares its tool capability. An unavailable
+or incompatible model yields HTTP 503 with `Retry-After: 10` and a safe reason.
+Database failures have a separate safe error. Kubernetes probes keep the backend able to explain model
 unavailability; Ollama server readiness permits setup before a model exists.
 An `Insufficient cpu` event means a scheduling reservation problem, not an
 active download. Interrupt an unsuccessful wait, fix resources and rerun
 `chat-up`; a cluster rebuild is not required.
 
-## Intent, evidence and context budget
+## Analytics execution, evidence and context budget
 
-Spring AI's native JSON-schema format constrains interpretation; strict Jackson
-parsing and Java validation check the response before SQL. The reference date
-and configured timezone are system metadata, separate from the verbatim question.
-Explicit dates are inclusive and require a year. Last N days excludes today;
-last week is the previous Monday–Sunday. Java handles DST and month boundaries.
-A missing or ambiguous metric, operation or period needs clarification.
+Java executes accepted selections directly through `GarminAnalyticsService`.
+The service checks field and operation allowlists, compatibility, periods and
+query range before PostgreSQL, then validates the returned metrics, operation,
+units, dates and coverage. Repository errors remain database failures, never
+model input. The existing tool adapter is retained for future tool-driven flows;
+the routed scalar workflow does not register callbacks or a tool-loop advisor.
+Unexpected tool calls during explanation are rejected without dispatching them.
 
-The service checks that repository results match the requested metrics,
-operation, dates, units and expected coverage. An inconsistent repository result
-returns the safe database error rather than reaching the explanation model.
-The explanation message contains only `QueryEvidence`, for example (synthetic):
+Named periods require only their type. `LAST_N_DAYS` additionally needs `days`;
+`EXPLICIT` needs `startDate` and `endDate`. Omitted auxiliary fields use neutral
+Java defaults. Conflicting nonempty dates or nonzero counts for named periods
+remain invalid. Existing full objects with neutral fields still decode.
+
+The synchronous request uses one virtual worker so the HTTP caller can
+return when its deadline expires. The worker checks the deadline before
+checking Ollama availability, before each model turn and before and after analytics execution.
+Expiration or interruption of the waiting caller interrupts the worker.
+Spring's JDK HTTP transport attempts cancellation while waiting for an exchange.
+In-flight HTTP and JDBC operations remain subject to their own timeouts.
+A client disconnect on the synchronous servlet endpoint may only be noticed
+when the server writes the response.
+
+The analytics service returns `QueryEvidence`, for example (synthetic):
 
 ```json
 {
-  "question": "Average recorded sleep duration from 2024-02-26 to 2024-03-03?",
   "aggregation": "AVG",
   "dateRange": {"startDate": "2024-02-26", "endDate": "2024-03-03"},
   "metrics": [{
@@ -308,33 +332,23 @@ The explanation message contains only `QueryEvidence`, for example (synthetic):
 }
 ```
 
-The explanation prompt requires supplied values only, no further calculations,
-unit conversions or invented measurements. It requires incomplete coverage and
-partial totals to be labelled, and unknown requested metrics to be reported.
-Sleep duration cannot establish sleep quality; medical conclusions, advice,
-comparisons, trends and correlations are outside the supported contract.
+The explanation model gets the original question and the complete verified
+`QueryEvidence` in a separate system message. It is instructed to use supplied values, identify partial totals
+and explain coverage, including missing readings and valid zeros.
 
-Before each model call, `PromptBudget` reserves:
+Before each inference turn, `PromptBudget` counts UTF-8 bytes for the messages,
+routing schema, tool definition, arguments and result, using one estimated token per byte.
+It also reserves 512 tokens for template overhead and `chat.responseTokens`
+for output. Oversized questions stop before Ollama and SQL. If the conversation
+including evidence exceeds the budget, the backend requests a shorter question
+or fewer metrics and the final model turn is skipped. The evidence is passed
+intact when it fits.
 
-```text
-UTF-8 bytes of every prompt message + 512 template tokens + chat.responseTokens
-```
-
-One estimated token per byte deliberately overestimates text, including non-Latin
-text. This includes the full system prompt, original question and all compact
-evidence. Interpretation output is limited to at most 384 tokens; explanation
-uses `chat.responseTokens`. Oversized questions skip both model calls and SQL.
-Oversized evidence skips explanation and requests a shorter period or fewer
-metrics. Nothing is silently removed. Longer periods no longer send more raw
-JSON; the maximum date range and context checks are separate safeguards.
-
-`POST /api/chat` still accepts `{"message":"..."}` and returns `answer`,
-`startDate`, `endDate`. Dates cover the validated requested range, including gaps.
-No summaries or no numeric readings produce direct messages with those dates.
-When some metrics have data and others are unknown, all requested metrics and
-coverage reach explanation. Clarification and unsupported intent have null
-dates; resend the complete question because there is no conversation memory.
-Blank requests remain HTTP 400; database/model failures remain safe HTTP 503s.
+`POST /api/chat` accepts `{"message":"..."}` and returns `answer`, `startDate`
+and `endDate`. Dates come from successfully executed evidence and describe
+the inclusive range, including gaps. Clarification and unsupported answers
+without a query have null dates. Blank requests return HTTP 400, and
+database and model failures return safe HTTP 503s.
 
 ## Step 1 manual verification (deployment requires approval)
 
@@ -350,10 +364,10 @@ It uses the existing summary analytics; correlation remains unsupported.
    ```
 
    This also checks the cached model and forwards the frontend. Keep the
-   terminal open and open http://127.0.0.1:5173. Confirm the introduction reads
-   “Ask your Garmin watch”. Existing local values and the reader Secret are
-   reused; no cluster recreation is needed. If only forwarding needs restarting,
-   use `make chat-ui`.
+   terminal open and open the address on the `Forwarding from` line. Confirm
+   the introduction reads “Ask your Garmin watch”. The deployment reuses the
+   local values and reader Secret in the existing cluster. Use `make chat-ui`
+   to restart forwarding on its own.
 
 2. Use a known backfilled week. Replace the example dates below if necessary.
    Each answer should show the requested inclusive range, correct units and
@@ -392,7 +406,7 @@ It uses the existing summary analytics; correlation remains unsupported.
    Expect friendly unsupported guidance and one supported example, no coefficient
    or invented conclusion, and no date caption. The old “Unsupported aggregation”
    and “Date range not selected” messages must not appear. Unsupported requests
-   should stop before SQL and the explanation call, as the automated tests check.
+   should finish without a tool call or SQL.
 
 4. Ask “Average resting heart rate” to check clarification, then ask a dated
    question containing an impossible date such as 2026-02-30. Expect clear
@@ -413,18 +427,34 @@ change; record actual manual results only after executing the checks above.
 
 ## Backend packages
 
-Under `com.garmin.analytics.chat`, `controller` owns HTTP requests and errors,
-`service` coordinates the flow, `repository` owns PostgreSQL access, `model`
-contains shared records, `ai` handles interpretation, prompts and model
-availability, and `config` holds server settings. `GarminChatApplication` stays
-at the root for component scanning. Tests mirror these packages and share
-test-only fixtures through `support`.
+The backend uses packages under `com.garmin.analytics.chat`.
+
+| Package | Responsibility |
+| --- | --- |
+| `controller` | HTTP validation and error responses |
+| `service` | Chat use-case entry point |
+| `execution` | Request correlation, deadline and cancellation |
+| `ai` | ChatClient conversation, model transport, availability and per-turn checks |
+| `ai.routing` | Structured decision decoding and validation |
+| `ai.prompt` | Prompt assembly from resources and context budgeting |
+| `ai.tool` | Routed analytics execution and retained tool adapters |
+| `analytics` | Business validation, date resolution and evidence assembly |
+| `repository` | Fixed SQL, bound parameters and result mapping |
+| `model` | Shared records and metric catalog |
+| `diagnostics` | Opt-in structured diagnostics |
+| `config` | Application and transport wiring |
+
+Application contracts live in their owning package. Their implementations
+live in its `impl` subpackage and use the contract name, an optional technology
+qualifier, and the `Impl` suffix. For example, `DailySummaryRepository` is
+implemented by `repository.impl.DailySummaryRepositoryPostgresImpl`.
 
 ## Offline verification
 
 ```sh
 export JAVA_HOME=$(/usr/libexec/java_home -v 25)  # macOS; select Java 25 on other OSes
-mvn -B -ntp -f garmin-chat/backend/pom.xml clean verify
+mvn -B -ntp -f garmin-chat/backend/pom.xml \
+  -Dtest='*Test,!PostgresMetricAggregationDatabaseTest' clean test
 npm --prefix garmin-chat/frontend ci
 npm --prefix garmin-chat/frontend test
 npm --prefix garmin-chat/frontend run build
@@ -435,10 +465,10 @@ PATH="/tmp/garmin-chat-checks/bin:$PATH" make chat-validate
 
 Tests use synthetic summaries, a fixed Clock, stub repositories/models and fake
 HTTP transport/CLIs. They cover explicit/relative/invalid dates, timezone and DST,
-clarification and unsupported intent before SQL, bound profile/date arguments,
+clarification and unsupported answers without tools, bound profile/date arguments,
 compact evidence with distinct coverage and no raw payloads, no data,
-model/database failures, independent questions, and oversized requests
-skipping answer calls. Budget tests include system text, JSON, question, response
+model/database failures, call limits, the request deadline, and oversized
+questions and evidence. Budget tests include system text, JSON, question, response
 reserve and non-Latin text. Configuration, React, Helm render, model setup and
 Make sequencing checks remain offline. No Git write operations are performed.
 
@@ -467,8 +497,7 @@ tests also verify calculated compact evidence and the no-data path with stubbed
 model responses. The offline HTTP integration test exercises MVC, repository
 mapping and the real Spring AI client with mocked JDBC and HTTP boundaries.
 
-Step 3 verification: 226 offline tests and 35 read-only PostgreSQL tests passed;
-the executable JAR also builds successfully. All model responses in these checks
-are stubbed. No deployment, workload changes or SQL writes were performed.
-Without database environment settings, the opt-in suite is skipped; no Ollama
-connection is needed for either suite.
+Before the tool-calling refactor, Step 3 verification passed 226 offline tests
+and 35 read-only PostgreSQL tests and built the executable JAR. All model
+responses in these checks are stubbed. The opt-in suite requires
+database environment settings. Both suites run without an Ollama connection.

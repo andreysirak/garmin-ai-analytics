@@ -8,6 +8,10 @@ metadata:
   labels:
     {{- include "garmin-chat.labels" . | nindent 4 }}
 data:
+  {{- if .Values.chat.diagnosticsEnabled }}
+  SPRING_PROFILES_ACTIVE: "chat-diagnostics"
+  GARMIN_CHAT_DIAGNOSTIC_DIRECTORY: "/tmp/chat-diagnostics"
+  {{- end }}
   SERVER_ADDRESS: "0.0.0.0"
   GARMIN_CHAT_DB_URL: {{ .Values.database.url | quote }}
   GARMIN_CHAT_TIMEZONE: {{ .Values.chat.timezone | quote }}
@@ -16,4 +20,5 @@ data:
   OLLAMA_BASE_URL: {{ printf "http://%s-ollama:11434" (include "garmin-chat.name" .) | quote }}
   OLLAMA_MODEL: {{ .Values.ollama.model | quote }}
   OLLAMA_CONTEXT_LENGTH: {{ .Values.ollama.contextLength | quote }}
+  GARMIN_CHAT_EXECUTION_TIMEOUT: {{ printf "%ss" (include "garmin-chat.executionTimeoutSeconds" .) | quote }}
   OLLAMA_REQUEST_TIMEOUT: {{ printf "%ds" (int .Values.chat.modelTimeoutSeconds) | quote }}

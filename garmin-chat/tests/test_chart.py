@@ -30,6 +30,17 @@ class ChartTest(unittest.TestCase):
         cls.deployments = {item["metadata"]["name"]: item for item in cls.resources
                            if item["kind"] == "Deployment"}
 
+    def test_sensitive_diagnostics_are_disabled_unless_explicitly_enabled(self):
+        config = self.resource("ConfigMap")["data"]
+        self.assertNotIn("SPRING_PROFILES_ACTIVE", config)
+        self.assertNotIn("GARMIN_CHAT_DIAGNOSTIC_DIRECTORY", config)
+        rendered = render("--set", "chat.diagnosticsEnabled=true")
+        self.assertEqual(rendered.returncode, 0, rendered.stderr)
+        config = next(item["data"] for item in yaml.safe_load_all(rendered.stdout)
+                      if item and item["kind"] == "ConfigMap")
+        self.assertEqual(config["SPRING_PROFILES_ACTIVE"], "chat-diagnostics")
+        self.assertEqual(config["GARMIN_CHAT_DIAGNOSTIC_DIRECTORY"], "/tmp/chat-diagnostics")
+
     def resource(self, kind):
         return next(item for item in self.resources if item["kind"] == kind)
 
@@ -126,7 +137,11 @@ class ChartTest(unittest.TestCase):
                 self.assertNotEqual(render(*overrides, **kwargs).returncode, 0)
 
     def test_proxy_allows_both_model_calls_for_default_and_overridden_timeouts(self):
-        for overrides in ([], ["--set", "chat.modelTimeoutSeconds=420"]):
+        for overrides, expected_execution in (
+            ([], 660),
+            (["--set", "chat.modelTimeoutSeconds=420"], 900),
+            (["--set", "chat.modelTimeoutSeconds=420,chat.executionTimeoutSeconds=960"], 960),
+        ):
             with self.subTest(overrides=overrides):
                 result = render(*overrides)
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -137,7 +152,11 @@ class ChartTest(unittest.TestCase):
                 env = environment(frontend["spec"]["template"]["spec"]["containers"][0])
                 per_call = int(config["OLLAMA_REQUEST_TIMEOUT"].removesuffix("s"))
                 proxy = int(env["API_PROXY_TIMEOUT_SECONDS"]["value"])
-                self.assertGreater(proxy, 2 * per_call + 15)  # Includes the database/health checks.
+                execution = int(config["GARMIN_CHAT_EXECUTION_TIMEOUT"].removesuffix("s"))
+                self.assertEqual(execution, expected_execution)
+                self.assertGreater(execution, 2 * per_call)
+                self.assertEqual(proxy, execution + 30)
                 template = (ROOT / "garmin-chat/frontend/nginx.conf.template").read_text()
                 self.assertIn("proxy_read_timeout ${API_PROXY_TIMEOUT_SECONDS}s;", template)
-        self.assertNotEqual(render("--set", "chat.modelTimeoutSeconds=0").returncode, 0)
+        for invalid in ("chat.modelTimeoutSeconds=0", "chat.executionTimeoutSeconds=0"):
+            self.assertNotEqual(render("--set", invalid).returncode, 0)
