@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Execute accepted Garmin scalar selections in Java before the explanation call,
+  removing the redundant model-generated tool call. Use compact period schemas,
+  constrain routing fields to the metric catalog, log validation rejection reasons,
+  and clarify unsupported relationships and ambiguous goals in the routing prompt.
+  Live routing quality on the configured local model still requires verification.
+
 - Route Garmin questions with structured output and require successful tool
   evidence before completing analytical answers. Log routing and completion
   outcomes under the same request ID.

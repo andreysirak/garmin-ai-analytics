@@ -86,6 +86,7 @@ public class GarminRequestRouter {
       analytics.validateRequest(selection.metrics(), selection.aggregation(), selection.period(),
           referenceDate);
     } catch (InvalidAnalyticsRequest invalid) {
+      log.info("chat_routing_validation_rejected reason={}", invalid.getMessage());
       throw new InvalidAnalyticsRequest("The model selected an invalid analysis. "
           + "Please try rephrasing your question.", invalid);
     }

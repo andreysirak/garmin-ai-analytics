@@ -30,8 +30,8 @@ public class ChatCompletion {
 
   public ChatAnswer analysis(String answer, QueryEvidence evidence, boolean truncated) {
     if (evidence == null) {
-      return failed("I couldn't complete the analysis. No Garmin readings were returned "
-          + "by the analytical tool.", null);
+      return failed("I couldn't complete the analysis. The analytics query did not produce "
+          + "verified evidence.", null);
     }
     if (evidence.metrics().stream().allMatch(metric -> metric.value() == null)) {
       boolean noSummaries = evidence.metrics().stream()

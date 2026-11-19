@@ -13,12 +13,17 @@ server's reference date and timezone. Ollama returns a schema-constrained
 Clarification and unsupported requests finish without a tool call or database
 access.
 
-For `ANALYZE`, the existing Spring AI tool loop receives the original question
-and the selected metric, calculation and period. The tool accepts only matching
-arguments. The existing fixed SQL returns values and coverage for the server
-profile. A completed analysis requires valid tool evidence. Text that only
-proposes a calculation yields application-authored incomplete guidance.
-A successful query with no numeric data yields an explicit no-data response.
+For `ANALYZE`, Java executes the validated metric, calculation and period once
+through the analytics service. The fixed SQL returns compact values and coverage
+for the server profile. Only then does Spring AI ask the model to explain the
+verified evidence. The model cannot skip the query or change its parameters in
+a second tool call. A successful query with no numeric data yields an explicit
+no-data response without another inference call.
+
+Routing is still model-generated: schema-valid JSON does not prove the selected
+calculation answers the question. Verify routing quality with the configured
+model before considering a demo ready. The prompt includes examples of ambiguous
+goals and unsupported relationships; there are no question-specific Java rules.
 
 Questions are independent. Resend the full question after a clarification.
 Raw daily summaries and profile IDs stay on the server.
@@ -66,14 +71,14 @@ template and capability check establish support for the protocol. Accuracy of
 tool selection, arguments and the final answer still needs live verification.
 
 CPU inference can take time even with compact evidence. A supported question can
-require three inference turns, including the new routing call. These calls, the
+require two inference turns: routing and evidence explanation. These calls, the
 capability check and database work share the existing backend deadline. Helm sets the frontend
 proxy timeout 30 seconds above that deadline.
 
 Direct backend runs configure the HTTP read timeout with
 `OLLAMA_REQUEST_TIMEOUT` (default `300s`) and the independent application
 deadline with `GARMIN_CHAT_EXECUTION_TIMEOUT` (default `660s`). If you override
-the transport timeout, allow time for up to three turns, capability checks and SQL in
+the transport timeout, allow time for up to two turns, capability checks and SQL in
 the application deadline. Set any external proxy timeout above the application
 deadline. Timeouts return HTTP 503 with a retry hint.
 
@@ -87,15 +92,15 @@ The local file is ignored by Git and optional. It can change model, context,
 resources, timezone and response reserve. It contains no fixed dates or personal
 profile ID. Existing overrides are preserved; no deployment happens during tests.
 
-## Analytical tool contract
+## Analytics selection contract
 
-`aggregate_garmin_metrics` takes the following arguments:
+The router selects these parameters; Java executes them through the analytics service:
 
 ```json
 {
   "metrics": ["restingHeartRate"],
   "aggregation": "AVG",
-  "period": {"type": "LAST_WEEK", "days": 0, "startDate": "", "endDate": ""}
+  "period": {"type": "LAST_WEEK"}
 }
 ```
 
@@ -113,10 +118,10 @@ duplicate metrics, incorrect JSON types, contradictory periods
 and invalid/future dates are rejected. The reference date and timezone stay in
 the system message; the question is passed verbatim as the user message.
 
-The Java metric catalog generates the system context before tool selection.
+The Java metric catalog generates the system context before routing.
 It lists field meaning, units, synonyms, allowed aggregations and limitations
 for the four supported fields. The model should clarify ambiguity without
-calling the tool, including questions about work productivity. The tool covers
+querying the database, including questions about work productivity. The service covers
 scalar aggregations over a single period. Sleep quality, medical conclusions,
 correlation, period comparisons, trends, rankings and thresholds are outside
 that scope.
@@ -284,27 +289,31 @@ An `Insufficient cpu` event means a scheduling reservation problem, not an
 active download. Interrupt an unsuccessful wait, fix resources and rerun
 `chat-up`; a cluster rebuild is not required.
 
-## Tool execution, evidence and context budget
+## Analytics execution, evidence and context budget
 
-Spring AI 1.1.8's `ToolCallAdvisor` disables the Ollama chat model's internal
-tool loop. The application checks the entire batch before Spring AI dispatches
-it and allows one tool call per request. Each call can include several metrics.
-The advisor checks the JSON shape. The tool verifies that its arguments match
-the validated route. The analytics service checks the allowlists, compatibility,
-period and query range before PostgreSQL. The
-analytics service also validates returned metrics, operation, units, dates and
-coverage. Repository errors exit the tool loop as database failures.
+Java executes accepted selections directly through `GarminAnalyticsService`.
+The service checks field and operation allowlists, compatibility, periods and
+query range before PostgreSQL, then validates the returned metrics, operation,
+units, dates and coverage. Repository errors remain database failures, never
+model input. The existing tool adapter is retained for future tool-driven flows;
+the routed scalar workflow does not register callbacks or a tool-loop advisor.
+Unexpected tool calls during explanation are rejected without dispatching them.
 
-The synchronous tool loop uses one virtual worker so the HTTP caller can
+Named periods require only their type. `LAST_N_DAYS` additionally needs `days`;
+`EXPLICIT` needs `startDate` and `endDate`. Omitted auxiliary fields use neutral
+Java defaults. Conflicting nonempty dates or nonzero counts for named periods
+remain invalid. Existing full objects with neutral fields still decode.
+
+The synchronous request uses one virtual worker so the HTTP caller can
 return when its deadline expires. The worker checks the deadline before
-checking Ollama availability, before each model turn and before tool dispatch.
+checking Ollama availability, before each model turn and before and after analytics execution.
 Expiration or interruption of the waiting caller interrupts the worker.
 Spring's JDK HTTP transport attempts cancellation while waiting for an exchange.
 In-flight HTTP and JDBC operations remain subject to their own timeouts.
 A client disconnect on the synchronous servlet endpoint may only be noticed
 when the server writes the response.
 
-The tool returns `QueryEvidence`, for example (synthetic):
+The analytics service returns `QueryEvidence`, for example (synthetic):
 
 ```json
 {
@@ -321,8 +330,8 @@ The tool returns `QueryEvidence`, for example (synthetic):
 }
 ```
 
-The analytical model gets the original question, the validated selection, its
-structured call, and the complete tool result. It is instructed to use supplied values, identify partial totals
+The explanation model gets the original question and the complete verified
+`QueryEvidence` in a separate system message. It is instructed to use supplied values, identify partial totals
 and explain coverage, including missing readings and valid zeros.
 
 Before each inference turn, `PromptBudget` counts UTF-8 bytes for the messages,
@@ -336,7 +345,7 @@ intact when it fits.
 `POST /api/chat` accepts `{"message":"..."}` and returns `answer`, `startDate`
 and `endDate`. Dates come from successfully executed evidence and describe
 the inclusive range, including gaps. Clarification and unsupported answers
-without a tool call have null dates. Blank requests return HTTP 400, and
+without a query have null dates. Blank requests return HTTP 400, and
 database and model failures return safe HTTP 503s.
 
 ## Step 1 manual verification (deployment requires approval)
@@ -426,7 +435,7 @@ The backend uses packages under `com.garmin.analytics.chat`.
 | `ai` | ChatClient conversation, model transport, availability and per-turn checks |
 | `ai.routing` | Structured decision decoding and validation |
 | `ai.prompt` | Prompt assembly from resources and context budgeting |
-| `ai.tool` | Request-scoped analytics tool, argument checks and Spring AI tool lifecycle |
+| `ai.tool` | Routed analytics execution and retained tool adapters |
 | `analytics` | Business validation, date resolution and evidence assembly |
 | `repository` | Fixed SQL, bound parameters and result mapping |
 | `model` | Shared records and metric catalog |

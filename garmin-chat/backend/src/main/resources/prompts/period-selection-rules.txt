@@ -1,7 +1,6 @@
-Period rules (the reference date is server context, not part of the question):
-- LAST_N_DAYS: rolling completed days ending yesterday, e.g. past/last seven days, past week, за последнюю неделю, за останній тиждень. A duration of N weeks is 7*N days. Send a positive integer days and empty startDate/endDate.
-- LAST_WEEK: previous calendar week, Monday through Sunday, e.g. "last week" or "на прошлой неделе".
-- THIS_WEEK, LAST_MONTH, THIS_MONTH, YESTERDAY, TODAY: use the matching period type.
-- For relative types other than LAST_N_DAYS, send days=0 and empty startDate/endDate. Let Java calculate dates.
-- EXPLICIT: dates stated in the question with unambiguous years. Send inclusive yyyy-MM-dd dates and days=0. Repeat the date for a single day. Never copy the reference date as an explicit date.
-- Missing, vague, conflicting or unsupported periods, ambiguous numeric dates and missing years require clarification without a tool call. Recognize equivalent wording in other languages.
+Period rules (reference date is server context):
+- LAST_N_DAYS: completed days ending yesterday, e.g. past seven days or past week. Send {"type":"LAST_N_DAYS","days":7}. For N weeks use 7*N days.
+- LAST_WEEK: previous calendar Monday through Sunday. Send only {"type":"LAST_WEEK"}.
+- THIS_WEEK, LAST_MONTH, THIS_MONTH, YESTERDAY, TODAY: send only the matching type. Java calculates dates.
+- EXPLICIT: unambiguous dates stated by the user, with years. Send type, startDate and endDate as inclusive yyyy-MM-dd. Repeat the date for a single day.
+- Never invent a period, copy the reference date as user input, or fill fields belonging to another period type. Missing or ambiguous periods require CLARIFY, unless the whole request is UNSUPPORTED.

@@ -10,8 +10,6 @@ import com.garmin.analytics.chat.ai.prompt.PromptBudget;
 import com.garmin.analytics.chat.ai.routing.GarminRequestRouter;
 import com.garmin.analytics.chat.ai.routing.RoutingDecisionValidator;
 import com.garmin.analytics.chat.ai.tool.GarminAnalysisWorkflow;
-import com.garmin.analytics.chat.ai.tool.GarminAnalyticsToolFactory;
-import com.garmin.analytics.chat.ai.tool.GarminToolArguments;
 import com.garmin.analytics.chat.analytics.GarminAnalyticsService;
 import com.garmin.analytics.chat.analytics.impl.GarminAnalyticsServiceImpl;
 import com.garmin.analytics.chat.config.ChatExecutionProperties;
@@ -39,7 +37,6 @@ import java.util.List;
 import java.util.function.Function;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.AssistantMessage;
-import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
@@ -84,13 +81,12 @@ public final class ChatTestSupport {
         new ClassPathResource("prompts/garmin-routing-system.txt"),
         new ClassPathResource("prompts/garmin-answer-instructions.txt"));
     var analytics = analytics(repository, properties, CLOCK);
-    var tools = new GarminAnalyticsToolFactory(analytics);
     var modelTurn = new ChatModelTurnAdvisor(budget, properties, new ChatDiagnostics(JSON));
     var completion = new ChatCompletion();
     var router = new GarminRequestRouter(ChatClient.builder(model), availability, modelTurn,
         new RoutingDecisionValidator(), analytics, JSON);
-    var workflow = new GarminAnalysisWorkflow(ChatClient.builder(model), prompts, tools, budget,
-        new GarminToolArguments(JSON), modelTurn, completion);
+    var workflow = new GarminAnalysisWorkflow(ChatClient.builder(model), prompts, analytics, budget,
+        modelTurn, completion);
     var conversation = new GarminChatConversationSpringAiImpl(prompts, analytics,
         budget, router, workflow, completion);
     return new GarminChatServiceImpl(new ChatRequestExecutor(new ChatExecutionProperties(timeout)),
@@ -98,8 +94,7 @@ public final class ChatTestSupport {
   }
 
   public static ChatModel model(String arguments, Function<Prompt, ChatResponse> answer) {
-    return routed(arguments, prompt -> prompt.getInstructions().getLast()
-        instanceof ToolResponseMessage ? answer.apply(prompt) : toolCall(arguments));
+    return routed(arguments, answer::apply);
   }
 
   public static ChatModel routed(String selection, ChatModel model) {
@@ -133,8 +128,8 @@ public final class ChatTestSupport {
   }
 
   public static String toolEvidence(Prompt prompt) {
-    var toolResponse = (ToolResponseMessage) prompt.getInstructions().getLast();
-    return toolResponse.getResponses().getFirst().responseData();
+    var text = prompt.getInstructions().getLast().getText();
+    return text.substring(text.indexOf('\n') + 1);
   }
 
   public static ChatResponse response(String text) {

@@ -14,14 +14,14 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
-import com.garmin.analytics.chat.ai.tool.GarminToolCallAdvisor;
+import com.garmin.analytics.chat.ai.routing.GarminRequestRouter;
+import com.garmin.analytics.chat.support.ChatTestSupport;
 import com.garmin.analytics.chat.support.ChatTestSupport.AggregationLoader;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
-import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.dao.DataAccessResourceFailureException;
 
 class ChatDiagnosticsTest {
@@ -31,11 +31,11 @@ class ChatDiagnosticsTest {
     try (var normal = new Capture("com.garmin.analytics.chat", Level.INFO);
          var trace = new Capture("garmin.chat.diagnostics", Level.OFF)) {
       var requestIds = new ArrayList<String>();
-      var service = service((AggregationLoader) query -> List.of(result(query, "123")), routed(WEEK, prompt -> {
+      var service = service((AggregationLoader) query -> List.of(result(query, "123")), prompt -> {
         requestIds.add(MDC.get("chatRequestId"));
-        return prompt.getInstructions().getLast() instanceof ToolResponseMessage
-            ? response("private model answer") : toolCall(WEEK);
-      }));
+        return response(ChatTestSupport.routing(prompt)
+            ? ChatTestSupport.analyze(WEEK) : "private model answer");
+      });
       MDC.put("chatRequestId", "outer-request");
       try {
         service.answer("private user question");
@@ -49,10 +49,10 @@ class ChatDiagnosticsTest {
       assertThat(normal.events.list).allSatisfy(event ->
           assertThat(event.getMDCPropertyMap())
               .containsEntry("chatRequestId", requestIds.getFirst()));
-      assertThat(normal.text()).contains("model_started turn=1", "model_completed turn=3",
-          "tool_execution tool=aggregate_garmin_metrics outcome=completed",
-          "sql_completed", "chat_completed model_calls=3",
-          "chat_route_selected route=Analyze", "chat_completion status=analyzed", "elapsed_ms=", "prompt_sha256=",
+      assertThat(normal.text()).contains("model_started turn=1", "model_completed turn=2",
+          "sql_completed", "chat_completed model_calls=2",
+          "chat_route_selected route=Analyze", "chat_completion status=analyzed",
+          "elapsed_ms=", "prompt_sha256=",
           "prompt_tokens=null", "completion_tokens=null")
           .doesNotContain("private user question", "private model answer", "2026-11-09");
       assertThat(trace.events.list).isEmpty();
@@ -66,7 +66,8 @@ class ChatDiagnosticsTest {
           model(WEEK, prompt -> response("private answer\nsecond line")));
       service.answer("private question\nsecond line");
       assertThat(trace.text()).contains("event=model_request", "event=model_response",
-          "event=sql_request", "event=sql_evidence", "\"turn\":1", "\"turn\":2", "private question\\nsecond line",
+          "event=sql_request", "event=sql_evidence", "\"turn\":1", "\"turn\":2",
+          "private question\\nsecond line",
           "private answer\\nsecond line", "123")
           .doesNotContain("profileId", "postgres_password");
       assertThat(trace.events.list).allSatisfy(event ->
@@ -99,13 +100,17 @@ class ChatDiagnosticsTest {
 
   @Test
   void invalidPeriodExplainsValidationFailureWithoutQueryingOrLeakingModelJson() throws Exception {
-    try (var normal = new Capture(GarminToolCallAdvisor.class.getName(), Level.INFO);
+    try (var normal = new Capture(GarminRequestRouter.class.getName(), Level.INFO);
          var trace = new Capture("garmin.chat.diagnostics", Level.OFF)) {
       AggregationLoader unused = query -> { throw new AssertionError("Must not query"); };
-      var service = service(unused, routed(WEEK, prompt -> toolCall(WEEK.replace("LAST_WEEK", "EXPLICIT")
-              .replace("\"startDate\":\"\"", "\"startDate\":\"private-invalid-date\""))));
-      assertThat(service.answer("private question").answer()).contains("did not match");
-      assertThat(normal.text()).contains("outcome=rejected", "error_type=InvalidAnalyticsRequest")
+      var invalid = WEEK.replace("LAST_WEEK", "EXPLICIT")
+          .replace("\"startDate\":\"\"", "\"startDate\":\"private-invalid-date\"");
+      var service = service(unused, prompt -> response(ChatTestSupport.analyze(invalid)));
+      assertThat(service.answer("private question").answer())
+          .contains("selected an invalid analysis");
+      assertThat(normal.text()).contains("chat_routing_validation_rejected",
+              "outcome=invalid_analytics_arguments",
+              "valid, ordered dates")
           .doesNotContain("private-invalid-date", "private question");
       assertThat(MDC.get("chatRequestId")).isNull();
     }

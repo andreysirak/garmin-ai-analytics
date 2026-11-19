@@ -2,7 +2,7 @@ package com.garmin.analytics.chat.ai.prompt;
 
 import com.garmin.analytics.chat.ai.routing.RoutingSchema;
 import com.garmin.analytics.chat.config.GarminChatProperties;
-import com.garmin.analytics.chat.model.AnalyticsSelection;
+import com.garmin.analytics.chat.model.QueryEvidence;
 import com.garmin.analytics.chat.model.QueryIntent.Metric;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -13,7 +13,6 @@ import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.ollama.api.OllamaChatOptions;
-import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.util.json.JsonParser;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
@@ -55,12 +54,14 @@ public class GarminChatPromptFactory {
     return new Prompt(List.of(new SystemMessage(system), new UserMessage(question)), options);
   }
 
-  public Prompt analysis(String question, AnalyticsSelection selection, ToolCallback[] tools) {
-    var system = systemTemplate.formatted(JsonParser.toJson(selection), answerInstructions);
+  public Prompt analysis(String question, QueryEvidence evidence) {
+    var system = systemTemplate.formatted(answerInstructions);
     var options = OllamaChatOptions.builder()
         .numPredict(properties.responseTokens())
-        .toolCallbacks(tools)
+        .internalToolExecutionEnabled(false)
         .build();
-    return new Prompt(List.of(new SystemMessage(system), new UserMessage(question)), options);
+    return new Prompt(List.of(new SystemMessage(system), new UserMessage(question),
+        new SystemMessage("Verified Garmin evidence (JSON):\n" + JsonParser.toJson(evidence))),
+        options);
   }
 }

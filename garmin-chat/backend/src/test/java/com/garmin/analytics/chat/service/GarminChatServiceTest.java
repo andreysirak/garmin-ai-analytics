@@ -59,7 +59,7 @@ class GarminChatServiceTest {
         List.of(ChatTestSupport.result(call.getArgument(0), "0")));
     var arguments = WEEK.replace("totalSteps", metric.field()).replace("SUM", operation.name());
     var chat = service(repository, ChatTestSupport.model(arguments, prompt -> {
-      assertThat(prompt.getInstructions()).hasSize(4);
+      assertThat(prompt.getInstructions()).hasSize(3);
       assertThat(prompt.getUserMessage().getText()).isEqualTo("Synthetic question");
       var evidence = evidence(prompt);
       assertThat(evidence.get("aggregation").asText()).isEqualTo(operation.name());
@@ -157,7 +157,7 @@ class GarminChatServiceTest {
 
   @Test
   void delegatesRoutedPeriodValidationToAnalytics() throws IOException {
-    var invalidPeriod = WEEK.replace("\"days\":0", "\"days\":1");
+    var invalidPeriod = WEEK.replace("\"days\":0", "\"days\":7");
     var answer = service(repository, prompt -> response(ChatTestSupport.analyze(invalidPeriod)))
         .answer("Total steps last week?");
     assertThat(answer.answer()).contains("The model selected an invalid analysis");
@@ -187,8 +187,9 @@ class GarminChatServiceTest {
       return List.of(new MetricAggregation(Metric.TOTAL_STEPS, Aggregation.SUM, null,
           "steps", intent.range(), new DataCoverage(7, 1, 2, 3, 1, 0, 0)));
     });
-    var chat = service(repository, ChatTestSupport.model(WEEK, prompt ->
-        response("You took 5000 steps.")));
+    var chat = service(repository, ChatTestSupport.model(WEEK, prompt -> {
+      throw new AssertionError("No-data evidence must not require another model call");
+    }));
     var answer = chat.answer("How many steps last week?");
     assertThat(answer.answer()).contains("none contain a numeric reading", "0 of 7 days")
         .doesNotContain("5000");
@@ -196,33 +197,30 @@ class GarminChatServiceTest {
   }
 
   @Test
-  void analyticalPlanWithoutToolEvidenceIsIncomplete() throws IOException {
-    var yesterday = WEEK.replace("LAST_WEEK", "YESTERDAY");
-    var chat = service(repository, ChatTestSupport.routed(yesterday,
-        prompt -> response("We need to calculate your total steps now.")));
-    var answer = chat.answer("How many steps yesterday?");
-    assertThat(answer.answer()).contains("couldn't complete").doesNotContain("We need");
-    assertThat(answer.startDate()).isNull();
-    verifyNoInteractions(repository);
-  }
-
-  @ParameterizedTest
-  @ValueSource(strings = {"activeKilocalories", "AVG", "THIS_WEEK"})
-  void rejectsSchemaValidToolArgumentsThatContradictRouting(String changed) throws IOException {
-    String arguments = switch (changed) {
-      case "AVG" -> WEEK.replace("SUM", changed);
-      case "THIS_WEEK" -> WEEK.replace("LAST_WEEK", changed);
-      default -> WEEK.replace("totalSteps", changed);
-    };
-    var chat = service(repository, ChatTestSupport.routed(WEEK, prompt -> toolCall(arguments)));
-    assertThat(chat.answer("How many steps last week?").answer()).contains("did not match");
-    verifyNoInteractions(repository);
+  void executesAnalysisBeforeExplanationWithoutAskingTheModelToCallATool() throws IOException {
+    when(repository.aggregate(any())).thenAnswer(call ->
+        List.of(ChatTestSupport.result(call.getArgument(0), "4200")));
+    var calls = new AtomicInteger();
+    var compact = WEEK.replace(
+        "{\"type\":\"LAST_WEEK\",\"startDate\":\"\",\"endDate\":\"\",\"days\":0}",
+        "{\"type\":\"LAST_WEEK\"}");
+    var chat = service(repository, ChatTestSupport.routed(compact, prompt -> {
+      calls.incrementAndGet();
+      verify(repository).aggregate(any());
+      assertThat(((ToolCallingChatOptions) prompt.getOptions()).getToolCallbacks()).isEmpty();
+      assertThat(evidence(prompt).at("/metrics/0/value").asInt()).isEqualTo(4200);
+      return response("You recorded 4,200 steps.");
+    }));
+    var answer = chat.answer("Total steps last week?");
+    assertThat(answer.answer()).isEqualTo("You recorded 4,200 steps.");
+    assertThat(answer.startDate()).isEqualTo("2026-11-09");
+    assertThat(calls.get()).isEqualTo(1);
   }
 
   @ParameterizedTest
   @MethodSource("invalidArguments")
-  void rejectsInvalidToolArgumentsBeforeLoadingData(String arguments) throws IOException {
-    var chat = service(repository, ChatTestSupport.routed(WEEK, prompt -> toolCall(arguments)));
+  void rejectsInvalidRoutingArgumentsBeforeLoadingData(String arguments) throws IOException {
+    var chat = service(repository, prompt -> response(ChatTestSupport.analyze(arguments)));
     var answer = chat.answer("Synthetic question");
 
     assertThat(answer.answer()).isNotBlank();
@@ -247,8 +245,7 @@ class GarminChatServiceTest {
         WEEK.replace("\"days\":0", "\"days\":1"),
         WEEK.replace("\"days\":0", "\"days\":0,\"jsonPath\":\"payload\""),
         WEEK.replace("LAST_WEEK", "LAST_YEAR"),
-        WEEK.replace("\"startDate\":\"\"", "\"startDate\":null"),
-        WEEK.replace("\"startDate\":\"\",", ""));
+        WEEK.replace("\"startDate\":\"\"", "\"startDate\":\"2026-11-01\""));
   }
 
   @Test
@@ -281,38 +278,15 @@ class GarminChatServiceTest {
   }
 
   @Test
-  void rejectsAToolBatchBeforeExecutingAnyCall() throws IOException {
-    var first = new AssistantMessage.ToolCall("1", "function", ChatTestSupport.TOOL_NAME, WEEK);
-    var second = new AssistantMessage.ToolCall("2", "function", ChatTestSupport.TOOL_NAME, WEEK);
-    var chat = service(repository, ChatTestSupport.routed(WEEK,
-        prompt -> ChatTestSupport.toolCalls(first, second)));
-
-    assertThat(chat.answer("Synthetic question").answer()).contains("one calculation");
-    verifyNoInteractions(repository);
-  }
-
-  @Test
-  void rejectsAnUnknownToolWithoutResolvingOrExecutingIt() throws IOException {
-    var call = new AssistantMessage.ToolCall("1", "function", "execute_sql", WEEK);
+  void rejectsUnexpectedToolCallsDuringExplanationWithoutExecutingThem() throws IOException {
+    when(repository.aggregate(any())).thenAnswer(call ->
+        List.of(ChatTestSupport.result(call.getArgument(0), "0")));
+    var call = new AssistantMessage.ToolCall("1", "function", "execute_sql", "{}");
     var chat = service(repository, ChatTestSupport.routed(WEEK,
         prompt -> ChatTestSupport.toolCalls(call)));
-
-    assertThat(chat.answer("Synthetic question").startDate()).isNull();
-    verifyNoInteractions(repository);
-  }
-
-  @Test
-  void stopsRepeatedToolCallsAfterOneRepositoryExecution() throws IOException {
-    when(repository.aggregate(any())).thenAnswer(call ->
-        List.of(ChatTestSupport.result(call.getArgument(0), null)));
-    var calls = new AtomicInteger();
-    var chat = service(repository, ChatTestSupport.routed(WEEK, prompt -> {
-      calls.incrementAndGet();
-      return toolCall(WEEK);
-    }));
-
-    assertThat(chat.answer("Synthetic question").answer()).contains("one calculation");
-    assertThat(calls.get()).isEqualTo(2);
+    var answer = chat.answer("Total steps last week?");
+    assertThat(answer.answer()).contains("did not return a completed explanation");
+    assertThat(answer.startDate()).isEqualTo("2026-11-09");
     verify(repository).aggregate(any());
   }
 
@@ -367,9 +341,6 @@ class GarminChatServiceTest {
       var selection = question.equals("Yesterday") ? WEEK.replace("LAST_WEEK", "YESTERDAY") : WEEK;
       if (ChatTestSupport.routing(prompt)) {
         return response(ChatTestSupport.analyze(selection));
-      }
-      if (prompt.getInstructions().size() == 2) {
-        return toolCall(selection);
       }
       evidenceReady.countDown();
       try {

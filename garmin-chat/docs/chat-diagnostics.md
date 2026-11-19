@@ -1,6 +1,6 @@
 # Chat diagnostics and local model evaluation (#66)
 
-These diagnostics cover the Spring AI tool conversation. Live Ollama and
+These diagnostics cover routing, server-controlled analytics and evidence explanation. Live Ollama and
 SQL-backed evaluation is still required on the owner's local cluster.
 
 ## Normal operation
@@ -121,15 +121,15 @@ curl --fail-with-body --max-time 690 http://127.0.0.1:5173/api/chat \
 
 Inspect the first `model_response` for the structured route. The output schema
 offers one shape per route, with only the fields that route requires. Java
-still checks the decoded output. On `ANALYZE`, inspect
-the next response for matching tool arguments. Compare `sql_request` and
-`sql_evidence` with the final answer. Use `tool_execution` to distinguish
-executed, rejected and failed calls.
+still checks the decoded output. On `ANALYZE`, Java executes the selection once.
+Compare `sql_request` and `sql_evidence` with the final explanation. No model tool
+call is needed. `chat_routing_validation_rejected` records the safe validation
+reason when generated parameters fail, without logging raw question text.
 
 For the short routing regression check, use cases 17, 19 and 21 above, then ask
 “How many steps yesterday?” and “How many steps last week?”. Confirm one routing
-call and zero SQL for the productivity, activity–sleep, and missing-period cases. Confirm a matching
-tool call for the step questions, with yesterday resolved in the configured
+call and zero SQL for the productivity, activity–sleep, and missing-period cases. Confirm one SQL execution before explanation
+for the step questions, with yesterday resolved in the configured
 timezone and last week resolved as the previous Monday through Sunday. Use one
 known empty period and one partially covered period to verify that missing
 readings and recorded zeros stay distinct.
@@ -143,11 +143,11 @@ such as asking for dates already given or substituting steps for productivity.
 The backend's `accepted` event indicates validation success only. Use the
 original question and the private routing trace to assess relevance.
 
-Check malformed routing, plan-only output, mismatched tool arguments, database
+Check malformed routing, contradictory periods, unexpected explanation tool calls, database
 failure and timeout with the offline mocked cases. Model behavior on the live
 cluster is **pending**. Record routing latency separately and compare total
 latency and model-call count with the previous flow. Analytical requests now
-make up to three model calls under the same request deadline.
+make up to two model calls under the same request deadline.
 
 Independently check accepted ranges in PostgreSQL using the configured reader
 and the resolved dates. Reproduce SUM/AVG/MIN/MAX and numeric-only coverage from

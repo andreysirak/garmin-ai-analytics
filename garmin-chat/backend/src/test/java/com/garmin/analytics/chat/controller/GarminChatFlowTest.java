@@ -62,7 +62,7 @@ class GarminChatFlowTest {
       "sleepingSeconds, AVG, 1.5, hours, 3600, "
           + "Средняя длительность сна за последние семь дней?"
   })
-  void sendsCompactEvidenceInToolMessages(
+  void executesSqlBeforeSendingCompactEvidenceToExplanation(
       String field, String operation, String expectedValue, String unit, int divisor,
       String questionText)
       throws Exception {
@@ -101,29 +101,18 @@ class GarminChatFlowTest {
       assertThat(body.at("/tools").size()).isZero();
     }).andRespond(withSuccess(modelResponse(ChatTestSupport.analyze(arguments)),
         MediaType.APPLICATION_JSON));
-    server.expect(requestTo("http://ollama:11434/api/chat")).andExpect(request -> {
-      var body = json.readTree(((MockClientHttpRequest) request).getBodyAsString());
-      assertThat(body.at("/messages/1/content").asText()).isEqualTo(question);
-      assertThat(body.hasNonNull("format")).isFalse();
-      assertThat(body.at("/tools/0/function/name").asText()).isEqualTo(ChatTestSupport.TOOL_NAME);
-      var period = body.at("/tools/0/function/parameters/properties/period");
-      assertThat(period.at("/properties/days/type").asText()).isEqualTo("integer");
-      assertThat(period.get("required")).map(fieldName -> fieldName.asText())
-          .containsExactlyInAnyOrder("type", "startDate", "endDate", "days");
-      assertThat(body.at("/options/num_predict").asInt()).isEqualTo(1024);
-    }).andRespond(withSuccess(modelToolResponse(arguments), MediaType.APPLICATION_JSON));
     String explanation = operation + " " + field + ": " + expectedValue + " " + unit
         + ". Coverage is incomplete: 3 of 7 days have numeric readings.";
     server.expect(requestTo("http://ollama:11434/api/chat")).andExpect(request -> {
       var body = json.readTree(((MockClientHttpRequest) request).getBodyAsString());
-      assertThat(body.get("messages").size()).isEqualTo(4);
+      assertThat(body.get("messages").size()).isEqualTo(3);
       assertThat(body.at("/format").isMissingNode() || body.at("/format").isNull()).isTrue();
       assertThat(body.at("/options/num_predict").asInt()).isEqualTo(1024);
       assertThat(body.at("/messages/1/content").asText()).isEqualTo(question);
-      assertThat(body.at("/messages/2/tool_calls/0/function/name").asText())
-          .isEqualTo(ChatTestSupport.TOOL_NAME);
-      assertThat(body.at("/messages/3/role").asText()).isEqualTo("tool");
-      var data = json.readTree(body.at("/messages/3/content").asText());
+      assertThat(body.at("/tools").size()).isZero();
+      assertThat(body.at("/messages/2/role").asText()).isEqualTo("system");
+      var content = body.at("/messages/2/content").asText();
+      var data = json.readTree(content.substring(content.indexOf('\n') + 1));
       assertThat(data.has("question")).isFalse();
       assertThat(data.get("aggregation").asText()).isEqualTo(operation);
       assertThat(data.at("/dateRange/startDate").asText()).isEqualTo("2026-11-09");
@@ -179,14 +168,6 @@ class GarminChatFlowTest {
     var propertyNames = new ArrayList<String>();
     branch.get("properties").fieldNames().forEachRemaining(propertyNames::add);
     assertThat(propertyNames).containsExactlyInAnyOrderElementsOf(required);
-  }
-
-  private String modelToolResponse(String arguments) throws Exception {
-    return json.writeValueAsString(Map.of("model", "synthetic-model", "done", true,
-        "message", Map.of("role", "assistant", "content", "", "tool_calls",
-            List.of(Map.of("function",
-                Map.of("name", ChatTestSupport.TOOL_NAME,
-                    "arguments", json.readTree(arguments)))))));
   }
 
   private String modelResponse(String content) throws Exception {
