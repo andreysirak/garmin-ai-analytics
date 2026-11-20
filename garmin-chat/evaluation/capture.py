@@ -56,8 +56,11 @@ def run(args):
         "num_predict": suite["protocol"]["response_tokens"],
         "num_gpu": 0,
     }
-    runtime = LocalHttp(args.ollama_url, args.timeout)
-    version, model, show = inspect_model(runtime, args.model)
+    runtime = LocalHttp(args.ollama_url, args.timeout) if bridge is not None else None
+    if runtime is not None:
+        version, model, show = inspect_model(runtime, args.model)
+    else:
+        version, model, show = None, None, None
     dirty = command("git", "status", "--porcelain") != ""
     plan = {
         "suite_version": suite["version"],
@@ -76,11 +79,12 @@ def run(args):
         "plan": plan,
         "source_sha": command("git", "rev-parse", "HEAD"),
         "source_dirty": dirty,
-        "production_sha256": production_fingerprint(),
+        "production_sha256": production_fingerprint() if bridge is not None else None,
         "model": model,
         "settings": settings,
         "runtime": version,
-        "unreported_sampling_defaults": "not overridden; not fully exposed",
+        "unreported_sampling_defaults": "not overridden; not fully exposed"
+        if bridge is not None else None,
         "deployment_id": args.deployment_id if args.mode == "application" else None,
         "measurement": "Application HTTP includes live model and SQL; no exact evidence captured"
         if args.mode == "application"
@@ -96,7 +100,8 @@ def run(args):
     private_root.mkdir(parents=True, exist_ok=True, mode=0o700)
     out.mkdir(mode=0o700)
     save(out / "manifest.json", manifest)
-    save(out / "model-info.json", show)
+    if show is not None:
+        save(out / "model-info.json", show)
     save(out / "inputs.json", exported)
     application = (
         LocalHttp(args.application_url, args.timeout)
@@ -110,9 +115,11 @@ def run(args):
             row = execute_trial(
                 case, prompt, trial, args.model, settings, suite["protocol"],
                 application if application else runtime,
-                validate_route=lambda answer: bridge.call(
-                    "validate", [{"output": answer}], suite["protocol"]
-                )[0],
+                validate_route=(
+                    lambda answer: bridge.call(
+                        "validate", [{"output": answer}], suite["protocol"]
+                    )[0]
+                ) if bridge is not None else None,
                 application=bool(application),
             )
             captured.append(row)
@@ -126,7 +133,7 @@ def run(args):
                 stream.write(json.dumps(row, allow_nan=False) + "\n")
             print(f"{stage}/{case['id']}/{trial}: {row['status']}")
     # Detect external model replacement during a run; never mutate or pull models.
-    manifest["model_unchanged"] = identity_unchanged(runtime, model)
+    manifest["model_unchanged"] = identity_unchanged(runtime, model) if runtime else None
     manifest["completed_at"] = datetime.now(timezone.utc).isoformat()
     save(
         out / "completion.json",
@@ -155,6 +162,7 @@ def run(args):
     print("Private results:", out)
     return (
         0
-        if all(r["status"] == "PASS" for r in captured) and manifest["model_unchanged"]
+        if all(r["status"] == "PASS" for r in captured)
+        and (runtime is None or manifest["model_unchanged"])
         else 2
     )
