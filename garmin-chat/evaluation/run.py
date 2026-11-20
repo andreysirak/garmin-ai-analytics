@@ -88,8 +88,9 @@ def main(argv=None):
         return 0 if all(row["status"] == "PASS" for row in judged) else 2
     for folder in [args.baseline, args.candidate]:
         completion = read(folder / "completion.json")
-        if not completion.get("model_unchanged"):
-            raise ValueError("Cannot compare runs with missing/changed model identity")
+        manifest = read(folder / "manifest.json")
+        if manifest["plan"]["mode"] == "model" and not completion.get("model_unchanged"):
+            raise ValueError("Cannot compare model runs with missing/changed model identity")
     before, after = (
         rows(args.baseline / args.baseline_results),
         rows(args.candidate / args.candidate_results),
