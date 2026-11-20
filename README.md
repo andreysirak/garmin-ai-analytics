@@ -110,6 +110,22 @@ triggered. Chat verification commands are documented in the
 [chat verification guide](garmin-chat/docs/testing.md#offline-verification) and
 [contribution guide](CONTRIBUTING.md).
 
+### Planned AI evaluation architecture
+
+![Approved target architecture: independent AI evaluation framework with test cases, runner, evaluators, black-box Garmin Chat API and model evaluation, producing a comparison report](garmin-chat/evaluation/assets/approved-evaluation-architecture.svg)
+
+**Approved target design — not yet fully implemented.** The evaluation framework
+will remain independent of Garmin Chat internals and Spring AI, with reusable
+test cases, model/application adapters, evaluators and reproducible reports.
+Black-box E2E tests will exercise the chat as a user does; optional structured
+diagnostic traces will verify routing, SQL and explanation flow without importing
+backend classes. Unit and component/integration tests remain close to the code.
+A reviewable LLM-as-a-Judge is a **later option**, not part of current grading.
+
+The [evaluation framework README](garmin-chat/evaluation/README.md#approved-target-architecture--planned-refactoring)
+explains the approved boundaries and planned SOLID / Clean Code refactoring.
+Existing evaluation capabilities and limitations are described below.
+
 The [controlled model evaluation](docs/evaluations/2026-11-19-garmin-chat/README.md)
 records observed routing and explanation failures, not just successful examples.
 The [permanent AI evaluation suite](garmin-chat/evaluation/README.md) provides
