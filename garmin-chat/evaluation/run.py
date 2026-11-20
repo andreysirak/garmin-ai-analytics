@@ -12,7 +12,7 @@ from comparison import compare, verify_capture
 from grading import apply_review, review_key
 from reporting import describe, read, rows, save
 from suite import REPO, input_item, load_suite, production_fingerprint
-from transport import JavaBridge
+from component_bridge import JavaBridge
 
 
 def main(argv=None):
