@@ -434,7 +434,6 @@ chat-eval-model:
 chat-eval-application:
 	@test -n "$(EVAL_OUTPUT)" || { echo "Set EVAL_OUTPUT=data/evaluations/NEW-RUN-NAME; existing runs are never overwritten"; exit 1; }
 	@test "$(EVAL_SYNTHETIC_DATABASE)" = yes && test -n "$(EVAL_DEPLOYMENT_ID)" || { echo "Use an isolated synthetic deployment; set EVAL_SYNTHETIC_DATABASE=yes and EVAL_DEPLOYMENT_ID"; exit 1; }
-	$(MAKE) chat-eval-prepare
 	python3 garmin-chat/evaluation/run.py run --mode application \
 		--synthetic-database --deployment-id "$(EVAL_DEPLOYMENT_ID)" \
 		--application-url "$(EVAL_APPLICATION_URL)" --ollama-url "$(EVAL_OLLAMA_URL)" \
