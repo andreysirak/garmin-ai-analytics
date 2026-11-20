@@ -9,6 +9,51 @@ expected outcome. The [technical reference](REFERENCE.md) explains the capture
 format, detailed grading rules, baseline restrictions and remaining limitations.
 Tracked in [#74](https://github.com/andreysirak/garmin-ai-analytics/issues/74).
 
+## Approved target architecture — planned refactoring
+
+> **Architecture decision (approved by project owner, 20 November 2026).** The diagram below is the agreed **target design**, not a claim that the existing suite already implements these boundaries. This documentation-only stage precedes the refactoring. The diagram is a repository-renderable recreation of the reviewed architecture sketch.
+
+![Approved target architecture: independent AI Evaluation Framework with test cases, runner and evaluators; Garmin Chat API black-box E2E and Ollama API model evaluation; evaluation report](assets/approved-evaluation-architecture.svg)
+
+**Architectural goal:** a standalone, implementation-agnostic **AI Evaluation Harness**. It must remain usable if Garmin Chat replaces Spring AI, Ollama or the entire backend implementation. Spring AI belongs to the application, **not** to the framework's core dependencies. The framework can live in this monorepo while remaining logically independent; a separate repository is not required for independence.
+
+### Testing boundaries and terminology
+
+| Layer | Purpose | Coupling | Location / status |
+| --- | --- | --- | --- |
+| Unit tests | Deterministic date, catalog, validation and orchestration logic | May import production classes | Remain in backend test sources; existing |
+| Integration / component tests | Real SQL, Spring components, prompt/decoder contracts and test-only Java bridge | Deliberately white-/gray-box | Existing; keep separate from black-box acceptance |
+| Application E2E | Send a user question through public `/api/chat` and inspect the response | **Black-box**; no imports of application internals | Existing HTTP capture is preliminary; full automatic factual verification **planned** |
+| Model evaluation | Run frozen questions and evidence against a model/provider endpoint | Model adapter only, not application code | Existing Ollama mode; provider-neutral adapters **planned** |
+| Trace-based flow evaluation | Assert routing, SQL execution count, evidence and explanation sequence | **Gray-box** via a stable, versioned diagnostic-event contract, not Java imports or arbitrary log strings | **Planned** |
+| AI quality evaluation | Grade semantic routing, factual accuracy, coverage, relevance, unsupported claims and regressions | Versioned rubric, independent synthetic oracle | Deterministic checks and human review exist; expansion **planned** |
+
+**Target component responsibilities** (names express roles, not a mandate to create one class per row):
+
+- **Test Cases / Dataset:** versioned questions, synthetic evidence, expected behavior and acceptance rubric; independent of runner and provider.
+- **Runner:** execute a case/repetition with deadlines, capture immutable provenance and return an execution record; do not implement grading.
+- **Transport ports and adapters:** application HTTP and model endpoints behind small interfaces. Ollama is one adapter, not the core abstraction.
+- **Evaluators:** deterministic assertions and separate reviewable semantic criteria; do not invoke the application implicitly or silently convert uncertain answers into passes.
+- **Reporting / comparison:** summarize PASS / FAIL / ERROR / NEEDS_REVIEW, latency and comparable model/configuration regressions without changing captured results.
+- **Optional diagnostic trace adapter:** consume a documented, stable event schema for flow assertions. A black-box run must remain possible without this adapter.
+
+### SOLID and Clean Code refactoring rules — next implementation stage
+
+1. **SRP:** separate dataset loading, execution, transport, validation/grading, review and reporting. Keep classes/functions cohesive and small without creating needless wrappers.
+2. **OCP / DIP:** introduce explicit ports for application/model transports and evaluator strategies; the runner depends on abstractions, not Spring AI, Ollama or Garmin Chat internals.
+3. **LSP / ISP:** keep adapter contracts narrow and substitutable; provider-specific fields belong in adapters or optional metadata, not mandatory core interfaces.
+4. **Clean boundaries:** no imports from `garmin-chat/backend` in the independent core; retain the existing Java bridge only in a clearly isolated component/contract-testing adapter where production fidelity is useful.
+5. **Preserve behavior:** keep existing case IDs, fixtures, review states, privacy controls, immutable captures, baseline comparability and CLI commands unless an explicitly reviewed migration is necessary.
+6. **Incremental delivery:** first review the dependency map and proposed module layout; then move responsibilities in small independently testable steps. Run existing offline checks after each step. **No refactoring or production changes are part of this documentation update.**
+
+### LLM-as-a-Judge — planned, not enabled
+
+A future optional evaluator may use an LLM to **propose** relevance, groundedness and unsupported-claim judgments. This is **not** the next implementation step and **must not** replace deterministic arithmetic, schema/route assertions, synthetic oracle checks or human adjudication. Any judge needs an explicit model/version, calibrated rubric, provenance, reviewable rationale, reproducibility controls and separate failure classification. Never treat a model judging its own answer as independent proof.
+
+The Spring AI [evaluation testing documentation](https://docs.spring.io/spring-ai/reference/api/testing.html) provides relevant evaluation concepts, and its [LLM-as-a-Judge guide](https://docs.spring.io/spring-ai/reference/guides/llm-as-judge.html) describes an optional approach. **Neither API is a required dependency of this standalone harness**; consult documentation matching the pinned Spring AI version before any application-side integration.
+
+**Delivery boundary:** this PR stage records the approved design only. The next stage is the SOLID / Clean Code refactor, followed by separately verified trace-based E2E acceptance and (later) optional judge research.
+
 ## What we test
 
 | Check | Plain meaning | Command | Needs running services? |
