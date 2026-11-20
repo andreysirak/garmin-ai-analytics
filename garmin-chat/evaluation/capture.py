@@ -5,13 +5,12 @@ import json
 import os
 from pathlib import Path
 import subprocess
-import time
 
-from fixtures import evidence
-from grading import initial_grade, numeric_hints, review_key
+from grading import review_key
 from reporting import describe, save, save_summary
 from suite import ROOT, REPO, digest, input_item, load_suite, production_fingerprint
 from transport import JavaBridge, LocalHttp
+from trial import execute_trial
 
 
 def command(*argv):
@@ -111,100 +110,14 @@ def run(args):
     for case, prompt in zip(cases, exported):
         stage = "application" if application else case["stage"]
         for trial in range(1, args.repetitions + 1):
-            payload = (
-                {"message": case["question"]}
-                if application
-                else {
-                    "model": args.model,
-                    **prompt,
-                    "stream": False,
-                    "options": settings,
-                }
+            row = execute_trial(
+                case, prompt, trial, args.model, settings, suite["protocol"],
+                application if application else runtime,
+                validate_route=lambda answer: bridge.call(
+                    "validate", [{"output": answer}], suite["protocol"]
+                )[0],
+                application=bool(application),
             )
-            row = {
-                "case_id": case["id"],
-                "stage": stage,
-                "trial": trial,
-                "case_sha256": digest(case),
-                "input_sha256": digest(payload),
-                "input": payload,
-                "started_at": datetime.now(timezone.utc).isoformat(),
-                "status": "ERROR",
-                "failures": [],
-                "review_required": [],
-            }
-            started = time.perf_counter()
-            try:
-                response = (
-                    application.json("/api/chat", payload)
-                    if application
-                    else runtime.json("/api/chat", payload)
-                )
-                if not isinstance(response, dict):
-                    raise ValueError("Expected an HTTP JSON object")
-                row.update(
-                    elapsed_seconds=time.perf_counter() - started,
-                    response=response,
-                    output_sha256=digest(response),
-                )
-                if application:
-                    text = response.get("answer")
-                    if not isinstance(text, str) or not text.strip():
-                        row.update(
-                            status="FAIL", failures=["empty_or_invalid_http_answer"]
-                        )
-                    else:
-                        row.update(
-                            status="NEEDS_REVIEW",
-                            review_required=[
-                                "routing_behavior",
-                                "factual_accuracy",
-                                "coverage",
-                                "relevance",
-                                "no_unsupported_claims",
-                            ],
-                        )
-                        row["limitation"] = (
-                            "HTTP text alone cannot establish route, SQL or exact evidence; attach a reviewed synthetic trace"
-                        )
-                else:
-                    if not isinstance(response.get("message"), dict):
-                        raise ValueError("Missing provider message object")
-                    text = response["message"].get("content", "")
-                    if (
-                        not response.get("done")
-                        or response.get("done_reason") == "length"
-                        or response.get("message", {}).get("tool_calls")
-                    ):
-                        row.update(
-                            status="FAIL",
-                            failures=["incomplete_or_unexpected_tool_output"],
-                        )
-                    else:
-                        decoded = None
-                        if stage == "routing":
-                            decoded = bridge.call(
-                                "validate", [{"output": text}], suite["protocol"]
-                            )[0]
-                            row["production_validation"] = decoded
-                        status, failures, required = initial_grade(case, text, decoded)
-                        row.update(
-                            status=status, failures=failures, review_required=required
-                        )
-                        if stage == "explanation":
-                            row.update(
-                                evidence=evidence(case, suite["protocol"]),
-                                numeric_hints=numeric_hints(text)
-                                if isinstance(text, str)
-                                else [],
-                            )
-            except (OSError, ValueError, RuntimeError, KeyError) as error:
-                # Preserve prior trials and keep operational errors distinct from model quality failures.
-                row.update(
-                    status="ERROR",
-                    elapsed_seconds=time.perf_counter() - started,
-                    error_type=type(error).__name__,
-                )
             captured.append(row)
             # Flush each result immediately; an interrupted run retains completed trials.
             with open(
