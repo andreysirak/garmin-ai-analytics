@@ -8,6 +8,7 @@ import subprocess
 
 from grading import review_key
 from reporting import describe, save, save_summary
+from ollama import inspect_model, identity_unchanged
 from suite import ROOT, REPO, digest, input_item, load_suite, production_fingerprint
 from transport import JavaBridge, LocalHttp
 from trial import execute_trial
@@ -48,19 +49,7 @@ def run(args):
         "num_gpu": 0,
     }
     runtime = LocalHttp(args.ollama_url, args.timeout)
-    version = runtime.json("/api/version")
-    tags = runtime.json("/api/tags")
-    found = [
-        m
-        for m in tags.get("models", [])
-        if args.model in {m.get("name"), m.get("model")}
-    ]
-    if len(found) != 1 or not found[0].get("digest"):
-        raise ValueError(
-            "Requested model must already be installed and have a digest; no auto-pull"
-        )
-    model = {"name": args.model, "digest": found[0]["digest"]}
-    show = runtime.json("/api/show", {"model": args.model})
+    version, model, show = inspect_model(runtime, args.model)
     dirty = command("git", "status", "--porcelain") != ""
     plan = {
         "suite_version": suite["version"],
@@ -129,15 +118,7 @@ def run(args):
                 stream.write(json.dumps(row, allow_nan=False) + "\n")
             print(f"{stage}/{case['id']}/{trial}: {row['status']}")
     # Detect external model replacement during a run; never mutate or pull models.
-    try:
-        final = runtime.json("/api/tags")
-        manifest["model_unchanged"] = any(
-            m.get("digest") == model["digest"]
-            and args.model in {m.get("name"), m.get("model")}
-            for m in final.get("models", [])
-        )
-    except (OSError, ValueError):
-        manifest["model_unchanged"] = False
+    manifest["model_unchanged"] = identity_unchanged(runtime, model)
     manifest["completed_at"] = datetime.now(timezone.utc).isoformat()
     save(
         out / "completion.json",
