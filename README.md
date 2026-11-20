@@ -2,10 +2,11 @@
 
 **Your data. Your insights. Your goals.**
 
-Explore Garmin activity and recovery data through a daily data pipeline,
-PostgreSQL analytics and natural-language questions. Built as an independent
-learning and portfolio project, with a longer-term goal of a community-driven
-platform.
+A free, community-driven platform that helps Garmin users better understand their activity, recovery and health trends through data analytics and AI.
+
+- **For Garmin users** — understand what your data means, not just see numbers
+- **For developers** — contribute to a real open-source AI and data engineering platform
+- **For personal development** — explore how data and AI can help people pursue measurable goals
 
 ## Current status
 
@@ -74,7 +75,7 @@ guidance from a bounded local check, not a verified minimum or stress-test resul
    `make stack-up` deploys PostgreSQL and Airflow.
 2. [Run the ingestion pipeline](docs/ingestion-guide.md#4-run-the-pipeline)
    through the Airflow UI.
-3. Follow the [chat setup](garmin-chat/README.md) for its read-only database
+3. Follow the [chat setup](garmin-chat/docs/setup.md) for its read-only database
    credentials and deployment settings, then run `make chat-up` to deploy and
    forward the frontend. Keep the forwarding terminal open.
 
@@ -106,7 +107,7 @@ still require changes to storage, IAM, secrets and execution settings.
 Code, SQL and model behaviour need different checks. Java/Python and infrastructure
 checks run in GitHub Actions; a separate Airflow smoke workflow is manually
 triggered. Chat verification commands are documented in the
-[chat guide](garmin-chat/README.md#offline-verification) and
+[chat verification guide](garmin-chat/docs/testing.md#offline-verification) and
 [contribution guide](CONTRIBUTING.md).
 
 The [controlled model evaluation](docs/evaluations/2026-11-19-garmin-chat/README.md)
@@ -155,14 +156,15 @@ for tracked investigations and tasks.
 | Understand past decisions and failures | [Ingestion retrospective](docs/retrospectives/0001-garmin-api-integration.md) · [AI chat retrospective](docs/retrospectives/0002-ai-chat-integration.md) |
 | Contribute or review changes | [Contribution guide](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) |
 
-<a id="contributions-welcome"></a>
+## Contributions welcome
 
-<a id="project-philosophy"></a>
+Interested in Java, Python, Airflow, Kubernetes, or data engineering? Contributions are welcome, from focused bug fixes and tests to documentation improvements. Explore the [open issues](https://github.com/andreysirak/garmin-ai-analytics/issues), propose an improvement, or submit a pull request. No invitation is needed—see [CONTRIBUTING.md](CONTRIBUTING.md) for a friendly first-contribution guide and review expectations.
 
-Contributions are welcome: focused fixes, tests, documentation and ideas.
-Build incrementally, with clear component boundaries, testable business logic,
-data integrity and operational reliability. This project is **not a medical
-diagnosis or treatment service**.
+## Project philosophy
+
+Build incrementally, with clear component boundaries, testable business logic, data integrity, and operational reliability. Add infrastructure only where it serves a practical need.
+
+This is an independent learning and portfolio project, **not a medical diagnosis or treatment service**.
 
 <details>
 <summary>Links for existing README bookmarks</summary>
