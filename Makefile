@@ -65,6 +65,7 @@ EVAL_SYNTHETIC_DATABASE ?= no
         stack-up stack-restart stack-config-check chat-up chat-ui chat-images kind-load-chat-images chat-validate
 
 help:
+	@echo "  make docs-check             - Check tracked Markdown links and anchors offline (Lychee 0.24.2)"
 	@echo "Cluster and infrastructure:"
 	@echo "  make stack-up               - Run the existing full startup sequence in order"
 	@echo "  make stack-restart          - Reapply configuration and restart workloads in the existing cluster"
@@ -439,3 +440,8 @@ chat-eval-application:
 		--application-url "$(EVAL_APPLICATION_URL)" --ollama-url "$(EVAL_OLLAMA_URL)" \
 		--model "$(EVAL_MODEL)" --split "$(EVAL_SPLIT)" --repetitions "$(EVAL_REPETITIONS)" \
 		--timeout "$(EVAL_TIMEOUT)" --output "$(EVAL_OUTPUT)"
+
+# Git-tracked input avoids generated/vendor documentation in local working trees.
+.PHONY: docs-check
+docs-check:
+	git ls-files -z '*.md' | xargs -0 lychee --offline --include-fragments --no-progress

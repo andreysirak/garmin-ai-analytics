@@ -27,3 +27,16 @@ jobs:
         run: make infra-validate
       - name: Verify PostgreSQL bootstrap, preflight and connection configuration
         run: python3 -m unittest discover -s infrastructure/tests -v
+
+  documentation-links:
+    name: Check documentation links
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Check local Markdown links and fragments offline
+        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
+        with:
+          lycheeVersion: v0.24.2
+          args: --offline --include-fragments --no-progress './**/*.md'
+          fail: true
