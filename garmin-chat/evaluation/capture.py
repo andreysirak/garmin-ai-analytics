@@ -39,9 +39,17 @@ def run(args):
         raise ValueError(
             "Application mode requires --synthetic-database and --deployment-id; never point at a personal deployment"
         )
-    bridge = JavaBridge()
-    items = [input_item(c, suite["protocol"]) for c in cases]
-    exported = bridge.call("export", items, suite["protocol"])
+    # Application E2E uses only its public HTTP contract; Java internals are optional.
+    bridge = JavaBridge() if args.mode != "application" else None
+    exported = (
+        bridge.call(
+            "export",
+            [input_item(c, suite["protocol"]) for c in cases],
+            suite["protocol"],
+        )
+        if bridge is not None
+        else [{"question": c["question"]} for c in cases]
+    )
     settings = {
         "temperature": 0,
         "num_ctx": suite["protocol"]["context_tokens"],
