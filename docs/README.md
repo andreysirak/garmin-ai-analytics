@@ -41,7 +41,7 @@ observations, not guarantees for the current revision.
 
 ## Evaluate AI changes
 
-Use the [AI evaluation start guide](../garmin-chat/evaluation/README.md),
-[test-case catalogue](../garmin-chat/evaluation/TEST-CASES.md) and
-[technical reference](../garmin-chat/evaluation/REFERENCE.md) for offline contracts,
+Use the [AI evaluation start guide](../ai-evaluation-framework/README.md),
+[test-case catalogue](../ai-evaluation-framework/TEST-CASES.md) and
+[technical reference](../ai-evaluation-framework/REFERENCE.md) for offline contracts,
 real-model trials, synthetic application captures, review and baseline comparisons.

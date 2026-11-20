@@ -110,27 +110,21 @@ triggered. Chat verification commands are documented in the
 [chat verification guide](garmin-chat/docs/testing.md#offline-verification) and
 [contribution guide](CONTRIBUTING.md).
 
-### Planned AI evaluation architecture
+### AI evaluation architecture
 
-![Approved target architecture: independent AI evaluation framework with test cases, runner, evaluators, black-box Garmin Chat API and model evaluation, producing a comparison report](garmin-chat/evaluation/assets/approved-evaluation-architecture.svg)
+![Standalone Java evaluation runner, case dataset, Garmin Chat and Ollama HTTP adapters, and comparison reports](ai-evaluation-framework/assets/approved-evaluation-architecture.svg)
 
-**Approved target design — not yet fully implemented.** The evaluation framework
-will remain independent of Garmin Chat internals and Spring AI, with reusable
-test cases, model/application adapters, evaluators and reproducible reports.
-Black-box E2E tests will exercise the chat as a user does; optional structured
-diagnostic traces will verify routing, SQL and explanation flow without importing
-backend classes. Unit and component/integration tests remain close to the code.
-A reviewable LLM-as-a-Judge is a **later option**, not part of current grading.
-
-The [evaluation framework README](garmin-chat/evaluation/README.md#approved-target-architecture--planned-refactoring)
-explains the approved boundaries and planned SOLID / Clean Code refactoring.
-Existing evaluation capabilities and limitations are described below.
+The Java 25 framework runs independently of Garmin Chat and Spring AI. It
+evaluates the public chatbot API on a synthetic deployment or sends versioned
+prompts directly to Ollama. Deterministic checks validate structured routing.
+Human reviewers assess factual accuracy and other semantic criteria.
+Production prompt, routing and AI flow tests live in the backend test suite.
 
 The [controlled model evaluation](docs/evaluations/2026-11-19-garmin-chat/README.md)
 records observed routing and explanation failures, not just successful examples.
-The [permanent AI evaluation suite](garmin-chat/evaluation/README.md) provides
+The [permanent AI evaluation suite](ai-evaluation-framework/README.md) provides
 versioned synthetic cases, repeatable model/application runs, explicit review
-and baseline comparison. See its [test-case catalogue](garmin-chat/evaluation/TEST-CASES.md)
+and baseline comparison. See its [test-case catalogue](ai-evaluation-framework/TEST-CASES.md)
 and start with `make chat-eval-test` for offline evaluation-contract checks.
 Passing mocked or offline tests does not establish real-model answer quality.
 Dependency vulnerability scanning remains an open follow-up in

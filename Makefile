@@ -48,8 +48,17 @@ EVAL_REPETITIONS ?= 3
 EVAL_STAGE ?= all
 EVAL_SPLIT ?= regression
 EVAL_TIMEOUT ?= 120
+EVAL_TEMPERATURE ?= 0
+EVAL_NUM_CTX ?= 32768
+EVAL_NUM_PREDICT ?= 1024
+EVAL_NUM_GPU ?= 0
 EVAL_DEPLOYMENT_ID ?=
 EVAL_SYNTHETIC_DATABASE ?= no
+EVAL_MAVEN_FLAGS ?=
+EVAL_MODULE := ai-evaluation-framework
+EVAL_MAVEN = mvn -B -ntp $(EVAL_MAVEN_FLAGS) -f $(EVAL_MODULE)/pom.xml
+EVAL_JAVA = $(if $(JAVA_HOME),"$(JAVA_HOME)/bin/java",java)
+EVAL_CLI = $(EVAL_JAVA) -jar $(EVAL_MODULE)/target/ai-evaluation.jar
 
 .PHONY: help prepare-garmin-raw-data cluster-create cluster-status cluster-delete infra-validate infra-up airflow-operator-rollout infra-down \
         infra-status infra-resources airflow-ui airflow-password airflow-logs test-infra java-verify \
@@ -112,8 +121,9 @@ help:
 	@echo "  make airflow-image          - Build the Airflow image with Garmin operator packages"
 	@echo "  make kind-load-airflow-image - Load the local Airflow image into kind"
 	@echo "Chat (existing garmin-analytics namespace):"
-	@echo "  make chat-eval-test         - Offline AI evaluation case, grader and Java bridge checks"
-	@echo "  make chat-eval-prepare      - Compile the production prompt/validation evaluation adapter"
+	@echo "  make chat-eval-test         - Standalone Java evaluation and loopback stub tests"
+	@echo "  make chat-eval-component-test - Production routing, prompt, advisor and AI flow tests"
+	@echo "  make chat-eval-build        - Build the standalone evaluation CLI"
 	@echo "  make chat-eval-list         - List versioned AI evaluation cases without a model or database"
 	@echo "  make chat-eval-model        - Evaluate installed Ollama model (requires EVAL_OUTPUT)"
 	@echo "  make chat-eval-application  - Capture isolated synthetic chat path (requires explicit acknowledgement)"
@@ -407,37 +417,41 @@ chat-ui:
 		service/$(CHAT_RELEASE)-frontend "$$port:80"
 
 # Reusable AI evaluations. No model/DB access in offline checks.
-.PHONY: chat-eval-test chat-eval-prepare chat-eval-sql-test chat-eval-list chat-eval-model chat-eval-application
+.PHONY: chat-eval-test chat-eval-component-test chat-eval-build chat-eval-sql-test chat-eval-list chat-eval-model chat-eval-application
 chat-eval-test:
-	python3 -m unittest discover -s garmin-chat/evaluation/tests -v
-	mvn -B -ntp -f garmin-chat/backend/pom.xml -Dtest=EvaluationBridgeTest test
+	$(EVAL_MAVEN) test
 
-chat-eval-prepare:
-	mvn -B -ntp -f garmin-chat/backend/pom.xml test-compile dependency:build-classpath -Dmdep.includeScope=test -Dmdep.outputFile=target/evaluation-classpath.txt
-	python3 garmin-chat/evaluation/run.py prepare
+chat-eval-component-test:
+	mvn -B -ntp $(EVAL_MAVEN_FLAGS) -f garmin-chat/backend/pom.xml \
+		-Dtest=ProductionEvaluationContractTest,GarminChatFlowTest,PromptBudgetTest,RoutingSchemaTest test
+
+chat-eval-build:
+	$(EVAL_MAVEN) -DskipTests package
 
 chat-eval-sql-test:
 	@test -n "$$GARMIN_CHAT_TEST_DB_URL" || { echo "Set an isolated PostgreSQL test URL and reader credentials first"; exit 1; }
-	mvn -B -ntp -f garmin-chat/backend/pom.xml -Dtest=PostgresMetricAggregationDatabaseTest test
+	mvn -B -ntp $(EVAL_MAVEN_FLAGS) -f garmin-chat/backend/pom.xml -Dtest=PostgresMetricAggregationDatabaseTest test
 
-chat-eval-list:
-	python3 garmin-chat/evaluation/run.py list
+chat-eval-list: chat-eval-build
+	$(EVAL_CLI) list
 
 chat-eval-model:
 	@test -n "$(EVAL_OUTPUT)" || { echo "Set EVAL_OUTPUT=data/evaluations/NEW-RUN-NAME; existing runs are never overwritten"; exit 1; }
-	$(MAKE) chat-eval-prepare
-	python3 garmin-chat/evaluation/run.py run --mode model \
+	$(MAKE) chat-eval-build
+	$(EVAL_CLI) run --mode model \
 		--ollama-url "$(EVAL_OLLAMA_URL)" --model "$(EVAL_MODEL)" \
 		--stage "$(EVAL_STAGE)" --split "$(EVAL_SPLIT)" --repetitions "$(EVAL_REPETITIONS)" \
+		--temperature "$(EVAL_TEMPERATURE)" --num-ctx "$(EVAL_NUM_CTX)" \
+		--num-predict "$(EVAL_NUM_PREDICT)" --num-gpu "$(EVAL_NUM_GPU)" \
 		--timeout "$(EVAL_TIMEOUT)" --output "$(EVAL_OUTPUT)"
 
 chat-eval-application:
 	@test -n "$(EVAL_OUTPUT)" || { echo "Set EVAL_OUTPUT=data/evaluations/NEW-RUN-NAME; existing runs are never overwritten"; exit 1; }
 	@test "$(EVAL_SYNTHETIC_DATABASE)" = yes && test -n "$(EVAL_DEPLOYMENT_ID)" || { echo "Use an isolated synthetic deployment; set EVAL_SYNTHETIC_DATABASE=yes and EVAL_DEPLOYMENT_ID"; exit 1; }
-	python3 garmin-chat/evaluation/run.py run --mode application \
+	$(MAKE) chat-eval-build
+	$(EVAL_CLI) run --mode application \
 		--synthetic-database --deployment-id "$(EVAL_DEPLOYMENT_ID)" \
-		--application-url "$(EVAL_APPLICATION_URL)" --ollama-url "$(EVAL_OLLAMA_URL)" \
-		--model "$(EVAL_MODEL)" --split "$(EVAL_SPLIT)" --repetitions "$(EVAL_REPETITIONS)" \
+		--application-url "$(EVAL_APPLICATION_URL)" --split "$(EVAL_SPLIT)" --repetitions "$(EVAL_REPETITIONS)" \
 		--timeout "$(EVAL_TIMEOUT)" --output "$(EVAL_OUTPUT)"
 
 # Git-tracked input avoids generated/vendor documentation in local working trees.

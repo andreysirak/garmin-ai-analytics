@@ -22,12 +22,9 @@ jobs:
           distribution: temurin
           java-version: "25"
           cache: maven
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
-        with:
-          python-version: "3.12"
-      - name: Check cases, graders and production bridge
+      - name: Check standalone cases, graders and HTTP adapters
         run: make chat-eval-test
-      - name: Prepare production prompt adapter
-        run: make chat-eval-prepare
-      - name: Exercise capture with real Java and a synthetic HTTP stub
-        run: GARMIN_EVAL_JAVA_SMOKE=1 python3 -m unittest discover -s garmin-chat/evaluation/tests -p test_bridge_transport.py -v
+      - name: Check production component contracts and AI flow
+        run: make chat-eval-component-test
+      - name: Build the standalone CLI and load the bundled cases
+        run: make chat-eval-list
