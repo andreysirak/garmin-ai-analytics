@@ -54,6 +54,27 @@ The Spring AI [evaluation testing documentation](https://docs.spring.io/spring-a
 
 **Delivery boundary:** this PR stage records the approved design only. The next stage is the SOLID / Clean Code refactor, followed by separately verified trace-based E2E acceptance and (later) optional judge research.
 
+### Refactoring implementation status (20 November 2026)
+
+The second-stage refactor has **started on this PR branch**. The initial
+behavior-preserving extraction separates single-trial execution and stage grading
+(`trial.py`) from run orchestration (`capture.py`), and isolates Ollama
+model identity/provenance (`ollama.py`). The trial executor accepts a transport
+port and an optional route validator; application HTTP trials no longer instantiate
+the Java test bridge. Focused contract tests have been added.
+
+**Not yet complete:** model-mode prompt export/validation still deliberately uses
+the Java bridge, and the run orchestration, provenance, CLI, storage and report
+modules still require further SOLID/Clean Code review. Application runs still
+query Ollama for provenance and require a synthetic deployment. Structured trace
+ingestion, provider-neutral model discovery and optional LLM-as-a-Judge remain
+planned. The Make wrappers still prepare the Java bridge; removing that unnecessary
+step for application-only runs is follow-up work.
+
+This change has **not** been validated by a full Java/Python CI run or a live
+model/application run in this environment. Do not treat it as acceptance-ready
+until those checks and a human review pass.
+
 ## What we test
 
 | Check | Plain meaning | Command | Needs running services? |
