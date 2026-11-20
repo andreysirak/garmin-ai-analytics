@@ -110,11 +110,22 @@ triggered. Chat verification commands are documented in the
 [chat verification guide](garmin-chat/docs/testing.md#offline-verification) and
 [contribution guide](CONTRIBUTING.md).
 
+### AI evaluation architecture
+
+![Standalone Java evaluation runner, case dataset, Garmin Chat and Ollama HTTP adapters, and comparison reports](ai-evaluation-framework/assets/approved-evaluation-architecture.svg)
+
+The Java 25 framework runs independently of Garmin Chat and Spring AI. It
+evaluates the public chatbot API on a synthetic deployment or sends versioned
+prompts directly to Ollama. Deterministic checks validate structured routing.
+Human reviewers assess factual accuracy and other semantic criteria.
+Production prompt, routing and AI flow tests live in the backend test suite.
+
 The [controlled model evaluation](docs/evaluations/2026-11-19-garmin-chat/README.md)
 records observed routing and explanation failures, not just successful examples.
-A permanent, versioned regression suite is being reviewed in
-[draft PR #75](https://github.com/andreysirak/garmin-ai-analytics/pull/75)
-([#74](https://github.com/andreysirak/garmin-ai-analytics/issues/74)).
+The [permanent AI evaluation suite](ai-evaluation-framework/README.md) provides
+versioned synthetic cases, repeatable model/application runs, explicit review
+and baseline comparison. See its [test-case catalogue](ai-evaluation-framework/TEST-CASES.md)
+and start with `make chat-eval-test` for offline evaluation-contract checks.
 Passing mocked or offline tests does not establish real-model answer quality.
 Dependency vulnerability scanning remains an open follow-up in
 [#6](https://github.com/andreysirak/garmin-ai-analytics/issues/6).

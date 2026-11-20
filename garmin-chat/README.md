@@ -109,10 +109,14 @@ Synthetic fixtures and mocked model responses verify code behaviour; they do
 not measure real-model answer quality.
 
 The [controlled evaluation](../docs/evaluations/2026-11-19-garmin-chat/README.md)
-records model failures and grading caveats. The permanent evaluation suite in
-[draft PR #75](https://github.com/andreysirak/garmin-ai-analytics/pull/75)
-([#74](https://github.com/andreysirak/garmin-ai-analytics/issues/74)) is separate
-work under review. Do not assume its Make targets are present on this branch.
+records model failures and grading caveats. The [permanent AI evaluation suite](../ai-evaluation-framework/README.md) has versioned synthetic
+cases, actual production prompt export, explicit review and baseline comparison.
+Read the [test-case catalogue](../ai-evaluation-framework/TEST-CASES.md), then run
+`make chat-eval-test` for offline checks. Use
+`make chat-eval-model EVAL_OUTPUT=data/evaluations/NEW-RUN` for real-model
+routing/explanation evaluation. Application-path captures use
+`make chat-eval-application` against an explicitly isolated synthetic deployment;
+see the suite guide for prerequisites and limitations.
 
 ## Next steps
 

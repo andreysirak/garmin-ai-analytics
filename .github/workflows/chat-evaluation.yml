@@ -1,0 +1,30 @@
+name: Garmin Chat Evaluation Checks
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  evaluation-contracts:
+    name: Garmin Chat Evaluation Contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+      - name: Check standalone cases, graders and HTTP adapters
+        run: make chat-eval-test
+      - name: Check production component contracts and AI flow
+        run: make chat-eval-component-test
+      - name: Build the standalone CLI and load the bundled cases
+        run: make chat-eval-list

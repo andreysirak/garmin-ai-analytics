@@ -85,6 +85,15 @@ Keep profile IDs, credentials, real measurements and answers out of commits and
 public logs. Record manual results only after executing the checks above, with
 the revision, deployment, model, dates and any skipped scenarios identified.
 
+## AI evaluation suite
+
+The [evaluation guide](../../ai-evaluation-framework/README.md) separates offline contracts,
+real-model routing/explanation trials and synthetic application-path captures.
+The [catalogue](../../ai-evaluation-framework/TEST-CASES.md) lists stable scenarios and expected
+behaviour. Start with `make chat-eval-test`; a passing offline suite does not
+establish model answer quality. Live runs require already-running services and
+explicit output directories. Follow the guide for evidence review and comparison.
+
 ## Offline verification
 
 ```sh
