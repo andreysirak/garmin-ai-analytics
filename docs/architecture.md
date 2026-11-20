@@ -12,7 +12,7 @@ Existing node-local installations require a one-time migration.
 `make stack-up` composes the existing startup targets; `make stack-restart`
 reapplies them and restarts workloads in place. Both check creation-time kind
 settings before deployment and require an explicit, backed-up rebuild when they
-differ. The [manual Quick start](../README.md#quick-start) remains supported;
+differ. The [manual Quick start](getting-started.md#quick-start) remains supported;
 see [startup/restart and rebuild behavior](database-storage.md#startup-and-restart-55).
 
 **Environment:** This is a local development deployment running on the developer's Mac, not a production-grade or always-on service. See [Kubernetes execution decision](decisions/0001-kubernetes-execution.md) for why local kind was chosen over managed cloud services and what a GCP Cloud Composer migration would require.

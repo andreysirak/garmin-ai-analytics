@@ -283,3 +283,11 @@ roles, Mac/internal client connectivity, and synthetic-row persistence across
 Pod replacement and deployment rollback. See
 [Local analytics PostgreSQL](docs/postgresql.md) for the verification behavior
 and storage lifecycle.
+
+## Documentation changes
+
+Use the [documentation index](docs/README.md) to place instructions in the right
+guide. Keep defaults in the owning configuration reference and historical results
+in dated verification records. Follow the [testing terminology and maintenance
+conventions](docs/documentation-maintenance.md). Before submitting Markdown changes,
+install Lychee v0.24.2, stage new files and run `make docs-check`.
