@@ -7,13 +7,16 @@ Run commands from the repository root. Deployment steps remain manual.
 
 [Chat overview](../README.md) · [Setup](setup.md) · [Analytics reference](analytics-reference.md) · [Diagnostics](chat-diagnostics.md)
 
-## Step 1 manual verification (deployment requires approval)
+<a id="step-1-manual-verification-deployment-requires-approval"></a>
+
+## Manual application verification
 
 The local automated checks do not establish live Ollama answer correctness.
-Run this checklist after the application deployment has been explicitly approved.
+Run this checklist against the deployment you intend to review, after arranging
+any required deployment approval.
 It uses the existing summary analytics; correlation remains unsupported.
 
-1. **After deployment approval only**, rebuild/load the app images and upgrade
+1. Rebuild/load the app images and upgrade
    the existing chat release:
 
    ```sh
@@ -79,8 +82,8 @@ It uses the existing summary analytics; correlation remains unsupported.
    successful responses contain only `answer`, `startDate`, `endDate`.
 
 Keep profile IDs, credentials, real measurements and answers out of commits and
-public logs. No deployment or live Ollama test has been performed for this UX
-change; record actual manual results only after executing the checks above.
+public logs. Record manual results only after executing the checks above, with
+the revision, deployment, model, dates and any skipped scenarios identified.
 
 ## Offline verification
 
@@ -130,7 +133,6 @@ tests also verify calculated compact evidence and the no-data path with stubbed
 model responses. The offline HTTP integration test exercises MVC, repository
 mapping and the real Spring AI client with mocked JDBC and HTTP boundaries.
 
-Before the tool-calling refactor, Step 3 verification passed 226 offline tests
-and 35 read-only PostgreSQL tests and built the executable JAR. All model
-responses in these checks are stubbed. The opt-in suite requires
-database environment settings. Both suites run without an Ollama connection.
+For earlier test counts and their limitations, see the
+[historical verification note](../../docs/verification/0076-chat-checks-reference.md).
+Those results do not establish that the current revision passes.

@@ -55,8 +55,7 @@ includes further answer checks that are not implemented yet.
 
 For example, “How many steps did I take last week?” requests a supported
 calculation; “What was my average resting heart rate yesterday?” does too.
-Use a period with stored readings when checking results. The default maximum
-range is 31 inclusive days. “Last week” is the previous Monday–Sunday; the
+Use a period with stored readings when checking results. The maximum query range is configurable; see the [configuration reference](docs/configuration.md). “Last week” is the previous Monday–Sunday; the
 last N days excludes today.
 
 “How productive was I?” should prompt clarification rather than silently
@@ -80,7 +79,7 @@ The backend uses Java 25, Spring JDBC, Bean Validation and Actuator; the fronten
 uses React, Vite and Nginx. A custom Helm chart manages the chat components.
 The pinned default model is quantized Qwen 2.5 1.5B Instruct; model and resource
 settings are configurable. See [configuration and prerequisites](docs/setup.md#configuration-and-prerequisites)
-before choosing a larger model or context window.
+and the [configuration reference](docs/configuration.md) before choosing a larger model or context window.
 
 ## Run locally
 
@@ -129,6 +128,7 @@ work. This chat is not a medical diagnosis or treatment service.
 
 | I want to… | Read |
 | --- | --- |
+| Choose model, limits and timeouts | [Configuration reference](docs/configuration.md) |
 | Configure credentials and deploy | [Setup guide](docs/setup.md) |
 | Understand SQL, evidence and orchestration | [Analytics reference](docs/analytics-reference.md) |
 | Run offline, SQL or manual checks | [Verification guide](docs/testing.md) |

@@ -53,6 +53,7 @@ CHAT_PORT ?= 5173
         stack-up stack-restart stack-config-check chat-up chat-ui chat-images kind-load-chat-images chat-validate
 
 help:
+	@echo "  make docs-check             - Check tracked Markdown links and anchors offline (Lychee 0.24.2)"
 	@echo "Cluster and infrastructure:"
 	@echo "  make stack-up               - Run the existing full startup sequence in order"
 	@echo "  make stack-restart          - Reapply configuration and restart workloads in the existing cluster"
@@ -386,3 +387,8 @@ chat-ui:
 	echo "Keep this terminal open. Ctrl+C stops forwarding while the chat Pods stay running."; \
 	exec $(KUBECTL) -n $(POSTGRESQL_NAMESPACE) port-forward --address 127.0.0.1 \
 		service/$(CHAT_RELEASE)-frontend "$$port:80"
+
+# Git-tracked input avoids generated/vendor documentation in local working trees.
+.PHONY: docs-check
+docs-check:
+	git ls-files -z '*.md' | xargs -0 lychee --offline --include-fragments --no-progress

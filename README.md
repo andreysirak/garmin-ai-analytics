@@ -143,6 +143,8 @@ for tracked investigations and tasks.
 
 ## Documentation
 
+Start with the [documentation index](docs/README.md), grouped by task.
+
 | I want to… | Read |
 | --- | --- |
 | Install the local stack | [Getting started](docs/getting-started.md) |
