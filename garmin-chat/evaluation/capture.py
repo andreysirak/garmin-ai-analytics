@@ -10,7 +10,8 @@ from grading import review_key
 from reporting import describe, save, save_summary
 from ollama import inspect_model, identity_unchanged
 from suite import ROOT, REPO, digest, input_item, load_suite, production_fingerprint
-from transport import JavaBridge, LocalHttp
+from component_bridge import JavaBridge
+from transport import LocalHttp
 from trial import execute_trial
 
 
