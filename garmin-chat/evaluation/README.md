@@ -9,9 +9,9 @@ expected outcome. The [technical reference](REFERENCE.md) explains the capture
 format, detailed grading rules, baseline restrictions and remaining limitations.
 Tracked in [#74](https://github.com/andreysirak/garmin-ai-analytics/issues/74).
 
-## Approved target architecture — planned refactoring
+## Approved target architecture — refactoring in progress
 
-> **Architecture decision (approved by project owner, 20 November 2026).** The diagram below is the agreed **target design**, not a claim that the existing suite already implements these boundaries. This documentation-only stage precedes the refactoring. The diagram is a repository-renderable recreation of the reviewed architecture sketch.
+> **Architecture decision (approved by project owner, 20 November 2026).** The diagram below is the agreed **target design**, not a claim that the existing suite already implements these boundaries. The refactoring is being implemented incrementally on this PR branch. The diagram is a repository-renderable recreation of the reviewed architecture sketch.
 
 ![Approved target architecture: independent AI Evaluation Framework with test cases, runner and evaluators; Garmin Chat API black-box E2E and Ollama API model evaluation; evaluation report](assets/approved-evaluation-architecture.svg)
 
@@ -37,14 +37,14 @@ Tracked in [#74](https://github.com/andreysirak/garmin-ai-analytics/issues/74).
 - **Reporting / comparison:** summarize PASS / FAIL / ERROR / NEEDS_REVIEW, latency and comparable model/configuration regressions without changing captured results.
 - **Optional diagnostic trace adapter:** consume a documented, stable event schema for flow assertions. A black-box run must remain possible without this adapter.
 
-### SOLID and Clean Code refactoring rules — next implementation stage
+### SOLID and Clean Code refactoring rules
 
 1. **SRP:** separate dataset loading, execution, transport, validation/grading, review and reporting. Keep classes/functions cohesive and small without creating needless wrappers.
 2. **OCP / DIP:** introduce explicit ports for application/model transports and evaluator strategies; the runner depends on abstractions, not Spring AI, Ollama or Garmin Chat internals.
 3. **LSP / ISP:** keep adapter contracts narrow and substitutable; provider-specific fields belong in adapters or optional metadata, not mandatory core interfaces.
 4. **Clean boundaries:** no imports from `garmin-chat/backend` in the independent core; retain the existing Java bridge only in a clearly isolated component/contract-testing adapter where production fidelity is useful.
 5. **Preserve behavior:** keep existing case IDs, fixtures, review states, privacy controls, immutable captures, baseline comparability and CLI commands unless an explicitly reviewed migration is necessary.
-6. **Incremental delivery:** first review the dependency map and proposed module layout; then move responsibilities in small independently testable steps. Run existing offline checks after each step. **No refactoring or production changes are part of this documentation update.**
+6. **Incremental delivery:** first review the dependency map and proposed module layout; then move responsibilities in small independently testable steps. Run existing offline checks after each step. Review and verify each refactoring increment before merge.
 
 ### LLM-as-a-Judge — planned, not enabled
 
@@ -52,28 +52,39 @@ A future optional evaluator may use an LLM to **propose** relevance, groundednes
 
 The Spring AI [evaluation testing documentation](https://docs.spring.io/spring-ai/reference/api/testing.html) provides relevant evaluation concepts, and its [LLM-as-a-Judge guide](https://docs.spring.io/spring-ai/reference/guides/llm-as-judge.html) describes an optional approach. **Neither API is a required dependency of this standalone harness**; consult documentation matching the pinned Spring AI version before any application-side integration.
 
-**Delivery boundary:** this PR stage records the approved design only. The next stage is the SOLID / Clean Code refactor, followed by separately verified trace-based E2E acceptance and (later) optional judge research.
+**Delivery boundary:** the approved design is now being implemented on this draft PR. Trace-based E2E acceptance and optional judge research remain separate future work.
 
 ### Refactoring implementation status (20 November 2026)
 
-The second-stage refactor has **started on this PR branch**. The initial
-behavior-preserving extraction separates single-trial execution and stage grading
-(`trial.py`) from run orchestration (`capture.py`), and isolates Ollama
-model identity/provenance (`ollama.py`). The trial executor accepts a transport
-port and an optional route validator; application HTTP trials no longer instantiate
-the Java test bridge. Focused contract tests have been added.
+**Implemented on this draft PR branch (pending local verification):**
 
-**Not yet complete:** model-mode prompt export/validation still deliberately uses
-the Java bridge, and the run orchestration, provenance, CLI, storage and report
-modules still require further SOLID/Clean Code review. Application runs still
-query Ollama for provenance and require a synthetic deployment. Structured trace
-ingestion, provider-neutral model discovery and optional LLM-as-a-Judge remain
-planned. The Make wrappers still prepare the Java bridge; removing that unnecessary
-step for application-only runs is follow-up work.
+- `trial.py`: single-trial execution with injected HTTP transport, optional
+  route decoder and separate model/application grading.
+- `transport.py`: loopback-only HTTP with bounded response size and redirects
+  disabled; no Java or Spring AI imports.
+- `component_bridge.py`: optional Java production-prompt/validation adapter
+  for model-mode component fidelity and explicit `prepare` operations.
+- `ollama.py`: provider-specific installed-model identity and metadata.
+- `capture.py`: retains orchestration, immutable capture, provenance and
+  private reports. **Application mode no longer instantiates the Java bridge,
+  queries Ollama or requires model metadata**. Its only network call is to the
+  explicitly configured application HTTP endpoint.
+- `Makefile`: `chat-eval-application` no longer compiles the Java bridge.
+- Added isolated trial, adapter and application-only contract tests.
 
-This change has **not** been validated by a full Java/Python CI run or a live
-model/application run in this environment. Do not treat it as acceptance-ready
-until those checks and a human review pass.
+**Remaining limitations:** the isolated model mode still intentionally uses the
+production Java prompt/validation bridge (component coupling), and the CLI,
+provenance, capture storage and reporting can be split further if complexity
+warrants. Model mode currently supports Ollama; adding a different provider
+requires a provider adapter. Application E2E still reports `NEEDS_REVIEW` for
+nonempty responses, not automatic factual PASS. The deployment identity and
+`--synthetic-database` flag are operator attestations, **not automatic proof
+that the target database is synthetic**. Structured diagnostic-trace validation,
+provider-neutral model metadata and LLM-as-a-Judge remain future stages.
+
+**Verification:** no complete local Python/Java CI or live model/application
+run was performed by this editing environment. Run offline checks and inspect
+the implementation before merge. Keep the PR in Draft.
 
 ## What we test
 
@@ -105,8 +116,8 @@ cannot give it a pass. This is case `ANSWER-001` in the
 
 ## Run it step by step
 
-Run these commands from the repository root. Live targets compile the Java bridge
-automatically, then call the same Python runner. They do not install models,
+Run these commands from the repository root. Model-mode targets compile the
+optional Java bridge; application-mode targets do not need Java or Ollama. They do not install models,
 create deployments, modify your database or start port-forwards.
 
 ### 1. Check the suite and see its cases
