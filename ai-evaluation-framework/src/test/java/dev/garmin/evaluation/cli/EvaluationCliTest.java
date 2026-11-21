@@ -12,7 +12,10 @@ import dev.garmin.evaluation.transport.LoopbackHttp;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
+import java.io.BufferedWriter;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -24,7 +27,13 @@ import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
@@ -123,6 +132,135 @@ class EvaluationCliTest {
             assertThrows(IllegalArgumentException.class, () -> application(stub, workspace.resolve("outside")));
             assertTrue(stub.requests.isEmpty());
         }
+    }
+
+    @Test
+    void flushesCompletedTrialsWithoutPublishingAnInterruptedCapture() throws Exception {
+        var secondRequest = new CountDownLatch(1);
+        var releaseResponse = new CountDownLatch(1);
+        var requests = new AtomicInteger();
+        try (var stub = new Stub(request -> {
+            if (requests.incrementAndGet() == 2) {
+                secondRequest.countDown();
+                awaitRelease(releaseResponse);
+            }
+            return Response.ok(Json.object().put("answer", "Synthetic answer."));
+        })) {
+            var destination = run("interrupted");
+            var execution = new FutureTask<>(() -> application(stub, destination));
+            var runner = Thread.ofVirtual().start(execution);
+            try {
+                assertTrue(secondRequest.await(10, TimeUnit.SECONDS));
+                var raw = Files.readString(destination.resolve(Capture.RESULTS));
+                assertTrue(raw.endsWith(System.lineSeparator()));
+                var rows = PrivateFiles.readRows(destination.resolve(Capture.RESULTS));
+                assertEquals(1, rows.size());
+                assertEquals("HOLDOUT-001", rows.getFirst().get("case_id").asText());
+                runner.interrupt();
+                var failure = assertThrows(ExecutionException.class, () -> execution.get(10, TimeUnit.SECONDS));
+                assertInstanceOf(InterruptedException.class, failure.getCause());
+                assertFalse(Files.exists(destination.resolve("completion.json")));
+                assertFalse(Files.exists(destination.resolve("summary.json")));
+                assertThrows(IOException.class, () -> Capture.read(destination));
+            } finally {
+                runner.interrupt();
+                releaseResponse.countDown();
+            }
+        }
+    }
+
+    @Test
+    void preservesApplicationManifestFieldsAndLedgerOrder() throws Exception {
+        try (var stub = new Stub(request -> Response.ok(Json.object().put("answer", "Synthetic answer.")))) {
+            var destination = run("format");
+            assertEquals(2, cli("run", "--mode", "application", "--synthetic-database", "--deployment-id", "format-test",
+                    "--application-url", stub.origin(), "--split", "holdout", "--stage", "explanation",
+                    "--repetitions", "2", "--timeout", "5.125", "--output", destination.toString()));
+            var capture = Capture.read(destination);
+            var manifest = capture.manifest();
+            assertEquals(2, manifest.get("format_version").asInt());
+            assertEquals("application", manifest.at("/plan/stage").asText());
+            assertEquals("5.125", manifest.get("timeout_seconds").asText());
+            assertEquals(Json.hash(manifest.get("plan")), manifest.get("protocol_sha256").asText());
+            assertTrue(manifest.at("/plan/grader_sha256").asText().matches("[0-9a-f]{64}"));
+            assertTrue(manifest.get("runner_sha256").asText().matches("[0-9a-f]{64}"));
+            assertTrue(manifest.get("source_sha").isNull());
+            assertTrue(manifest.get("source_dirty").isNull());
+            assertTrue(capture.completion().get("model_unchanged").isNull());
+            assertFalse(capture.completion().at("/artifact_sha256").has("model-info.json"));
+            assertFalse(Files.exists(destination.resolve("model-info.json")));
+            assertEquals(List.of("HOLDOUT-001/1", "HOLDOUT-001/2", "HOLDOUT-002/1", "HOLDOUT-002/2",
+                            "HOLDOUT-003/1", "HOLDOUT-003/2"),
+                    capture.rows().stream().map(row -> row.get("case_id").asText() + "/" + row.get("trial").asInt()).toList());
+        }
+    }
+
+    @Test
+    void validatesCommonOptionsBeforeOutputAndModelOptionsAfterPreflight() throws Exception {
+        var destination = run("bad-options");
+        var invalidStage = assertThrows(IllegalArgumentException.class, () -> cli("run", "--stage", "invalid",
+                "--repetitions", "21", "--output", destination.toString()));
+        assertEquals("Invalid --stage", invalidStage.getMessage());
+        assertFalse(Files.exists(destination.getParent()));
+
+        var invalidTemperature = assertThrows(IllegalArgumentException.class, () -> cli("run",
+                "--temperature", "3", "--ollama-url", "https://localhost", "--output", destination.toString()));
+        assertEquals("Value out of range for --temperature", invalidTemperature.getMessage());
+        assertTrue(Files.isDirectory(destination.getParent()));
+        assertFalse(Files.exists(destination));
+    }
+
+    private static void awaitRelease(CountDownLatch release) {
+        try {
+            release.await(10, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"application,write", "application,close", "model,write", "model,close"})
+    void ledgerFailurePreventsCompletion(String mode, String failingOperation) throws Exception {
+        var stub = mode.equals("application")
+                ? new Stub(request -> Response.ok(Json.object().put("answer", "Synthetic answer.")))
+                : ollama(request -> Response.ok(completion("{\"route\":\"UNSUPPORTED\",\"reason\":\"OTHER\"}")), false);
+        try (stub) {
+            var destination = run("failed-ledger");
+            var options = new EvaluationCli.Options(Map.of(
+                    "mode", mode, "split", "holdout", "repetitions", "1", "output", destination.toString(),
+                    "synthetic-database", "true", "deployment-id", "synthetic-test",
+                    "application-url", stub.origin(), "ollama-url", stub.origin(), "model", "fixture"), List.of());
+            var failure = new IOException("Ledger " + failingOperation + " failed");
+            var command = new RunCommand(options, workspace, new PrintStream(output, true, UTF_8),
+                    path -> failingLedger(path, failingOperation, failure));
+
+            assertSame(failure, assertThrows(IOException.class, command::run));
+            assertFalse(Files.exists(destination.resolve("completion.json")));
+            assertFalse(Files.exists(destination.resolve("summary.json")));
+            assertEquals(failingOperation.equals("close") ? 3 : 0,
+                    PrivateFiles.readRows(destination.resolve(Capture.RESULTS)).size());
+            assertFalse(output.toString(UTF_8).contains("Private results"));
+        }
+    }
+
+    private static BufferedWriter failingLedger(Path path, String operation, IOException failure) throws IOException {
+        return new BufferedWriter(PrivateFiles.newWriter(path)) {
+            @Override
+            public void write(String text, int offset, int length) throws IOException {
+                if (operation.equals("write")) {
+                    throw failure;
+                }
+                super.write(text, offset, length);
+            }
+
+            @Override
+            public void close() throws IOException {
+                super.close();
+                if (operation.equals("close")) {
+                    throw failure;
+                }
+            }
+        };
     }
 
     @Test

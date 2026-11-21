@@ -3,10 +3,8 @@ package dev.garmin.evaluation.cli;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import dev.garmin.evaluation.core.Json;
-import dev.garmin.evaluation.core.Status;
 import dev.garmin.evaluation.core.TrialRunner;
 import dev.garmin.evaluation.dataset.EvaluationSuite;
-import dev.garmin.evaluation.dataset.EvidenceOracle;
 import dev.garmin.evaluation.dataset.PromptFixtures;
 import dev.garmin.evaluation.evaluator.ResponseEvaluator;
 import dev.garmin.evaluation.evaluator.RoutingEvaluator;
@@ -14,38 +12,65 @@ import dev.garmin.evaluation.model.ModelProvider;
 import dev.garmin.evaluation.model.OllamaProvider;
 import dev.garmin.evaluation.report.Capture;
 import dev.garmin.evaluation.report.PrivateFiles;
-import dev.garmin.evaluation.report.Reports;
 import dev.garmin.evaluation.review.HumanReview;
 import dev.garmin.evaluation.transport.ChatHttpAdapter;
 import dev.garmin.evaluation.transport.LoopbackHttp;
 
+import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.math.BigDecimal;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.jar.JarFile;
-
-import static java.nio.charset.StandardCharsets.UTF_8;
+import java.util.Locale;
 
 final class RunCommand {
-    private record Prepared(JsonNode scenario, String stage, JsonNode request, TrialRunner.Grader grader) {}
+    private final EvaluationCli.Options options;
+    private final Path workspace;
+    private final PrintStream progress;
+    private final LedgerOpener ledgerOpener;
 
-    private RunCommand() {}
+    @FunctionalInterface
+    interface LedgerOpener {
+        BufferedWriter open(Path ledger) throws IOException;
+    }
+
+    RunCommand(EvaluationCli.Options options, Path workspace, PrintStream progress, LedgerOpener ledgerOpener) {
+        this.options = options;
+        this.workspace = workspace;
+        this.progress = progress;
+        this.ledgerOpener = ledgerOpener;
+    }
 
     static int execute(EvaluationCli.Options options, Path workspace, PrintStream out)
             throws IOException, InterruptedException {
-        var suite = EvaluationSuite.load();
-        String mode = options.choice("mode", "model", "model", "application");
-        boolean application = mode.equals("application");
-        if (application && !options.has("synthetic-database")) {
-            throw new IllegalArgumentException("Application mode requires --synthetic-database and --deployment-id");
+        return new RunCommand(options, workspace, out, PrivateFiles::newWriter).run();
+    }
+
+    int run() throws IOException, InterruptedException {
+        var selection = selectScenarios(EvaluationSuite.load());
+        var files = preflightCapture();
+        var manifest = createManifest(selection);
+        return switch (selection.settings().mode()) {
+            case APPLICATION -> evaluateApplication(selection, files, manifest);
+            case MODEL -> evaluateModel(selection, files, manifest);
+        };
+    }
+
+    private RunSelection selectScenarios(EvaluationSuite suite) {
+        var settings = readRunSettings();
+        String scenarioStage = settings.mode() == RunMode.APPLICATION ? "routing" : settings.stage();
+        return new RunSelection(suite, settings, suite.select(settings.split(), scenarioStage));
+    }
+
+    private RunSettings readRunSettings() {
+        var mode = RunMode.valueOf(options.choice("mode", "model", "model", "application").toUpperCase(Locale.ROOT));
+        if (mode == RunMode.APPLICATION) {
+            requireSyntheticDeployment();
         }
-        String deployment = application ? options.required("deployment-id") : null;
         String split = options.choice("split", "regression", "regression", "holdout", "all");
         String stage = options.choice("stage", "all", "routing", "explanation", "all");
         int repetitions = options.integer("repetitions", 3, 1, 20);
@@ -53,162 +78,154 @@ final class RunCommand {
         if (timeout.signum() == 0) {
             throw new IllegalArgumentException("HTTP timeout must be positive");
         }
-        var duration = Duration.ofNanos(timeout.movePointRight(9).longValue());
-        var cases = suite.select(split, application ? "routing" : stage);
+        return new RunSettings(mode, split, stage, repetitions, timeout);
+    }
+
+    private void requireSyntheticDeployment() {
+        if (!options.has("synthetic-database")) {
+            throw new IllegalArgumentException("Application mode requires --synthetic-database and --deployment-id");
+        }
+        options.required("deployment-id");
+    }
+
+    private Path requestedOutput() {
+        return Path.of(options.required("output"));
+    }
+
+    private PrivateFiles preflightCapture() throws IOException {
         var files = new PrivateFiles(workspace);
-        var output = Path.of(options.required("output"));
-        files.destination(output);
-        var plan = Json.object().put("suite_version", suite.version()).put("rubric_version", suite.rubricVersion())
-                .put("split", split).put("stage", application ? "application" : stage)
-                .put("mode", mode).put("repetitions", repetitions)
-                .put("grader_sha256", fingerprint(ResponseEvaluator.class, RoutingEvaluator.class, EvidenceOracle.class));
-        plan.set("cases", Json.MAPPER.valueToTree(cases));
-        plan.set("protocol", suite.protocol());
+        files.destination(requestedOutput());
+        return files;
+    }
+
+    private ObjectNode createManifest(RunSelection selection) throws IOException, InterruptedException {
+        var plan = describePlan(selection);
         var manifest = Json.object().put("format_version", Capture.FORMAT_VERSION)
                 .put("started_at", Instant.now().toString()).put("protocol_sha256", Json.hash(plan))
-                .put("runner_sha256", runnerFingerprint())
-                .put("java_version", Runtime.version().toString()).put("timeout_seconds", timeout);
+                .put("runner_sha256", RunProvenance.runnerFingerprint())
+                .put("java_version", Runtime.version().toString())
+                .put("timeout_seconds", selection.settings().timeoutSeconds());
         manifest.set("plan", plan);
-        addSourceProvenance(workspace, manifest);
+        RunProvenance.addSourceRevision(workspace, manifest);
+        return manifest;
+    }
 
-        if (application) {
-            manifest.put("deployment_id", deployment)
-                    .put("measurement", "Public application HTTP wall time");
-            try (var http = new LoopbackHttp(options.get("application-url", "http://127.0.0.1:8081"), duration)) {
-                var adapter = new ChatHttpAdapter(http);
-                var trials = cases.stream().map(c -> new Prepared(c, "application",
-                        adapter.request(Json.text(c, "question")), ResponseEvaluator::application)).toList();
-                return capture(files, output, manifest, trials, adapter, repetitions, null, null, out);
-            }
-        }
+    private static ObjectNode describePlan(RunSelection selection) throws IOException {
+        var suite = selection.suite();
+        var settings = selection.settings();
+        String captureStage = settings.mode() == RunMode.APPLICATION ? "application" : settings.stage();
+        var plan = Json.object().put("suite_version", suite.version()).put("rubric_version", suite.rubricVersion())
+                .put("split", settings.split()).put("stage", captureStage)
+                .put("mode", settings.mode().name().toLowerCase(Locale.ROOT))
+                .put("repetitions", settings.repetitions()).put("grader_sha256", RunProvenance.graderFingerprint());
+        plan.set("cases", Json.MAPPER.valueToTree(selection.scenarios()));
+        plan.set("protocol", suite.protocol());
+        return plan;
+    }
 
-        var prompts = PromptFixtures.load();
-        var settings = Json.object()
-                .put("temperature", options.decimal("temperature", "0", BigDecimal.ZERO, new BigDecimal("2")))
-                .put("num_ctx", options.integer("num-ctx", suite.protocol().get("context_tokens").intValue(), 1, Integer.MAX_VALUE))
-                .put("num_predict", options.integer("num-predict", suite.protocol().get("response_tokens").intValue(), 1, Integer.MAX_VALUE))
-                .put("num_gpu", options.integer("num-gpu", 0, 0, Integer.MAX_VALUE));
-        try (var http = new LoopbackHttp(options.get("ollama-url", "http://127.0.0.1:11434"), duration)) {
-            ModelProvider provider = new OllamaProvider(http, options.get("model", "qwen2.5:1.5b-instruct-q4_K_M"));
-            var routing = new RoutingEvaluator(suite.protocol());
-            var trials = cases.stream().map(c -> new Prepared(c, Json.text(c, "stage"),
-                    provider.request(prompts.forCase(c, suite.protocol()), settings),
-                    response -> ResponseEvaluator.model(c, suite.protocol(), routing, provider.decode(response)))).toList();
-            var provenance = provider.inspect();
-            manifest.put("provider", provenance.provider())
-                    .put("prompt_sha256", Json.hash(prompts.document()))
-                    .put("prompt_version", Json.text(prompts.document(), "version"))
-                    .put("unreported_sampling_defaults", "Other sampling defaults come from the provider")
-                    .put("measurement", "Isolated model HTTP wall time");
-            manifest.set("model", Json.MAPPER.valueToTree(provenance.identity()));
-            manifest.set("runtime", provenance.runtime());
-            manifest.set("settings", settings);
-            return capture(files, output, manifest, trials, provider, repetitions, provider, provenance, out);
+    private int evaluateApplication(RunSelection selection, PrivateFiles files, ObjectNode manifest)
+            throws IOException, InterruptedException {
+        var settings = selection.settings();
+        describeApplicationRun(manifest, options.required("deployment-id"));
+        try (var http = new LoopbackHttp(options.get("application-url", "http://127.0.0.1:8081"), settings.httpDeadline())) {
+            var adapter = new ChatHttpAdapter(http);
+            var trials = prepareApplicationTrials(selection.scenarios(), adapter);
+            var directory = files.createCapture(requestedOutput());
+            var capture = CaptureWriter.startApplication(directory, manifest, requests(trials));
+            recordTrials(capture, trials, adapter, settings.repetitions());
+            capture.publishApplicationCompletion();
+            return reportOutcome(capture, true);
         }
     }
 
-    private static int capture(PrivateFiles files, Path output, ObjectNode manifest, List<Prepared> trials,
-                               TrialRunner.Exchange exchange, int repetitions, ModelProvider provider,
-                               ModelProvider.Provenance provenance, PrintStream out)
+    private static void describeApplicationRun(ObjectNode manifest, String deploymentId) {
+        manifest.put("deployment_id", deploymentId).put("measurement", "Public application HTTP wall time");
+    }
+
+    private static List<PreparedTrial> prepareApplicationTrials(List<JsonNode> scenarios, ChatHttpAdapter adapter) {
+        return scenarios.stream().map(scenario -> new PreparedTrial(scenario, "application",
+                adapter.request(Json.text(scenario, "question")), ResponseEvaluator::application)).toList();
+    }
+
+    private int evaluateModel(RunSelection selection, PrivateFiles files, ObjectNode manifest)
             throws IOException, InterruptedException {
-        var run = files.createCapture(output);
-        PrivateFiles.save(run.resolve("manifest.json"), manifest);
-        if (provenance != null) {
-            PrivateFiles.save(run.resolve("model-info.json"), provenance.details());
+        var prompts = PromptFixtures.load();
+        var modelSettings = readModelSettings(selection.suite().protocol());
+        try (var http = new LoopbackHttp(options.get("ollama-url", "http://127.0.0.1:11434"), selection.settings().httpDeadline())) {
+            var provider = new OllamaProvider(http, options.get("model", "qwen2.5:1.5b-instruct-q4_K_M"));
+            var trials = prepareModelTrials(selection, provider, prompts, modelSettings);
+            var provenance = provider.inspect();
+            RunProvenance.addModelProvenance(manifest, provenance, prompts, modelSettings);
+            var directory = files.createCapture(requestedOutput());
+            var capture = CaptureWriter.startModel(directory, manifest, requests(trials), provenance.details());
+            recordTrials(capture, trials, provider, selection.settings().repetitions());
+            boolean modelUnchanged = provider.unchanged(provenance.identity());
+            capture.publishModelCompletion(modelUnchanged);
+            return reportOutcome(capture, modelUnchanged);
         }
-        PrivateFiles.save(run.resolve("inputs.json"), Json.MAPPER.valueToTree(trials.stream().map(Prepared::request).toList()));
-        var summary = new Reports.Summary();
-        var template = Json.object();
-        boolean allPassed = true;
-        try (var ledger = PrivateFiles.newWriter(run.resolve(Capture.RESULTS))) {
+    }
+
+    private ObjectNode readModelSettings(JsonNode protocol) {
+        int contextTokens = protocol.get("context_tokens").intValue();
+        int responseTokens = protocol.get("response_tokens").intValue();
+        return Json.object()
+                .put("temperature", options.decimal("temperature", "0", BigDecimal.ZERO, new BigDecimal("2")))
+                .put("num_ctx", options.integer("num-ctx", contextTokens, 1, Integer.MAX_VALUE))
+                .put("num_predict", options.integer("num-predict", responseTokens, 1, Integer.MAX_VALUE))
+                .put("num_gpu", options.integer("num-gpu", 0, 0, Integer.MAX_VALUE));
+    }
+
+    private static List<PreparedTrial> prepareModelTrials(RunSelection selection, ModelProvider provider,
+                                                         PromptFixtures prompts, JsonNode modelSettings) {
+        var protocol = selection.suite().protocol();
+        var routing = new RoutingEvaluator(protocol);
+        var trials = new ArrayList<PreparedTrial>();
+        for (var scenario : selection.scenarios()) {
+            var prompt = prompts.forCase(scenario, protocol);
+            var request = provider.request(prompt, modelSettings);
+            TrialRunner.Grader grader = response ->
+                    ResponseEvaluator.model(scenario, protocol, routing, provider.decode(response));
+            trials.add(new PreparedTrial(scenario, Json.text(scenario, "stage"), request, grader));
+        }
+        return trials;
+    }
+
+    private static List<JsonNode> requests(List<PreparedTrial> trials) {
+        return trials.stream().map(PreparedTrial::request).toList();
+    }
+
+    private void recordTrials(CaptureWriter capture, List<PreparedTrial> trials, TrialRunner.Exchange exchange,
+                              int repetitions) throws IOException, InterruptedException {
+        try (var ledger = ledgerOpener.open(capture.directory().resolve(Capture.RESULTS))) {
             for (var prepared : trials) {
                 for (int trial = 1; trial <= repetitions; trial++) {
                     var row = TrialRunner.execute(prepared.scenario(), prepared.stage(), trial,
                             prepared.request(), exchange, prepared.grader());
-                    ledger.write(Json.encode(row));
-                    ledger.newLine();
-                    ledger.flush();
-                    summary.accept(row);
-                    HumanReview.addTemplate(template, row);
-                    var status = Status.valueOf(row.get("status").asText());
-                    allPassed &= status == Status.PASS;
-                    out.println(HumanReview.key(row) + " " + status);
+                    capture.appendTrial(ledger, row);
+                    progress.println(HumanReview.key(row) + " " + row.get("status").asText());
                 }
             }
         }
-        Boolean unchanged = provider == null ? null : provider.unchanged(provenance.identity());
-        var stats = summary.json();
-        PrivateFiles.save(run.resolve("summary.json"), stats);
-        PrivateFiles.write(run.resolve("summary.md"), Reports.markdown(stats));
-        PrivateFiles.save(run.resolve("review-template.json"), template);
-        PrivateFiles.save(run.resolve("completion.json"), Capture.completion(run, trials.size() * repetitions, unchanged));
-        out.println("Private results " + run);
-        if (Boolean.FALSE.equals(unchanged)) {
-            out.println("Ollama model identity changed or was unavailable at completion");
-        }
-        return allPassed && !Boolean.FALSE.equals(unchanged) ? 0 : 2;
     }
 
-    private static String runnerFingerprint() throws IOException {
-        String runnerPackage = "dev/garmin/evaluation/";
-        var location = RunCommand.class.getProtectionDomain().getCodeSource().getLocation().toExternalForm();
-        var path = Path.of(java.net.URI.create(location));
-        var hashes = Json.object();
-        if (Files.isRegularFile(path)) {
-            try (var jar = new JarFile(path.toFile())) {
-                for (var entry : jar.stream().filter(e -> e.getName().startsWith(runnerPackage)
-                        && e.getName().endsWith(".class")).toList()) {
-                    try (var bytes = jar.getInputStream(entry)) {
-                        hashes.put(entry.getName(), Json.sha256(bytes.readAllBytes()));
-                    }
-                }
-            }
-        } else {
-            try (var entries = Files.walk(path.resolve(runnerPackage))) {
-                for (var entry : entries.filter(e -> e.toString().endsWith(".class")).toList()) {
-                    hashes.put(path.relativize(entry).toString(), PrivateFiles.fileHash(entry));
-                }
-            }
+    private int reportOutcome(CaptureWriter capture, boolean identityAccepted) {
+        progress.println("Private results " + capture.directory());
+        if (!identityAccepted) {
+            progress.println("Ollama model identity changed or was unavailable at completion");
         }
-        return Json.hash(hashes);
+        return capture.allTrialsPassed() && identityAccepted ? 0 : 2;
     }
 
-    private static String fingerprint(Class<?>... types) throws IOException {
-        var fingerprints = new ArrayList<String>();
-        for (var type : types) {
-            try (var bytes = type.getResourceAsStream(type.getSimpleName() + ".class")) {
-                if (bytes == null) {
-                    throw new IOException("Missing grader class bytes");
-                }
-                fingerprints.add(Json.sha256(bytes.readAllBytes()));
-            }
-        }
-        return Json.hash(Json.MAPPER.valueToTree(fingerprints));
-    }
+    private enum RunMode { APPLICATION, MODEL }
 
-    private static void addSourceProvenance(Path workspace, ObjectNode manifest) throws InterruptedException {
-        String commit = git(workspace, "rev-parse", "HEAD");
-        String status = commit == null ? null : git(workspace, "status", "--porcelain");
-        manifest.put("source_sha", commit);
-        if (status == null) {
-            manifest.putNull("source_dirty");
-        } else {
-            manifest.put("source_dirty", !status.isBlank());
+    private record RunSettings(RunMode mode, String split, String stage,
+                               int repetitions, BigDecimal timeoutSeconds) {
+        Duration httpDeadline() {
+            return Duration.ofNanos(timeoutSeconds.movePointRight(9).longValue());
         }
     }
 
-    private static String git(Path workspace, String... arguments) throws InterruptedException {
-        try {
-            var command = new ArrayList<>(List.of("git", "--no-optional-locks"));
-            command.addAll(List.of(arguments));
-            var process = new ProcessBuilder(command).directory(workspace.toFile())
-                    .redirectError(ProcessBuilder.Redirect.DISCARD).start();
-            try (var input = process.getInputStream()) {
-                String text = new String(input.readAllBytes(), UTF_8).strip();
-                return process.waitFor() == 0 ? text : null;
-            }
-        } catch (IOException unavailable) {
-            return null;
-        }
-    }
+    private record RunSelection(EvaluationSuite suite, RunSettings settings, List<JsonNode> scenarios) {}
+
+    private record PreparedTrial(JsonNode scenario, String stage, JsonNode request, TrialRunner.Grader grader) {}
 }
