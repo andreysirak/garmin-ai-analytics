@@ -39,6 +39,9 @@ observations, not guarantees for the current revision.
 - Historical observations: [bounded local capacity check](verification/0076-local-capacity-reference.md)
   and [earlier chat check counts](verification/0076-chat-checks-reference.md).
 
-The permanent AI evaluation suite is tracked in [#74](https://github.com/andreysirak/garmin-ai-analytics/issues/74)
-and [draft PR #75](https://github.com/andreysirak/garmin-ai-analytics/pull/75).
-Its commands are not assumed to be merged into this branch.
+## Evaluate AI changes
+
+Use the [AI evaluation start guide](../ai-evaluation-framework/README.md),
+[test-case catalogue](../ai-evaluation-framework/TEST-CASES.md) and
+[technical reference](../ai-evaluation-framework/REFERENCE.md) for offline contracts,
+real-model trials, synthetic application captures, review and baseline comparisons.

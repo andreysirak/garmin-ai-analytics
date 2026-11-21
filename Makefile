@@ -39,6 +39,27 @@ CHAT_FRONTEND_IMAGE := garmin-chat-frontend:local
 CHAT_BACKEND_IMAGE := garmin-chat-backend:local
 CHAT_PORT ?= 5173
 
+# Live evaluations are opt-in; choose a new output directory for each capture.
+EVAL_OUTPUT ?=
+EVAL_MODEL ?= qwen2.5:1.5b-instruct-q4_K_M
+EVAL_OLLAMA_URL ?= http://127.0.0.1:11434
+EVAL_APPLICATION_URL ?= http://127.0.0.1:8081
+EVAL_REPETITIONS ?= 3
+EVAL_STAGE ?= all
+EVAL_SPLIT ?= regression
+EVAL_TIMEOUT ?= 120
+EVAL_TEMPERATURE ?= 0
+EVAL_NUM_CTX ?= 32768
+EVAL_NUM_PREDICT ?= 1024
+EVAL_NUM_GPU ?= 0
+EVAL_DEPLOYMENT_ID ?=
+EVAL_SYNTHETIC_DATABASE ?= no
+EVAL_MAVEN_FLAGS ?=
+EVAL_MODULE := ai-evaluation-framework
+EVAL_MAVEN = mvn -B -ntp $(EVAL_MAVEN_FLAGS) -f $(EVAL_MODULE)/pom.xml
+EVAL_JAVA = $(if $(JAVA_HOME),"$(JAVA_HOME)/bin/java",java)
+EVAL_CLI = $(EVAL_JAVA) -jar $(EVAL_MODULE)/target/ai-evaluation.jar
+
 .PHONY: help prepare-garmin-raw-data cluster-create cluster-status cluster-delete infra-validate infra-up airflow-operator-rollout infra-down \
         infra-status infra-resources airflow-ui airflow-password airflow-logs test-infra java-verify \
         java-package-ingestion java-package-summary java-package-sleep \
@@ -100,6 +121,13 @@ help:
 	@echo "  make airflow-image          - Build the Airflow image with Garmin operator packages"
 	@echo "  make kind-load-airflow-image - Load the local Airflow image into kind"
 	@echo "Chat (existing garmin-analytics namespace):"
+	@echo "  make chat-eval-test         - Standalone Java evaluation and loopback stub tests"
+	@echo "  make chat-eval-component-test - Production routing, prompt, advisor and AI flow tests"
+	@echo "  make chat-eval-build        - Build the standalone evaluation CLI"
+	@echo "  make chat-eval-list         - List versioned AI evaluation cases without a model or database"
+	@echo "  make chat-eval-model        - Evaluate installed Ollama model (requires EVAL_OUTPUT)"
+	@echo "  make chat-eval-application  - Capture isolated synthetic chat path (requires explicit acknowledgement)"
+	@echo "  make chat-eval-sql-test     - Run SQL checks against an explicitly supplied test database"
 	@echo "  make chat-validate          - Offline chat chart lint, render checks and setup-script unit tests"
 	@echo "  make chat-up                - Build/deploy the full chat stack and forward the UI"
 	@echo "                                Requires the reader database Secret; CHAT_VALUES is optional"
@@ -387,6 +415,44 @@ chat-ui:
 	echo "Keep this terminal open. Ctrl+C stops forwarding while the chat Pods stay running."; \
 	exec $(KUBECTL) -n $(POSTGRESQL_NAMESPACE) port-forward --address 127.0.0.1 \
 		service/$(CHAT_RELEASE)-frontend "$$port:80"
+
+# Reusable AI evaluations. No model/DB access in offline checks.
+.PHONY: chat-eval-test chat-eval-component-test chat-eval-build chat-eval-sql-test chat-eval-list chat-eval-model chat-eval-application
+chat-eval-test:
+	$(EVAL_MAVEN) test
+
+chat-eval-component-test:
+	mvn -B -ntp $(EVAL_MAVEN_FLAGS) -f garmin-chat/backend/pom.xml \
+		-Dtest=ProductionEvaluationContractTest,GarminChatFlowTest,PromptBudgetTest,RoutingSchemaTest test
+
+chat-eval-build:
+	$(EVAL_MAVEN) -DskipTests package
+
+chat-eval-sql-test:
+	@test -n "$$GARMIN_CHAT_TEST_DB_URL" || { echo "Set an isolated PostgreSQL test URL and reader credentials first"; exit 1; }
+	mvn -B -ntp $(EVAL_MAVEN_FLAGS) -f garmin-chat/backend/pom.xml -Dtest=PostgresMetricAggregationDatabaseTest test
+
+chat-eval-list: chat-eval-build
+	$(EVAL_CLI) list
+
+chat-eval-model:
+	@test -n "$(EVAL_OUTPUT)" || { echo "Set EVAL_OUTPUT=data/evaluations/NEW-RUN-NAME; existing runs are never overwritten"; exit 1; }
+	$(MAKE) chat-eval-build
+	$(EVAL_CLI) run --mode model \
+		--ollama-url "$(EVAL_OLLAMA_URL)" --model "$(EVAL_MODEL)" \
+		--stage "$(EVAL_STAGE)" --split "$(EVAL_SPLIT)" --repetitions "$(EVAL_REPETITIONS)" \
+		--temperature "$(EVAL_TEMPERATURE)" --num-ctx "$(EVAL_NUM_CTX)" \
+		--num-predict "$(EVAL_NUM_PREDICT)" --num-gpu "$(EVAL_NUM_GPU)" \
+		--timeout "$(EVAL_TIMEOUT)" --output "$(EVAL_OUTPUT)"
+
+chat-eval-application:
+	@test -n "$(EVAL_OUTPUT)" || { echo "Set EVAL_OUTPUT=data/evaluations/NEW-RUN-NAME; existing runs are never overwritten"; exit 1; }
+	@test "$(EVAL_SYNTHETIC_DATABASE)" = yes && test -n "$(EVAL_DEPLOYMENT_ID)" || { echo "Use an isolated synthetic deployment; set EVAL_SYNTHETIC_DATABASE=yes and EVAL_DEPLOYMENT_ID"; exit 1; }
+	$(MAKE) chat-eval-build
+	$(EVAL_CLI) run --mode application \
+		--synthetic-database --deployment-id "$(EVAL_DEPLOYMENT_ID)" \
+		--application-url "$(EVAL_APPLICATION_URL)" --split "$(EVAL_SPLIT)" --repetitions "$(EVAL_REPETITIONS)" \
+		--timeout "$(EVAL_TIMEOUT)" --output "$(EVAL_OUTPUT)"
 
 # Git-tracked input avoids generated/vendor documentation in local working trees.
 .PHONY: docs-check

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="1100" viewBox="0 0 1100 1100">
+<rect width="1100" height="1100" fill="#080808"/><rect x="25" y="25" width="1050" height="1050" rx="35" fill="none" stroke="#292929" stroke-width="3"/>
+<rect x="55" y="55" width="990" height="180" rx="28" fill="#242424"/>
+<g font-family="Arial,Helvetica,sans-serif" text-anchor="middle" fill="#fff"><text x="550" y="133" font-size="48" font-weight="bold">AI Evaluation Framework</text><text x="550" y="190" font-size="30" fill="#aaa">Independent test runner</text></g>
+<g stroke="#888" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M550 260v38m-12 -12 12 12 12 -12"/><path d="M550 520v38m-12 -12 12 12 12 -12"/><path d="M550 805v38m-12 -12 12 12 12 -12"/></g>
+<g fill="#242424"><rect x="55" y="330" width="310" height="170" rx="20"/><rect x="395" y="330" width="310" height="170" rx="20"/><rect x="735" y="330" width="310" height="170" rx="20"/></g>
+<g font-family="Arial,Helvetica,sans-serif" text-anchor="middle"><g fill="#fff" font-size="37"><text x="210" y="392">Test Cases</text><text x="550" y="392">Runner</text><text x="890" y="392">Evaluators</text></g><g fill="#aaa" font-size="25"><text x="210" y="440">Questions &amp;</text><text x="210" y="473">expected behavior</text><text x="550" y="440">Execution</text><text x="550" y="473">&amp; capture</text><text x="890" y="440">Rules &amp; scoring</text></g></g>
+<g fill="none" stroke="#333" stroke-width="3"><rect x="55" y="590" width="480" height="210" rx="30"/><rect x="565" y="590" width="480" height="210" rx="30"/></g>
+<g font-family="Arial,Helvetica,sans-serif" text-anchor="middle"><g fill="#fff" font-size="40" font-weight="bold"><text x="295" y="685">Garmin Chat API</text><text x="805" y="685">Ollama API</text></g><g fill="#aaa" font-size="29"><text x="295" y="748">Black-box E2E</text><text x="805" y="748">Model evaluation</text></g></g>
+<rect x="55" y="875" width="990" height="165" rx="28" fill="#242424"/>
+<g font-family="Arial,Helvetica,sans-serif" text-anchor="middle"><text x="550" y="944" font-size="43" fill="#fff" font-weight="bold">Evaluation Report</text><text x="550" y="997" font-size="27" fill="#aaa">Pass / Fail / Needs Review · Latency · Model comparison</text></g></svg>
