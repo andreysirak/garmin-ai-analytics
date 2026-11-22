@@ -131,7 +131,7 @@ Run Java checks with:
 make java-verify
 ```
 
-Java tests are separated by execution scope. The four isolated `garmin-common`
+Java tests are separated by execution scope. The five isolated `garmin-common`
 tests mirror their production packages and use `*Test.java` (Maven Surefire).
 The ingestion application workflow and subprocess CLI checks live in the
 `com.garmin.analytics.integration.it` test package and use `*IT.java`
