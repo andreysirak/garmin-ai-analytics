@@ -131,6 +131,25 @@ Run Java checks with:
 make java-verify
 ```
 
+Java tests are separated by execution scope. The four isolated `garmin-common`
+tests mirror their production packages and use `*Test.java` (Maven Surefire).
+The ingestion application workflow and subprocess CLI checks live in the
+`com.garmin.analytics.integration.it` test package and use `*IT.java`
+(Maven Failsafe). These integration tests run offline with synthetic inputs;
+they do not call the live Garmin API or require Kubernetes.
+
+```bash
+# Unit tests only (Surefire).
+mvn -B -ntp -f garmin-integration/pom.xml test
+
+# Unit tests, offline integration tests, and Java static checks.
+mvn -B -ntp -f garmin-integration/pom.xml clean verify
+```
+
+`make java-verify` continues to run the full `clean verify` lifecycle.
+Failsafe writes reports to `target/failsafe-reports` within the ingestion module;
+Surefire reports remain in each module's `target/surefire-reports`.
+
 The executable JAR is `garmin-integration/garmin-data-ingestion/java/target/garmin-data-ingestion.jar`.
 The entry point injects `FileWriterLocalImpl` and `TokenServiceKubernetesImpl` through
 the `FileWriter` and `TokenService` interfaces. Their implementations live in the

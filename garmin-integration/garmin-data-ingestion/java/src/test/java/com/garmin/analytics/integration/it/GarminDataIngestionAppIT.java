@@ -1,4 +1,4 @@
-package com.garmin.analytics.integration.ingestion;
+package com.garmin.analytics.integration.it;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -14,6 +14,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.garmin.analytics.integration.ingestion.GarminDataIngestionApp;
 import com.garmin.analytics.integration.common.exception.GarminApiException;
 import com.garmin.analytics.integration.common.exception.IngestionExecutionException;
 import com.garmin.analytics.integration.common.exception.InvalidResponseException;
@@ -40,7 +41,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
-class GarminDataIngestionAppTest {
+class GarminDataIngestionAppIT {
 
   private static final String DATE = "2026-11-07";
   private static final String ENDPOINT = "/caller/resource";

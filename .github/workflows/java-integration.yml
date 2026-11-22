@@ -32,6 +32,7 @@ jobs:
           if-no-files-found: ignore
           path: |
             garmin-integration/**/target/surefire-reports/**
+            garmin-integration/**/target/failsafe-reports/**
             garmin-integration/**/target/site/spotbugs.html
             garmin-integration/**/target/spotbugsXml.xml
             garmin-integration/**/target/pmd.xml
