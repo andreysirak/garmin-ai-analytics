@@ -91,7 +91,7 @@ class GarminDataIngestionAppTest {
   }
 
   @Test
-  void rejectsInvalidArgumentsBeforeReadingCredentials() {
+  void rejectsInvalidArgumentsBeforeReadingCredentials() throws Exception {
     IngestionExecutionException failure = assertThrows(IngestionExecutionException.class,
         () -> application().run(new String[] {
             "--date", DATE, "--output-dir", directory.toString(),
