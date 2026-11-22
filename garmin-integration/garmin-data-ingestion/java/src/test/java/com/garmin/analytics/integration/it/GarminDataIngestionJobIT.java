@@ -1,9 +1,10 @@
-package com.garmin.analytics.integration.ingestion;
+package com.garmin.analytics.integration.it;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.garmin.analytics.integration.ingestion.GarminDataIngestionJob;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -16,7 +17,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-class GarminDataIngestionJobTest {
+class GarminDataIngestionJobIT {
 
   @TempDir Path directory;
 
@@ -122,8 +123,7 @@ class GarminDataIngestionJobTest {
   }
 
   private ProcessResult run(List<String> args, String tokenContents) throws Exception {
-    String classpath = System.getProperty(
-        "surefire.test.class.path", System.getProperty("java.class.path"));
+    String classpath = System.getProperty("java.class.path");
     ProcessBuilder builder = new ProcessBuilder(
         Path.of(System.getProperty("java.home"), "bin", "java").toString(),
         "-cp", classpath, GarminDataIngestionJob.class.getName());
