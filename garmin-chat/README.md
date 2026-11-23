@@ -41,7 +41,7 @@ routing and an evidence prompt do not by themselves establish a correct answer.
 
 See the [analytics reference](docs/analytics-reference.md) for parameter validation,
 date semantics, coverage categories, deadlines, context budgeting and package
-responsibilities. The broader [planned AI workflow](../README.md#planned-ai-workflow)
+responsibilities. The broader [planned AI workflow](../docs/architecture.md#planned-ai-workflow)
 includes further answer checks that are not implemented yet.
 
 ## Supported questions and data
