@@ -26,6 +26,7 @@ factual explanation failures; reliable answers remain an active work item.
 
 ## Architecture
 
+![Garmin AI Analytics — High-Level Architecture](docs/images/Garmin%E2%80%93Airflow%20Direct%20Data%20Connection.png)
 
 ### Detailed architecture
 
