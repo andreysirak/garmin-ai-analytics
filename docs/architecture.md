@@ -1,5 +1,18 @@
 # Architecture
 
+## Current Airflow pipeline
+
+![Current Airflow DAG: authentication unlocks parallel daily-summary and sleep ingestion; staging setup and daily-summary ingestion gate the PostgreSQL loader](images/airflow-daily-pipeline.png)
+
+Airflow schedules independent Java 25 ingestion jobs in Kubernetes Pods. Authentication unlocks parallel daily-summary and sleep ingestion; the daily-summary loader waits for ingestion and staging setup before upserting the archived JSON into PostgreSQL.
+
+## Planned AI workflow
+
+![Planned AI workflow: classify a question, clarify or reject unsupported requests, validate parameters, query PostgreSQL, and explain supported facts](images/planned-ai-workflow.png)
+
+The model interprets questions; PostgreSQL calculates the facts. Structured routing, Java validation, parameterized SQL scalar aggregates and an evidence-based explanation prompt are implemented. Separate fact presentation, explanation checking and fallback are planned; real-model reliability remains an active work item ([#66](https://github.com/andreysirak/garmin-ai-analytics/issues/66)).
+
+
 PostgreSQL persistence across kind recreation is configured under
 [database storage](database-storage.md): separate Mac-backed directories, static
 PV/PVC bindings and mount/ownership/permission checks before startup. Local
