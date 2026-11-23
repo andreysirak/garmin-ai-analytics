@@ -26,6 +26,12 @@ factual explanation failures; reliable answers remain an active work item.
 
 ## Architecture
 
+### High-Level System Architecture
+
+![Garmin AI Analytics high-level architecture showing Garmin API, Airflow-managed Kubernetes task pods, PostgreSQL, chatbot and independent AI evaluation](docs/images/high-level-architecture.svg)
+
+Conceptual overview of the platform. Some processing and metrics capabilities remain planned or in development.
+
 ### Current Airflow pipeline
 
 ![Current Airflow DAG: authentication unlocks parallel daily-summary and sleep ingestion; staging setup and daily-summary ingestion both gate the PostgreSQL loader](docs/images/airflow-daily-pipeline.png)
