@@ -32,42 +32,11 @@ factual explanation failures; reliable answers remain an active work item.
 
 Conceptual overview of the platform. Some processing and metrics capabilities remain planned or in development.
 
-### Current Airflow pipeline
+### Detailed architecture
 
-![Current Airflow DAG: authentication unlocks parallel daily-summary and sleep ingestion; staging setup and daily-summary ingestion both gate the PostgreSQL loader](docs/images/airflow-daily-pipeline.png)
+The [architecture guide](docs/architecture.md) contains the current Airflow DAG, planned AI workflow and their implementation status. For component-level details, see the [ingestion guide](docs/ingestion-guide.md), [chat documentation](garmin-chat/README.md) and [AI evaluation framework](ai-evaluation-framework/README.md).
 
-Airflow schedules independent Java 25 jobs in Kubernetes Pods. Authentication
-unlocks parallel daily-summary and sleep ingestion. Both archive the original
-JSON; the daily-summary loader waits for ingestion and staging setup, validates
-the successful archive, and upserts the response into PostgreSQL JSONB.
-Java ingestion remains independent of Airflow.
-
-[Task, archive and retry details](docs/ingestion-guide.md) ·
-[Component architecture and security](docs/architecture.md)
-
-### Planned AI workflow
-
-![Planned AI workflow: classify a question, clarify or reject unsupported requests, validate parameters, query PostgreSQL, and present facts with a checked AI explanation or a limitation](docs/images/planned-ai-workflow.png)
-
-**The model interprets questions; PostgreSQL calculates the facts.** Java validates
-the selected metrics, calculation and dates before executing parameterized,
-read-only SQL. A second model call explains compact evidence and coverage rather
-than receiving the entire raw archive.
-
-**Already implemented:** structured routing, Java validation, SQL scalar
-aggregates with coverage, and an evidence-based explanation prompt.
-**Planned additions in the diagram:** separate fact presentation, checking whether
-the explanation is supported, and falling back to facts with limitations.
-The diagram is a target workflow; each box does not require its own model call.
-Ambiguity should lead to clarification, and unsupported analysis to an explicit
-limitation. Current model reliability is still being improved in
-[#66](https://github.com/andreysirak/garmin-ai-analytics/issues/66).
-
-> **“Do days with more physical activity tend to be followed by better-quality sleep?”**
->
-> This motivating question is an open goal. It needs validated overnight sleep
-> data, supported quality indicators, next-night pairing and statistical analysis.
-> Longer sleep alone does not establish better quality.
+> **Open analytical goal:** “Do days with more physical activity tend to be followed by better-quality sleep?” This requires validated overnight sleep data, supported quality indicators, next-night pairing and statistical analysis; longer sleep alone does not establish better quality.
 
 ## Run locally
 
@@ -118,23 +87,7 @@ triggered. Chat verification commands are documented in the
 
 ### AI evaluation architecture
 
-![Standalone Java evaluation runner, case dataset, Garmin Chat and Ollama HTTP adapters, and comparison reports](ai-evaluation-framework/assets/approved-evaluation-architecture.svg)
-
-The Java 25 framework runs independently of Garmin Chat and Spring AI. It
-evaluates the public chatbot API on a synthetic deployment or sends versioned
-prompts directly to Ollama. Deterministic checks validate structured routing.
-Human reviewers assess factual accuracy and other semantic criteria.
-Production prompt, routing and AI flow tests live in the backend test suite.
-
-The [controlled model evaluation](docs/evaluations/2026-11-19-garmin-chat/README.md)
-records observed routing and explanation failures, not just successful examples.
-The [permanent AI evaluation suite](ai-evaluation-framework/README.md) provides
-versioned synthetic cases, repeatable model/application runs, explicit review
-and baseline comparison. See its [test-case catalogue](ai-evaluation-framework/TEST-CASES.md)
-and start with `make chat-eval-test` for offline evaluation-contract checks.
-Passing mocked or offline tests does not establish real-model answer quality.
-Dependency vulnerability scanning remains an open follow-up in
-[#6](https://github.com/andreysirak/garmin-ai-analytics/issues/6).
+The [independent AI evaluation framework](ai-evaluation-framework/README.md) documents its own [architecture diagram](ai-evaluation-framework/assets/approved-evaluation-architecture.svg), versioned synthetic cases and repeatable checks. The [controlled model evaluation](docs/evaluations/2026-11-19-garmin-chat/README.md) records observed routing and explanation failures. Offline tests do not establish real-model answer quality.
 
 <a id="implemented-foundations"></a>
 
